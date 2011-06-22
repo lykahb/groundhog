@@ -1,0 +1,35 @@
+name:            groundhog-sqlite
+version:         0.0.1.1
+license:         BSD3
+license-file:    LICENSE
+author:          Boris Lykah <lykahb@gmail.com>
+maintainer:      Boris Lykah <lykahb@gmail.com>
+synopsis:        Backend for the groundhog library using sqlite3.
+description:     This package includes a thin sqlite3 wrapper based on the direct-sqlite package, as well as the entire C library, so there are no system dependencies.
+category:        Database
+stability:       Non-stable
+cabal-version:   >= 1.10
+build-type:      Simple
+
+flag systemlib
+  description: Use the system-wide sqlite library
+  default: False
+
+library
+    build-depends:   base                    >= 4         && < 5
+                   , bytestring              >= 0.9.1     && < 0.10
+                   , transformers            >= 0.2.1     && < 0.3
+                   , groundhog               >= 0.0.1     && < 0.1
+                   , monad-control           >= 0.2       && < 0.3
+                   , containers              >= 0.2       && < 0.5
+                   , enumerator              >= 0.4.9     && < 0.5
+                   , utf8-string             >= 0.3.4     && < 0.4
+                   , pool                    >= 0.1       && < 0.2
+    exposed-modules: Database.Sqlite
+                     Database.Groundhog.Sqlite
+    ghc-options:     -Wall -fno-warn-unused-do-bind
+    if flag(systemlib)
+        extra-libraries: sqlite3
+    else
+        c-sources:   cbits/sqlite3.c
+    default-language: Haskell2010
