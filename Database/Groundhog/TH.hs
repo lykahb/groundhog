@@ -1,8 +1,9 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, RecordWildCards #-}
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
   ( deriveEntity
+  , deriveEntityWith
   , setDbEntityName
   , setConstructor
   , setPhantomName
@@ -11,6 +12,10 @@ module Database.Groundhog.TH
   , setField
   , setDbFieldName
   , setExprFieldName
+  , NamingStyle(..)
+  , fieldNamingStyle
+  , persistentNamingStyle
+  , conciseNamingStyle
   ) where
 
 import Database.Groundhog.Core(PersistEntity(..), PersistField(..), NeverNull, Primitive(toPrim), PersistBackend(..), DbType(DbEntity), Constraint, Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..))
@@ -45,7 +50,92 @@ data FieldDef = FieldDef {
   , fieldType :: Type
 } deriving Show
 
--- | Set name of the table in the datatype
+-- | Defines how the names are created. The mk* functions correspond to the set* functions.
+-- Functions mkNormal* define names of non-record constructor fields
+data NamingStyle = NamingStyle {
+  -- | Create name of the table for the datatype. Parameters: data name.
+    mkDbEntityName :: String -> String
+  -- | Create name for phantom constructor used to parametrise 'Fields'. Parameters: data name, constructor name, constructor position.
+  , mkPhantomName :: String -> String -> Int -> String
+  -- | Create name of the constructor specific table. Parameters: data name, constructor name, constructor position.
+  , mkDbConstrName :: String -> String -> Int -> String
+  -- | Create name of the field column in a database. Parameters: data name, constructor name, constructor position, field record name, field position.
+  , mkDbFieldName :: String -> String -> Int -> String -> Int -> String
+  -- | Create name of field constructor used in expressions. Parameters: data name, constructor name, constructor position, field record name, field position.
+  , mkExprFieldName :: String -> String -> Int -> String -> Int -> String
+  -- | Create field name used to refer to the it. Parameters: data name, constructor name, constructor position, field position.
+  , mkNormalFieldName :: String -> String -> Int -> Int -> String
+  -- | Create name of the field column in a database. Parameters: data name, constructor name, constructor position, field position.
+  , mkNormalDbFieldName :: String -> String -> Int -> Int -> String
+  -- | Create name of field constructor used in expressions. Parameters: data name, constructor name, constructor position, field position.
+  , mkNormalExprFieldName :: String -> String -> Int -> Int -> String
+}
+
+-- | Default style. Adds \"Field\" to each record field name
+--
+-- Example:
+--
+-- > data SomeData a = Normal Int | Record { bar :: Maybe String, asc :: a}
+-- > -- Generated code
+-- > data NormalConstructor
+-- > data RecordConstructor
+-- > instance PersistEntity where
+-- >   data Fields (SomeData a) where
+-- >     Normal0Field :: Fields NormalConstructor Int
+-- >     BarField :: Fields RecordConstructor (Maybe String)
+-- >     AscField :: Fields RecordConstructor a
+-- > ...
+fieldNamingStyle :: NamingStyle
+fieldNamingStyle = NamingStyle {
+    mkDbEntityName = \dName -> dName
+  , mkPhantomName = \_ cName _ -> cName ++ "Constructor"
+  , mkDbConstrName = \_ cName _ -> cName
+  , mkDbFieldName = \_ _ _ fName _ -> fName
+  , mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName ++ "Field"
+  , mkNormalFieldName = \_ cName _ fNum -> firstLetter toLower cName ++ show fNum
+  , mkNormalDbFieldName = \_ cName _ fNum -> firstLetter toLower cName ++ show fNum
+  , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
+}
+
+-- | Creates field names in Persistent fashion prepending constructor names to the fields.
+--
+-- Example:
+--
+-- > data SomeData a = Normal Int | Record { bar :: Maybe String, asc :: a}
+-- > -- Generated code
+-- > data NormalConstructor
+-- > data RecordConstructor
+-- > instance PersistEntity where
+-- >   data Fields (SomeData a) where
+-- >     Normal0 :: Fields NormalConstructor Int
+-- >     RecordBar :: Fields RecordConstructor (Maybe String)
+-- >     RecordAsc :: Fields RecordConstructor a
+-- > ...
+persistentNamingStyle :: NamingStyle
+persistentNamingStyle = fieldNamingStyle {
+  mkExprFieldName = \_ cName _ fName _ -> cName ++ firstLetter toUpper fName
+}
+
+-- | Creates the shortest field names. Very prone to conflicts
+--
+-- Example:
+--
+-- > data SomeData a = Normal Int | Record { bar :: Maybe String, asc :: a}
+-- > -- Generated code
+-- > data NormalConstructor
+-- > data RecordConstructor
+-- > instance PersistEntity where
+-- >   data Fields (SomeData a) where
+-- >     Normal0 :: Fields NormalConstructor Int
+-- >     Bar :: Fields RecordConstructor (Maybe String)
+-- >     Asc :: Fields RecordConstructor a
+-- > ...
+conciseNamingStyle :: NamingStyle
+conciseNamingStyle = fieldNamingStyle {
+  mkExprFieldName = \_ cName _ fName _ -> firstLetter toUpper fName
+}
+
+-- | Set name of the table for the datatype
 setDbEntityName :: String -> State THEntityDef ()
 setDbEntityName name = modify $ \d -> d {dbEntityName = name}
 
@@ -54,7 +144,7 @@ setConstructor :: Name -> State THConstructorDef () -> State THEntityDef ()
 setConstructor name f = modify $ \d ->
   d {thConstructors = replaceOne thConstrName name f $ thConstructors d}
 
--- | Set name used to parametrise fields
+-- | Set name for phantom constructor used to parametrise 'Fields'
 setPhantomName :: String -> State THConstructorDef ()
 setPhantomName name = modify $ \c -> c {thPhantomConstrName = name}
 
@@ -88,13 +178,23 @@ replaceOne p a f xs = case length (filter ((==a).p) xs) of
 runModify :: State a () -> a -> a
 runModify m a = snd $ runState m a
 
--- | Creates the auxiliary structures for a user datatype, which are required by Groundhog to manipulate it.
--- 
--- It creates GADT 'Fields' data instance for referring to the fields in
--- expressions and phantom types for data constructors. For record constructors the Field name is the regular field name with 
--- first letter capitalized and postpended \"Field\". If the field is an ordinary constructor, its name is constructor name
--- and postponed field name. The constructor phantom datatypes have the same name as constructors with \"Constructor\" postpended.
---
+-- | Creates the auxiliary structures for a custom datatype, which are required by Groundhog to manipulate it.
+-- The names of auxiliary datatypes and names used in database are generated using the naming style
+deriveEntityWith :: NamingStyle -> Name -> Maybe (State THEntityDef ()) -> Q [Dec]
+deriveEntityWith style name f = do
+  info <- reify name
+  let f' = maybe id runModify f
+  case info of
+    TyConI x -> do
+      case x of
+        def@(DataD _ _ _ _ _)  -> mkDecs $ either error id $ validate $ f' $ mkTHEntityDefWith style def
+        NewtypeD _ _ _ _ _ -> error "Newtypes are not supported"
+        _ -> error $ "Unknown declaration type"
+    _        -> error "Only datatypes can be processed"
+
+-- | Create the auxiliary structures using the default naming style.
+-- Particularly, it creates GADT 'Fields' data instance for referring to the fields in
+-- expressions and phantom types for data constructors. 
 -- The generation can be adjusted using the optional modifier function. Example:
 --
 -- > data SomeData a = Normal Int | Record { bar :: Maybe String, asc :: a}
@@ -109,22 +209,12 @@ runModify m a = snd $ runState m a
 -- > data RecordConstructor
 -- > instance PersistEntity where
 -- >   data Fields (SomeData a) where
--- >     Normal0Field :: Fields NormalConstructor Int
+-- >     Normal0  :: Fields NormalConstructor Int
 -- >     BarField :: Fields RecordConstructor (Maybe String)
 -- >     AscField :: Fields RecordConstructor a
 -- > ...
-
 deriveEntity :: Name -> Maybe (State THEntityDef ()) -> Q [Dec]
-deriveEntity name f = do
-  info <- reify name
-  let f' = maybe id runModify f
-  case info of
-    TyConI x -> do
-      case x of
-        def@(DataD _ _ _ _ _)  -> mkDecs $ either error id $ validate $ f' $ mkTHEntityDef def
-        NewtypeD _ _ _ _ _ -> error "Newtypes are not supported"
-        _ -> error $ "Unknown declaration type"
-    _        -> error "Only datatypes can be processed"
+deriveEntity = deriveEntityWith fieldNamingStyle
 
 validate :: THEntityDef -> Either String THEntityDef
 validate def = do
@@ -147,22 +237,30 @@ validate def = do
   return def
 
 mkTHEntityDef :: Dec -> THEntityDef
-mkTHEntityDef (DataD _ dname typeVars cons _) =
-  THEntityDef dname (nameBase dname) typeVars constrs where
-  constrs = map mkConstr cons
+mkTHEntityDef = mkTHEntityDefWith persistentNamingStyle
 
-  mkConstr (NormalC name params) = mkConstr' name $ zipWith (\p i -> mkField (firstLetter toLower (nameBase name) ++ show i) p) params [0::Int ..]
-  mkConstr (RecC name params) = mkConstr' name (map mkVarField params)
-  mkConstr (InfixC _ _ _) = error "Types with infix constructors are not supported"
-  mkConstr (ForallC _ _ _) = error "Types with existential quantification are not supported"
-  mkConstr' name params = THConstructorDef name (nameBase name ++ "Constructor") (nameBase name) params []
-  
-  mkField :: String -> StrictType -> FieldDef
-  mkField name (_, t) = mkField' name t
-  mkVarField :: VarStrictType -> FieldDef
-  mkVarField (name, _, t) = mkField' (nameBase name) t
-  mkField' name t = FieldDef name name (firstLetter toUpper name ++ "Field") t
-mkTHEntityDef _ = error "Only datatypes can be processed"
+mkTHEntityDefWith :: NamingStyle -> Dec -> THEntityDef
+mkTHEntityDefWith (NamingStyle{..}) (DataD _ dname typeVars cons _) =
+  THEntityDef dname (mkDbEntityName dname') typeVars constrs where
+  constrs = zipWith mkConstr [0..] cons
+  dname' = nameBase dname
+
+  mkConstr cNum c = case c of
+    (NormalC name params) -> mkConstr' name $ zipWith (mkField (nameBase name)) params [0..]
+    (RecC name params) -> mkConstr' name $ zipWith (mkVarField (nameBase name)) params [0..]
+    (InfixC _ _ _) -> error "Types with infix constructors are not supported"
+    (ForallC _ _ _) -> error "Types with existential quantification are not supported"
+   where
+    mkConstr' name params = THConstructorDef name (mkPhantomName dname' (nameBase name) cNum) (mkDbConstrName dname' (nameBase name) cNum) params []
+
+    mkField :: String -> StrictType -> Int -> FieldDef
+    mkField cname (_, t) fNum = FieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (apply mkNormalExprFieldName) t where
+      apply f = f dname' cname cNum fNum
+    mkVarField :: String -> VarStrictType -> Int -> FieldDef
+    mkVarField cname (fname, _, t) fNum = FieldDef fname' (apply mkDbFieldName) (apply mkExprFieldName) t where
+      apply f = f dname' cname cNum fname' fNum
+      fname' = nameBase fname
+mkTHEntityDefWith _ _ = error "Only datatypes can be processed"
 
 firstLetter :: (Char -> Char) -> String -> String
 firstLetter f s = f (head s):tail s
