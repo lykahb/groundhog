@@ -321,7 +321,7 @@ data DbType = DbString
             | DbList NamedType
             | DbTuple Int [NamedType]
             | DbEntity EntityDef
-  deriving Show
+  deriving (Eq, Show)
 
 -- TODO: this type can be changed to avoid storing the value itself. For example, ([String, DbType). Restriction: can be used to get DbType and name
 -- | It is used to store type 'DbType' and persist name of a value
