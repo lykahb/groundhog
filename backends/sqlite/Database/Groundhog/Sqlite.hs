@@ -141,10 +141,10 @@ migrate' = migrateRecursively migE migT migL where
         case mainsql of
           Nothing -> do
             -- no constructor tables can exist if there is no main data table
-            let orphans = filter fst res
+            let orphans = filter (fst.fst) $ zip res constrs
             return $ if null orphans
               then mergeMigrations $ Right [(False, mainTableQuery)]:map snd res
-              else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
+              else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
           Just sql -> do
             if sql == mainTableQuery
               then do -- the datatype had also many constructors before
@@ -167,7 +167,7 @@ migrate' = migrateRecursively migE migT migL where
       Nothing  -> mergeMigrations [Right [(False, query)], trigger]
       Just sql -> if sql == query
         then Right []
-        else Left ["Tuple table " ++ name ++ " has unexpected structure"]
+        else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ sql]
 
   -- we should consider storing tuples as is, not their id. For example for [(a, b)] this will prevent many unnecessary queries
   --TODO:finish
@@ -200,7 +200,7 @@ migConstrAndTrigger simple name constr = do
   return $ if constrExisted == triggerExisted || (constrExisted && null allDels)
     then (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
     -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
-    else (constrExisted, Left ["Trigger and constructor table must exist together: " ++ cName])
+    else (constrExisted, Left ["Both trigger and constructor table must exist: " ++ cName])
 
 migConstr :: MonadControlIO m => String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstr name constr = do
