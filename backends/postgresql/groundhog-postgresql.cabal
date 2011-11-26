@@ -1,5 +1,5 @@
 name:            groundhog-postgresql
-version:         0.0.1.1
+version:         0.1.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -17,7 +17,7 @@ library
                    , HDBC-postgresql         >= 2.2.3.1   && < 2.3
                    , bytestring              >= 0.9.1     && < 0.10
                    , transformers            >= 0.2.1     && < 0.3
-                   , groundhog               >= 0.0.1     && < 0.1
+                   , groundhog               >= 0.1.0     && < 0.2.0
                    , monad-control           >= 0.2       && < 0.3
                    , containers              >= 0.2       && < 0.5
                    , enumerator              >= 0.4.9     && < 0.5

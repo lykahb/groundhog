@@ -1,5 +1,5 @@
 name:            groundhog
-version:         0.0.1.1
+version:         0.1.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -22,10 +22,13 @@ library
                    , enumerator               >= 0.4.9     && < 0.5
                    , monad-control            >= 0.2       && < 0.3
                    , pool                     >= 0.1       && < 0.2
+                   , blaze-builder            >= 0.3.0.0   && < 0.4
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core
                      Database.Groundhog.Generic
                      Database.Groundhog.Generic.Sql
+                     Database.Groundhog.Generic.Sql.String
+                     Database.Groundhog.Generic.Sql.Utf8
                      Database.Groundhog.TH
     ghc-options:     -Wall
     
