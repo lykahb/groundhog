@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, OverloadedStrings #-}
 module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
@@ -11,7 +11,7 @@ module Database.Groundhog.Sqlite
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Sql
+import Database.Groundhog.Generic.Sql.String
 
 import qualified Database.Sqlite as S
 
@@ -355,17 +355,17 @@ insert' v = do
     then do
       let constr = head $ constructors e
       let query = insertIntoConstructorTable False name constr
-      executeRaw True query (tail vals)
+      executeRawCached' query (tail vals)
       rowid <- getLastInsertRowId
       return $ Key rowid
     else do
       let constr = constructors e !! constructorNum
       let cName = name ++ [defDelim] ++ constrName constr
       let query = "INSERT INTO " ++ escape name ++ "(discr)VALUES(?)"
-      executeRaw True query $ take 1 vals
+      executeRawCached' query $ take 1 vals
       rowid <- getLastInsertRowId
       let cQuery = insertIntoConstructorTable True cName constr
-      executeRaw True cQuery $ PersistInt64 rowid:(tail vals)
+      executeRawCached' cQuery $ PersistInt64 rowid:(tail vals)
       return $ Key rowid
 
 -- in Sqlite we can insert null to the id column. If so, id will be generated automatically
@@ -401,7 +401,7 @@ insertBy' v = do
       ifAbsent name $ do
         let query = insertIntoConstructorTable False name constr
         vals <- toPersistValues v
-        executeRaw True query (tail vals)
+        executeRawCached' query (tail vals)
         getLastInsertRowId
     else do
       let constr = constructors e !! constructorNum
@@ -409,10 +409,10 @@ insertBy' v = do
       ifAbsent cName $ do
         let query = "INSERT INTO " ++ escape name ++ "(discr)VALUES(?)"
         vals <- toPersistValues v
-        executeRaw True query $ take 1 vals
+        executeRawCached' query $ take 1 vals
         rowid <- getLastInsertRowId
         let cQuery = insertIntoConstructorTable True cName constr
-        executeRaw True cQuery $ PersistInt64 rowid :(tail vals)
+        executeRawCached' cQuery $ PersistInt64 rowid :(tail vals)
         return rowid
 
 replace' :: (MonadControlIO m, PersistEntity v) => Key v -> v -> DbPersist Sqlite m ()
@@ -427,7 +427,7 @@ replace' k v = do
   let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ upds ++ " WHERE " ++ constrId ++ "=?"
 
   if isSimple (constructors e)
-    then executeRaw True (mkQuery name) (tail vals ++ [toPrim k])
+    then executeRawCached' (mkQuery name) (tail vals ++ [toPrim k])
     else do
       let query = "SELECT discr FROM " ++ escape name ++ " WHERE id=?"
       x <- queryRawTyped query [DbInt32] [toPrim k] (firstRow >=> return.fmap (fromPrim . head))
@@ -439,15 +439,15 @@ replace' k v = do
             then executeRaw True (mkQuery cName) (tail vals ++ [toPrim k])
             else do
               let insQuery = insertIntoConstructorTable True cName constr
-              executeRaw True insQuery (toPrim k:tail vals)
+              executeRawCached' insQuery (toPrim k:tail vals)
 
               let oldCName = name ++ [defDelim] ++ constrName (constructors e !! discr)
               let delQuery = "DELETE FROM " ++ escape oldCName ++ " WHERE " ++ constrId ++ "=?"
-              executeRaw True delQuery [toPrim k]
+              executeRawCached' delQuery [toPrim k]
 
               -- UGLY: reinsert entry with a new discr to the main table after it was deleted by a trigger.
               let reInsQuery = "INSERT INTO " ++ escape name ++ "(id,discr)VALUES(?,?)"
-              executeRaw True reInsQuery [toPrim k, head vals]
+              executeRawCached' reInsQuery [toPrim k, head vals]
         Nothing -> return ()
 
 -- | receives constructor number and row of values from the constructor table
@@ -471,9 +471,9 @@ selectEnum' (cond :: Cond v c) ords limit offset = start where
         (0, o) -> (" LIMIT -1 OFFSET ?", [toPrim o])
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
-  (conds, condps) = renderCond' cond
-  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ (conds . orders $ lim)
-  binds = condps limps
+  conds' = renderCond' cond
+  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
+  binds = getValues conds' limps
   constr = (constructors e) !! phantomConstrNum (undefined :: c)
   types = DbInt64:getConstructorTypes constr
 
@@ -511,10 +511,10 @@ select' (cond :: Cond v c) ords limit offset = start where
         (0, o) -> (" LIMIT -1 OFFSET ?", [toPrim o])
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
-  (conds, condps) = renderCond' cond
-  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ (conds . orders $ lim)
+  conds' = renderCond' cond
+  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
   doSelectQuery query cNum = queryRawTyped query types binds $ mapAllRows (mkEntity cNum)
-  binds = condps limps
+  binds = getValues conds' limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
   types = DbInt64:getConstructorTypes constr
 
@@ -556,7 +556,7 @@ getTuple' :: MonadControlIO m => NamedType -> Int64 -> DbPersist Sqlite m [Persi
 getTuple' t k = do
   let name = getName t
   let (DbTuple _ ts) = getType t
-  let query = "SELECT * FROM " ++ name ++ " WHERE id = ?"
+  let query = "SELECT * FROM " ++ name ++ " WHERE id=?"
   x <- queryRawTyped query (DbInt64:map getType ts) [toPrim k] firstRow
   maybe (fail $ "No tuple with id " ++ show k) (return . tail) x
 
@@ -592,33 +592,25 @@ get' (k :: Key v) = do
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
 
-update' :: (PersistBackend m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> m ()
+update' :: (MonadControlIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Sqlite m ()
 update' upds (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
-  let (conds, condps) = renderCond' cond
-  let (upds', ps) = renderUpdates escape upds
-  let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ (upds' . (" WHERE " ++) . conds $ "")
-  if isSimple (constructors e)
-    then executeRaw True (mkQuery name) (ps $ condps [])
-    else do
-      let cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-      executeRaw True (mkQuery cName) (ps $ condps [])
+  let conds' = renderCond' cond
+  let upds' = renderUpdates escape upds
+  let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ fromStringS (getQuery upds' <> " WHERE " <> getQuery conds')
+  let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
+  executeRawCached' (mkQuery qName) (getValues upds' <> getValues conds' $ [])
 
-delete' :: (PersistBackend m, PersistEntity v, Constructor c) => Cond v c -> m ()
+delete' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m ()
 delete' (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
-  let (conds, condps) = renderCond' cond
+  let cond' = renderCond' cond
   let name = getEntityName e
-  if isSimple (constructors e)
-    then do
-      let query = "DELETE FROM " ++ escape name ++ " WHERE " ++ conds ""
-      executeRaw True query (condps [])
-    else do
-      -- after removal from the constructor table, entry from the main table is removed by trigger
-      let cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-      let query = "DELETE FROM " ++ escape cName ++ " WHERE " ++ conds ""
-      executeRaw True query (condps [])
+  let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
+  let query = "DELETE FROM " ++ escape qName ++ " WHERE " ++ fromStringS (getQuery cond')
+  -- after removal from the constructor table, entry from the main table is removed by trigger
+  executeRawCached' query (getValues cond' [])
       
 deleteByKey' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Sqlite m ()
 deleteByKey' (k :: Key v) = do
@@ -627,7 +619,7 @@ deleteByKey' (k :: Key v) = do
   if isSimple (constructors e)
     then do
       let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
-      executeRaw True query [toPrim k]
+      executeRawCached' query [toPrim k]
     else do
       let query = "SELECT discr FROM " ++ escape name
       x <- queryRawTyped query [DbInt64] [] firstRow
@@ -635,7 +627,7 @@ deleteByKey' (k :: Key v) = do
         Just [discr] -> do
           let cName = name ++ [defDelim] ++ constrName (constructors e !! fromPrim discr)
           let cQuery = "DELETE FROM " ++ escape cName ++ " WHERE id$=?"
-          executeRaw True cQuery [toPrim k]
+          executeRawCached' cQuery [toPrim k]
         Just xs -> fail $ "requested 1 column, returned " ++ show xs
         Nothing -> return ()
 
@@ -643,9 +635,9 @@ deleteByKey' (k :: Key v) = do
 count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m Int
 count' (cond :: Cond v c) = do
   let cName = persistName (undefined :: v) ++ [defDelim] ++ phantomConstrName (undefined :: c)
-  let (conds, condps) = renderCond' cond
-  let query = "SELECT COUNT(*) FROM " ++ cName ++ " WHERE " ++ conds ""
-  x <- queryRawTyped query [DbInt64] (condps []) firstRow
+  let cond' = renderCond' cond
+  let query = "SELECT COUNT(*) FROM " ++ cName ++ " WHERE " ++ fromStringS (getQuery cond')
+  x <- queryRawTyped query [DbInt64] (getValues cond' []) firstRow
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -681,7 +673,7 @@ insertList' l = do
 getList' :: forall m a.(MonadControlIO m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
-  let valuesName = mainName ++ "$" ++ "values"
+  let valuesName = mainName ++ "$values"
   queryRawTyped ("SELECT value FROM " ++ valuesName ++ " WHERE id=? ORDER BY ord$") [dbType (undefined :: a)] [toPrim k] $ mapAllRows (fromPersistValue.head)
     
 {-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO Int64 #-}
@@ -815,13 +807,13 @@ pFromSql (S.SQLNull)      = PersistNull
 escape :: String -> String
 escape s = '\"' : s ++ "\""
 
-renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> RenderS
+renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> RenderS StringS
 renderCond' = renderCond escape constrId renderEquals renderNotEquals where
-  renderEquals :: (String -> String) -> Expr v c a -> Expr v c a -> RenderS
-  renderEquals esc a b = renderExpr esc a <> ((" IS " ++), id) <> renderExpr esc b
+  renderEquals :: (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS
+  renderEquals esc a b = renderExpr esc a <> RenderS " IS " id <> renderExpr esc b
 
-  renderNotEquals :: (String -> String) -> Expr v c a -> Expr v c a -> RenderS
-  renderNotEquals esc a b = renderExpr esc a <> ((" IS NOT " ++), id) <> renderExpr esc b
+  renderNotEquals :: (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS
+  renderNotEquals esc a b = renderExpr esc a <> RenderS " IS NOT " id <> renderExpr esc b
 
 isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True
