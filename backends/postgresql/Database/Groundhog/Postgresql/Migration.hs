@@ -179,7 +179,7 @@ migConstr name constr = do
   let fields = constrParams constr
   let uniques = constrConstrs constr
   let new = mkColumns name constr
-  let addTable = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUIE" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
+  let addTable = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
   x <- checkTable2 name
   return $ case x of
     Nothing  -> let
@@ -194,6 +194,8 @@ migConstr name constr = do
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
 migTriggerOnDelete :: MonadControlIO m => String -> [String] -> DbPersist Postgresql m (Bool, SingleMigration)
+migTriggerOnDelete name deletes = return (False, Right [])
+{-
 migTriggerOnDelete name deletes = do
   let query = "CREATE TRIGGER " ++ escape name ++ " DELETE ON " ++ escape name ++ " BEGIN " ++ concat deletes ++ "END"
   x <- checkTrigger name
@@ -206,10 +208,13 @@ migTriggerOnDelete name deletes = do
         then Right []
         -- this can happen when a field was added or removed. Consider trigger replacement.
         else Left ["The trigger " ++ name ++ " is different from expected. Manual migration required.\n" ++ sql ++ "\n" ++ query])
-        
+-}
+      
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
 migTriggerOnUpdate :: MonadControlIO m => String -> String -> String -> DbPersist Postgresql m (Bool, SingleMigration)
+migTriggerOnUpdate name fieldName del = return (False, Right [])
+{-
 migTriggerOnUpdate name fieldName del = do
   let tname = name ++ "$" ++ fieldName
   let query = "CREATE TRIGGER " ++ escape tname ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape name ++ " BEGIN " ++ del ++ "END"
@@ -219,26 +224,34 @@ migTriggerOnUpdate name fieldName del = do
     Just sql -> (True, if sql == query
         then Right []
         else Left ["The trigger " ++ tname ++ " is different from expected. Manual migration required.\n" ++ sql ++ "\n" ++ query])
+-}
 
 -- on delete removes all ephemeral data
 -- TODO: merge several delete queries for a case when a constructor has several fields of the same ephemeral type
 mkDeletesOnDelete :: [(String, NamedType)] -> [String]
 mkDeletesOnDelete types = map (uncurry delField) ephemerals where
   -- we have the same query structure for tuples and lists
-  delField field t = "DELETE FROM " ++ tname ++ " WHERE id=old." ++ escape field ++ ";" where
-    tname = getName t
+  delField field t = "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";" where
+    ephemeralTableName = go t
+    go a = case getType a of
+      DbMaybe x -> go x
+      _         -> getName a
   ephemerals = filter (isEphemeral.snd) types
   
 -- on delete removes all ephemeral data
 mkDeletesOnUpdate :: [(String, NamedType)] -> [(String, String)]
 mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
   -- we have the same query structure for tuples and lists
-  delField field t = (field, "DELETE FROM " ++ tname ++ " WHERE id=old." ++ escape field ++ ";") where
-    tname = getName t
+  delField field t = (field, "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";") where
+    ephemeralTableName = go t
+    go a = case getType a of
+      DbMaybe x -> go x
+      _         -> getName a
   ephemerals = filter (isEphemeral.snd) types
 
 isEphemeral :: NamedType -> Bool
 isEphemeral a = case getType a of
+  DbMaybe x   -> isEphemeral x
   DbList _    -> True
   DbTuple _ _ -> True
   _           -> False
@@ -250,9 +263,6 @@ data Column = Column
     , cDefault :: Maybe String
     , cReference :: Maybe (String, String) -- table name, constraint name
     } deriving (Eq, Show)
-
-checkTrigger :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe String)
-checkTrigger = checkSqliteMaster "trigger"
 
 checkTable2 :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
 checkTable2 name = do
@@ -283,8 +293,7 @@ getColumn tname [column_name, PersistByteString is_nullable, udt_name, d] =
                 Right t -> do
                     let cname = fromPrim column_name
                     ref <- getRef cname
-                    return $ Right $ Column cname (is_nullable == "YES")
-                                     t d'' ref
+                    return $ Right $ Column cname (is_nullable == "YES") t d'' ref
   where
     getRef cname = do
         let sql = "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_name=? AND constraint_type='FOREIGN KEY' AND constraint_name=?"
@@ -296,19 +305,6 @@ getColumn tname [column_name, PersistByteString is_nullable, udt_name, d] =
             a@(PersistByteString _) -> Right $ Just $ fromPrim a
             _ -> Left $ "Invalid default column: " ++ show d
 getColumn _ x = return $ Left $ "Invalid result from information_schema: " ++ show x
-
-checkSqliteMaster :: MonadControlIO m => String -> String -> DbPersist Postgresql m (Maybe String)
-checkSqliteMaster vtype name = error "checkSqliteMaster" {-do
-  let query = "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?"
-  x <- queryRawTyped query [DbString] [toPrim vtype, toPrim name] firstRow
-  let throwErr = error . ("Unexpected result from sqlite_master: " ++)
-  case x of
-    Nothing -> return Nothing
-    Just [hsql] -> case hsql of
-      PersistString sql -> return $ Just sql
-      err               -> throwErr $ "column sql is not string: " ++ show err
-    Just xs -> throwErr $ "requested 1 column, returned " ++ show xs-}
-
 
 data AlterColumn = Type DbType | IsNull | NotNull | Add Column | Drop
                  | Default String | NoDefault | Update String
