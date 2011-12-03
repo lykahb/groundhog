@@ -92,6 +92,7 @@ runSqliteConn f conn@(Sqlite c _) = do
 open' :: String -> IO Sqlite
 open' s = do
   conn <- S.open s
+  S.prepare conn "PRAGMA foreign_keys = ON" >>= \stmt -> S.step stmt >> S.finalize stmt
   cache <- newIORef Map.empty
   return $ Sqlite conn cache
 
@@ -247,20 +248,27 @@ migTriggerOnUpdate name fieldName del = do
 mkDeletesOnDelete :: [(String, NamedType)] -> [String]
 mkDeletesOnDelete types = map (uncurry delField) ephemerals where
   -- we have the same query structure for tuples and lists
-  delField field t = "DELETE FROM " ++ tname ++ " WHERE id=old." ++ escape field ++ ";" where
-    tname = getName t
+  delField field t = "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";" where
+    ephemeralTableName = go t
+    go a = case getType a of
+      DbMaybe x -> go x
+      _         -> getName a
   ephemerals = filter (isEphemeral.snd) types
   
 -- on delete removes all ephemeral data
 mkDeletesOnUpdate :: [(String, NamedType)] -> [(String, String)]
 mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
   -- we have the same query structure for tuples and lists
-  delField field t = (field, "DELETE FROM " ++ tname ++ " WHERE id=old." ++ escape field ++ ";") where
-    tname = getName t
+  delField field t = (field, "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";") where
+    ephemeralTableName = go t
+    go a = case getType a of
+      DbMaybe x -> go x
+      _         -> getName a
   ephemerals = filter (isEphemeral.snd) types
 
 isEphemeral :: NamedType -> Bool
 isEphemeral a = case getType a of
+  DbMaybe x   -> isEphemeral x
   DbList _    -> True
   DbTuple _ _ -> True
   _           -> False
@@ -474,7 +482,7 @@ selectEnum' (cond :: Cond v c) ords limit offset = start where
   conds' = renderCond' cond
   mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
   binds = getValues conds' limps
-  constr = (constructors e) !! phantomConstrNum (undefined :: c)
+  constr = constructors e !! phantomConstrNum (undefined :: c)
   types = DbInt64:getConstructorTypes constr
 
 selectAllEnum' :: forall m v a.(MonadControlIO m, PersistEntity v) => Enumerator (Key v, v) (DbPersist Sqlite m) a
