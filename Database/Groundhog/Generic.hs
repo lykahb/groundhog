@@ -40,7 +40,7 @@ migrateRecursively migE migT migL = go . namedType where
   go w = case getType w of
     (DbList t)     -> f (getName w) (migL t) (go t)
     (DbTuple n ts) -> f (getName w) (migT n ts) (mapM_ go ts)
-    (DbEntity e) -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
+    (DbEntity e)   -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
     (DbMaybe t)    -> go t
     _              -> return ()    -- ordinary types need not migration
   f name mig cont = do
