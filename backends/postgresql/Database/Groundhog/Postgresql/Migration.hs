@@ -1,32 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Database.Groundhog.Postgresql.Migration (migrate) where
+module Database.Groundhog.Postgresql.Migration (migrate') where
 
 import Database.Groundhog.Core hiding (Update)
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Postgresql.Base
 
-import qualified Database.HDBC as H
-import qualified Database.HDBC.PostgreSQL as H
-
 import Control.Arrow ((&&&))
-import Control.Exception.Control (bracket, onException)
-import Control.Monad(liftM, forM, (>=>))
+import Control.Monad(liftM)
 import Control.Monad.IO.Control (MonadControlIO)
-import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Class(MonadTrans(..))
-import Control.Monad.Trans.Reader(ask)
-import Data.Enumerator(Enumerator, Iteratee(..), Stream(..), checkContinue0, (>>==), joinE, runIteratee, continue, concatEnums)
-import qualified Data.Enumerator.List as EL
-import Data.Int (Int64)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.List (intercalate, groupBy, sort)
-import Data.IORef
-import qualified Data.Map as Map
-import Data.Pool
-
-import Data.Time.LocalTime (localTimeToUTC, utc)
 
 {- ********************RULES******************** --
 For type with a single constructor, a single table is created.
@@ -132,8 +117,12 @@ migrate' = migrateRecursively migE migT migL where
     let expectedValuesStructure = ([mkColumn valuesName "ord$" DbInt32, mkColumn valuesName "value" (getType t)], [])
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations [Right [(False, mainQuery), (False, valuesQuery)], triggerMain, triggerValues]
-      (Just (Right mainStructure), Just (Right valuesStructure)) -> let errors = f mainName expectedMainStructure mainStructure ++ f valuesName expectedValuesStructure valuesStructure
-                                in if null errors then Right [] else Left errors
+      (Just (Right mainStructure), Just (Right valuesStructure)) -> let
+        errors = f mainName expectedMainStructure mainStructure ++ f valuesName expectedValuesStructure valuesStructure
+        in if null errors then Right [] else Left errors
+      (Just (Left errs1), Just (Left errs2)) -> Left $ errs1 ++ errs2
+      (Just (Left errs), Just _) -> Left errs
+      (Just _, Just (Left errs)) -> Left errs
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 
@@ -189,13 +178,19 @@ migConstr :: MonadControlIO m => String -> ConstructorDef -> DbPersist Postgresq
 migConstr name constr = do
   let fields = constrParams constr
   let uniques = constrConstrs constr
-  let query = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " INTEGER PRIMARY KEY" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ concatMap sqlUnique uniques ++ ")"
+  let new = mkColumns name constr
+  let addTable = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUIE" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
   x <- checkTable2 name
   return $ case x of
-    Nothing  -> (False, Right [(False, query)])
-    Just sql -> (True, if sql == query
-      then Right []
-      else Left ["Constructor table must be altered: " ++ name])
+    Nothing  -> let
+      rest = map (AlterTable name . uncurry AddUniqueConstraint) uniques
+      in (False, Right $ map showAlterDb $ (AddTable addTable):rest)
+    Just (Right old) -> let
+      (acs, ats) = getAlters new old
+      acs' = map (AlterColumn name) acs
+      ats' = map (AlterTable name) ats
+      in (True, Right $ map showAlterDb $ acs' ++ ats')
+    Just (Left errs) -> (True, Left errs)
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
 migTriggerOnDelete :: MonadControlIO m => String -> [String] -> DbPersist Postgresql m (Bool, SingleMigration)
