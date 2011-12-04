@@ -90,6 +90,8 @@ runPostgresqlConn f conn@(Postgresql c _) = do
 open' :: String -> IO Postgresql
 open' s = do
   conn <- H.connectPostgreSQL s
+  stmt <- H.prepare conn "SET client_min_messages TO WARNING"
+  H.execute stmt []
   cache <- newIORef Map.empty
   return $ Postgresql conn cache
 
@@ -117,22 +119,19 @@ insert' v = do
     then do
       let constr = head $ constructors e
       let query = insertIntoConstructorTable False name constr
-      executeRaw True query (tail vals)
-      rowid <- getLastInsertRowId
-      return $ Key rowid
+      queryRawCached' query (tail vals) $ getKey >=> return . Key
     else do
       let constr = constructors e !! constructorNum
       let cName = name ++ [defDelim] ++ constrName constr
-      let query = "INSERT INTO " ++ escape name ++ "(discr)VALUES(?)"
-      executeRaw True query $ take 1 vals
-      rowid <- getLastInsertRowId
+      let query = "INSERT INTO " ++ escape name ++ "(discr$)VALUES(?)RETURNING(id$)"
+      rowid <- queryRawCached' query (take 1 vals) getKey
       let cQuery = insertIntoConstructorTable True cName constr
       executeRaw True cQuery $ PersistInt64 rowid:(tail vals)
       return $ Key rowid
 
 -- in Sqlite we can insert null to the id column. If so, id will be generated automatically
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> String
-insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(" ++ fieldNames ++ ")VALUES(" ++ placeholders ++ ")" where
+insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(" ++ fieldNames ++ ")VALUES(" ++ placeholders ++ ")RETURNING(id$)" where
   fieldNames   = intercalate "," $ (if withId then (constrId:) else id) $ map (escape.fst) (constrParams c)
   placeholders = intercalate "," $ (if withId then ("?":) else id) $ map (const "?") (constrParams c)
 
@@ -163,16 +162,14 @@ insertBy' v = do
       ifAbsent name $ do
         let query = insertIntoConstructorTable False name constr
         vals <- toPersistValues v
-        executeRaw True query (tail vals)
-        getLastInsertRowId
+        queryRawCached' query (tail vals) getKey
     else do
       let constr = constructors e !! constructorNum
       let cName = name ++ [defDelim] ++ constrName constr
       ifAbsent cName $ do
-        let query = "INSERT INTO " ++ escape name ++ "(discr)VALUES(?)"
+        let query = "INSERT INTO " ++ escape name ++ "(discr$)VALUES(?)RETURNING(id$)"
         vals <- toPersistValues v
-        executeRaw True query $ take 1 vals
-        rowid <- getLastInsertRowId
+        rowid <- queryRawCached' query (take 1 vals) getKey
         let cQuery = insertIntoConstructorTable True cName constr
         executeRaw True cQuery $ PersistInt64 rowid :(tail vals)
         return rowid
@@ -191,7 +188,7 @@ replace' k v = do
   if isSimple (constructors e)
     then executeRaw True (mkQuery name) (tail vals ++ [toPrim k])
     else do
-      let query = "SELECT discr FROM " ++ escape name ++ " WHERE id=?"
+      let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
       x <- queryRawCached' query [toPrim k] (firstRow >=> return.fmap (fromPrim . head))
       case x of
         Just discr -> do
@@ -208,7 +205,7 @@ replace' k v = do
               executeRaw True delQuery [toPrim k]
 
               -- UGLY: reinsert entry with a new discr to the main table after it was deleted by a trigger.
-              let reInsQuery = "INSERT INTO " ++ escape name ++ "(id,discr)VALUES(?,?)"
+              let reInsQuery = "INSERT INTO " ++ escape name ++ "(id$,discr$)VALUES(?,?)"
               executeRaw True reInsQuery [toPrim k, head vals]
         Nothing -> return ()
 
@@ -299,19 +296,18 @@ insertList xs = do
   getStatement 
 -}
 
-insertTuple' :: MonadIO m => NamedType -> [PersistValue] -> DbPersist Postgresql m Int64
+insertTuple' :: MonadControlIO m => NamedType -> [PersistValue] -> DbPersist Postgresql m Int64
 insertTuple' t vals = do
   let name = getName t
   let (DbTuple _ ts) = getType t
   let fields = map (\i -> "val" ++ show i) [0 .. length ts - 1] 
-  let query = "INSERT INTO " ++ name ++ " (" ++ intercalate ", " fields ++ ")VALUES(" ++ intercalate ", " (replicate (length ts) "?") ++ ")"
-  executeRawCached' query vals
-  getLastInsertRowId
+  let query = "INSERT INTO " ++ escape name ++ " (" ++ intercalate ", " fields ++ ")VALUES(" ++ intercalate ", " (replicate (length ts) "?") ++ ")RETURNING(id$)"
+  queryRawCached' query vals getKey
 
 getTuple' :: MonadControlIO m => NamedType -> Int64 -> DbPersist Postgresql m [PersistValue]
 getTuple' t k = do
   let name = getName t
-  let query = "SELECT * FROM " ++ name ++ " WHERE id=?"
+  let query = "SELECT * FROM " ++ escape name ++ " WHERE id$=?"
   x <- queryRawCached' query [toPrim k] firstRow
   maybe (fail $ "No tuple with id " ++ show k) (return . tail) x
 
@@ -330,7 +326,7 @@ get' (k :: Key v) = do
         Just x'    -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
     else do
-      let query = "SELECT discr FROM " ++ escape name ++ " WHERE id=?"
+      let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
       x <- queryRawCached' query [toPrim k] firstRow
       case x of
         Just [discr] -> do
@@ -376,7 +372,7 @@ deleteByKey' (k :: Key v) = do
       let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
       executeRaw True query [toPrim k]
     else do
-      let query = "SELECT discr FROM " ++ escape name
+      let query = "SELECT discr$ FROM " ++ escape name
       x <- queryRawCached' query [] firstRow
       case x of
         Just [discr] -> do
@@ -391,7 +387,7 @@ count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPe
 count' (cond :: Cond v c) = do
   let cName = persistName (undefined :: v) ++ [defDelim] ++ phantomConstrName (undefined :: c)
   let cond' = renderCond' cond
-  let query = "SELECT COUNT(*) FROM " ++ cName ++ " WHERE " ++ fromStringS (getQuery cond')
+  let query = "SELECT COUNT(*) FROM " ++ escape cName ++ " WHERE " ++ fromStringS (getQuery cond')
   x <- queryRawCached' query (getValues cond' []) firstRow
   case x of
     Just [num] -> return $ fromPrim num
@@ -402,7 +398,7 @@ count' (cond :: Cond v c) = do
 countAll' :: (MonadControlIO m, PersistEntity v) => v -> DbPersist Postgresql m Int
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
-  let query = "SELECT COUNT(*) FROM " ++ name
+  let query = "SELECT COUNT(*) FROM " ++ escape name
   x <- queryRawCached' query [] firstRow
   case x of
     Just [num] -> return $ fromPrim num
@@ -412,10 +408,9 @@ countAll' (_ :: v) = do
 insertList' :: forall m a.(MonadControlIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' l = do
   let mainName = "List$$" ++ persistName (undefined :: a)
-  executeRaw True ("INSERT INTO " ++ mainName ++ " DEFAULT VALUES") []
-  k <- getLastInsertRowId
+  k <- queryRawCached' ("INSERT INTO " ++ escape mainName ++ " DEFAULT VALUES RETURNING(id$)") [] getKey
   let valuesName = mainName ++ "$" ++ "values"
-  let query = "INSERT INTO " ++ valuesName ++ "(id,ord$,value)VALUES(?,?,?)"
+  let query = "INSERT INTO " ++ escape valuesName ++ "(id$,ord$,value)VALUES(?,?,?)"
   let go :: Int -> [a] -> DbPersist Postgresql m ()
       go n (x:xs) = do
        x' <- toPersistValue x
@@ -429,11 +424,11 @@ getList' :: forall m a.(MonadControlIO m, PersistField a) => Int64 -> DbPersist 
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   let valuesName = mainName ++ "$values"
-  queryRawCached' ("SELECT value FROM " ++ valuesName ++ " WHERE id=? ORDER BY ord$") [toPrim k] $ mapAllRows (fromPersistValue.head)
-    
-{-# SPECIALIZE getLastInsertRowId :: DbPersist Postgresql IO Int64 #-}
-getLastInsertRowId :: MonadIO m => DbPersist Postgresql m Int64
-getLastInsertRowId = error "getLastInsertRowId"
+  queryRawCached' ("SELECT value FROM " ++ escape valuesName ++ " WHERE id$=? ORDER BY ord$") [toPrim k] $ mapAllRows (fromPersistValue.head)
+
+{-# SPECIALIZE getKey :: RowPopper (DbPersist Postgresql IO) -> DbPersist Postgresql IO Int64 #-}
+getKey :: MonadIO m => RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m Int64
+getKey pop = pop >>= \(Just [k]) -> return $ fromPrim k
 
 ----------
 
