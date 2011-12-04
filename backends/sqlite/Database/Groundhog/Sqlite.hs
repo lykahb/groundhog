@@ -126,7 +126,7 @@ migrate' = migrateRecursively migE migT migL where
   migE e = do
     let name = getEntityName e
     let constrs = constructors e
-    let mainTableQuery = "CREATE TABLE " ++ escape name ++ " (id INTEGER PRIMARY KEY, discr INTEGER NOT NULL)"
+    let mainTableQuery = "CREATE TABLE " ++ escape name ++ " (id$ INTEGER PRIMARY KEY, discr$ INTEGER NOT NULL)"
     if isSimple constrs
       then do
         x <- checkTable name
@@ -163,7 +163,7 @@ migrate' = migrateRecursively migE migT migL where
     (_, trigger) <- migTriggerOnDelete name $ mkDeletesOnDelete fields
     x <- checkTable name
     let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
-    let query = "CREATE TABLE " ++ name ++ " (id INTEGER PRIMARY KEY" ++ fields' ++ ")"
+    let query = "CREATE TABLE " ++ name ++ " (id$ INTEGER PRIMARY KEY" ++ fields' ++ ")"
     return $ case x of
       Nothing  -> mergeMigrations [Right [(False, 0, query)], trigger]
       Just sql -> if sql == query
@@ -175,11 +175,11 @@ migrate' = migrateRecursively migE migT migL where
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
-    let mainQuery = "CREATE TABLE " ++ mainName ++ " (id INTEGER PRIMARY KEY)"
-    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
+    let mainQuery = "CREATE TABLE " ++ mainName ++ " (id$ INTEGER PRIMARY KEY)"
+    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
     x <- checkTable mainName
     y <- checkTable valuesName
-    (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id=old.id;"]
+    (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ a ++ ". Found: " ++ b] else []
     return $ case (x, y) of
@@ -194,7 +194,7 @@ migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
   (constrExisted, mig) <- migConstr cName constr
   let dels = mkDeletesOnDelete $ constrParams constr
-  let allDels = if simple then dels else ("DELETE FROM " ++ escape name ++ " WHERE id=old." ++ constrId ++ ";"):dels
+  let allDels = if simple then dels else ("DELETE FROM " ++ escape name ++ " WHERE id$=old." ++ constrId ++ ";"):dels
   (triggerExisted, delTrigger) <- migTriggerOnDelete cName allDels
   let updDels = mkDeletesOnUpdate $ constrParams constr
   updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) updDels
@@ -248,7 +248,7 @@ migTriggerOnUpdate name fieldName del = do
 mkDeletesOnDelete :: [(String, NamedType)] -> [String]
 mkDeletesOnDelete types = map (uncurry delField) ephemerals where
   -- we have the same query structure for tuples and lists
-  delField field t = "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";" where
+  delField field t = "DELETE FROM " ++ ephemeralTableName ++ " WHERE id$=old." ++ escape field ++ ";" where
     ephemeralTableName = go t
     go a = case getType a of
       DbMaybe x -> go x
@@ -259,7 +259,7 @@ mkDeletesOnDelete types = map (uncurry delField) ephemerals where
 mkDeletesOnUpdate :: [(String, NamedType)] -> [(String, String)]
 mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
   -- we have the same query structure for tuples and lists
-  delField field t = (field, "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";") where
+  delField field t = (field, "DELETE FROM " ++ ephemeralTableName ++ " WHERE id$=old." ++ escape field ++ ";") where
     ephemeralTableName = go t
     go a = case getType a of
       DbMaybe x -> go x
@@ -369,7 +369,7 @@ insert' v = do
     else do
       let constr = constructors e !! constructorNum
       let cName = name ++ [defDelim] ++ constrName constr
-      let query = "INSERT INTO " ++ escape name ++ "(discr)VALUES(?)"
+      let query = "INSERT INTO " ++ escape name ++ "(discr$)VALUES(?)"
       executeRawCached' query $ take 1 vals
       rowid <- getLastInsertRowId
       let cQuery = insertIntoConstructorTable True cName constr
@@ -415,7 +415,7 @@ insertBy' v = do
       let constr = constructors e !! constructorNum
       let cName = name ++ [defDelim] ++ constrName constr
       ifAbsent cName $ do
-        let query = "INSERT INTO " ++ escape name ++ "(discr)VALUES(?)"
+        let query = "INSERT INTO " ++ escape name ++ "(discr$)VALUES(?)"
         vals <- toPersistValues v
         executeRawCached' query $ take 1 vals
         rowid <- getLastInsertRowId
@@ -437,7 +437,7 @@ replace' k v = do
   if isSimple (constructors e)
     then executeRawCached' (mkQuery name) (tail vals ++ [toPrim k])
     else do
-      let query = "SELECT discr FROM " ++ escape name ++ " WHERE id=?"
+      let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
       x <- queryRawTyped query [DbInt32] [toPrim k] (firstRow >=> return.fmap (fromPrim . head))
       case x of
         Just discr -> do
@@ -454,7 +454,7 @@ replace' k v = do
               executeRawCached' delQuery [toPrim k]
 
               -- UGLY: reinsert entry with a new discr to the main table after it was deleted by a trigger.
-              let reInsQuery = "INSERT INTO " ++ escape name ++ "(id,discr)VALUES(?,?)"
+              let reInsQuery = "INSERT INTO " ++ escape name ++ "(id$,discr$)VALUES(?,?)"
               executeRawCached' reInsQuery [toPrim k, head vals]
         Nothing -> return ()
 
@@ -564,7 +564,7 @@ getTuple' :: MonadControlIO m => NamedType -> Int64 -> DbPersist Sqlite m [Persi
 getTuple' t k = do
   let name = getName t
   let (DbTuple _ ts) = getType t
-  let query = "SELECT * FROM " ++ name ++ " WHERE id=?"
+  let query = "SELECT * FROM " ++ name ++ " WHERE id$=?"
   x <- queryRawTyped query (DbInt64:map getType ts) [toPrim k] firstRow
   maybe (fail $ "No tuple with id " ++ show k) (return . tail) x
 
@@ -584,7 +584,7 @@ get' (k :: Key v) = do
         Just x'    -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
     else do
-      let query = "SELECT discr FROM " ++ escape name ++ " WHERE id=?"
+      let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
       x <- queryRawTyped query [DbInt64] [toPrim k] firstRow
       case x of
         Just [discr] -> do
@@ -629,7 +629,7 @@ deleteByKey' (k :: Key v) = do
       let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
       executeRawCached' query [toPrim k]
     else do
-      let query = "SELECT discr FROM " ++ escape name
+      let query = "SELECT discr$ FROM " ++ escape name
       x <- queryRawTyped query [DbInt64] [] firstRow
       case x of
         Just [discr] -> do
@@ -668,7 +668,7 @@ insertList' l = do
   executeRaw True ("INSERT INTO " ++ mainName ++ " DEFAULT VALUES") []
   k <- getLastInsertRowId
   let valuesName = mainName ++ "$" ++ "values"
-  let query = "INSERT INTO " ++ valuesName ++ "(id,ord$,value)VALUES(?,?,?)"
+  let query = "INSERT INTO " ++ valuesName ++ "(id$,ord$,value)VALUES(?,?,?)"
   let go :: Int -> [a] -> DbPersist Sqlite m ()
       go n (x:xs) = do
        x' <- toPersistValue x
@@ -682,7 +682,7 @@ getList' :: forall m a.(MonadControlIO m, PersistField a) => Int64 -> DbPersist 
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   let valuesName = mainName ++ "$values"
-  queryRawTyped ("SELECT value FROM " ++ valuesName ++ " WHERE id=? ORDER BY ord$") [dbType (undefined :: a)] [toPrim k] $ mapAllRows (fromPersistValue.head)
+  queryRawTyped ("SELECT value FROM " ++ valuesName ++ " WHERE id$=? ORDER BY ord$") [dbType (undefined :: a)] [toPrim k] $ mapAllRows (fromPersistValue.head)
     
 {-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO Int64 #-}
 getLastInsertRowId :: MonadIO m => DbPersist Sqlite m Int64
