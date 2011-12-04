@@ -28,7 +28,7 @@ main :: IO ()
 main = do
   let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ setup >> m
   let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ m
-  runSqlite setup >> runPSQL setup
+  runPSQL setup
   -- we need clean db before each migration test
   defaultMain [ sqliteMigrationTestSuite $ withSqliteConn ":memory:" . runSqliteConn
               , mkTestSuite "Database.Groundhog.Sqlite" $ runSqlite
@@ -112,63 +112,63 @@ testEncoding = do
 testListTriggersOnDelete :: (PersistBackend m, MonadIO m) => m ()
 testListTriggersOnDelete = do
   k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [listKey] <- queryRaw False "select testList from TestTriggers where id$=?" [toPrim k] firstRow
-  tupleInsideListKeys <- queryRaw False "select value from List$$Tuple2$$Int$Int$values where id=?" [listKey] $ mapAllRows return
+  Just [listKey] <- queryRaw False "select \"testList\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
   deleteByKey k
   -- test if the main list table and the associated values were deleted
-  listMain <- queryRaw False "select * from List$$Tuple2$$Int$Int where id=?" [listKey] firstRow
+  listMain <- queryRaw False "select * from \"List$$Tuple2$$Int$Int\" where id$=?" [listKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from List$$Tuple2$$Int$Int$values where id=?" [listKey] firstRow
+  listValues <- queryRaw False "select * from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] firstRow
   Nothing @=? listValues
   -- test if the ephemeral values associated with the list were deleted
   forM_ tupleInsideListKeys $ \tupleInsideListKey -> do
-    tupleValues <- queryRaw False "select * from Tuple2$$Int$Int where id=?" tupleInsideListKey firstRow
+    tupleValues <- queryRaw False "select * from \"Tuple2$$Int$Int\" where id$=?" tupleInsideListKey firstRow
     Nothing @=? tupleValues
 
 testTupleTriggersOnDelete :: (PersistBackend m, MonadIO m) => m ()
 testTupleTriggersOnDelete = do
   k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [tupleKey] <- queryRaw False "select testTuple from TestTriggers where id$=?" [toPrim k] firstRow
-  Just [listInsideTupleKey] <- queryRaw False "select val0 from Tuple2$$List$$String$Int where id=?" [tupleKey] firstRow
+  Just [tupleKey] <- queryRaw False "select \"testTuple\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
   deleteByKey k
   -- test if the tuple was deleted
-  tupleValues <- queryRaw False "select val0 from Tuple2$$List$$String$Int where id=?" [tupleKey] firstRow
+  tupleValues <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
   Nothing @=? tupleValues
   -- test if the ephemeral values associated with the tuple were deleted
-  listMain <- queryRaw False "select * from List$$String where id=?" [listInsideTupleKey] firstRow
+  listMain <- queryRaw False "select * from \"List$$String\" where id$=?" [listInsideTupleKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from List$$String$values where id=?" [listInsideTupleKey] firstRow
+  listValues <- queryRaw False "select * from \"List$$String$values\" where id$=?" [listInsideTupleKey] firstRow
   Nothing @=? listValues
 
 testListTriggersOnUpdate :: (PersistBackend m, MonadIO m) => m ()
 testListTriggersOnUpdate = do
   k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [listKey] <- queryRaw False "select testList from TestTriggers where id$=?" [toPrim k] firstRow
-  tupleInsideListKeys <- queryRaw False "select value from List$$Tuple2$$Int$Int$values where id=?" [listKey] $ mapAllRows return
+  Just [listKey] <- queryRaw False "select \"testList\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
   replace k $ TestTriggers [] Nothing
   -- test if the old main list table and the associated values were deleted
-  listMain <- queryRaw False "select * from List$$Tuple2$$Int$Int where id=?" [listKey] firstRow
+  listMain <- queryRaw False "select * from \"List$$Tuple2$$Int$Int\" where id$=?" [listKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from List$$Tuple2$$Int$Int$values where id=?" [listKey] firstRow
+  listValues <- queryRaw False "select * from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] firstRow
   Nothing @=? listValues
   -- test if the ephemeral values associated with the old list were deleted
   forM_ tupleInsideListKeys $ \tupleInsideListKey -> do
-    tupleValues <- queryRaw False "select * from Tuple2$$Int$Int where id=?" tupleInsideListKey firstRow
+    tupleValues <- queryRaw False "select * from \"Tuple2$$Int$Int\" where id$=?" tupleInsideListKey firstRow
     Nothing @=? tupleValues
 
 testTupleTriggersOnUpdate :: (PersistBackend m, MonadIO m) => m ()
 testTupleTriggersOnUpdate = do
   k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [tupleKey] <- queryRaw False "select testTuple from TestTriggers where id$=?" [toPrim k] firstRow
-  Just [listInsideTupleKey] <- queryRaw False "select val0 from Tuple2$$List$$String$Int where id=?" [tupleKey] firstRow
+  Just [tupleKey] <- queryRaw False "select \"testTuple\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
   replace k $ TestTriggers [] Nothing
   -- test if the old tuple was deleted
-  tupleValues <- queryRaw False "select val0 from Tuple2$$List$$String$Int where id=?" [tupleKey] firstRow
+  tupleValues <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
   Nothing @=? tupleValues
   -- test if the ephemeral values associated with the old tuple were deleted
-  listMain <- queryRaw False "select * from List$$String where id=?" [listInsideTupleKey] firstRow
+  listMain <- queryRaw False "select * from \"List$$String\" where id$=?" [listInsideTupleKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from List$$String$values where id=?" [listInsideTupleKey] firstRow
+  listValues <- queryRaw False "select * from \"List$$String$values\" where id$=?" [listInsideTupleKey] firstRow
   Nothing @=? listValues
 
 firstRow pop = pop >>= return
