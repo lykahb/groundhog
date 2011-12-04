@@ -24,7 +24,8 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Data.Enumerator(Iteratee(..), run, (==<<))
 import Data.Enumerator.List(consume)
 import Data.Either(partitionEithers)
-import Data.List(intercalate)
+import Data.Function(on)
+import Data.List(intercalate, sortBy)
 import qualified Data.Map as Map
 
 -- | Create migration for a given entity and all entities it depends on.
@@ -50,7 +51,7 @@ migrateRecursively migE migT migL = go . namedType where
       _ -> return ()
   allSubtypes = map snd . concatMap constrParams . constructors
 
-getCorrectMigrations :: NamedMigrations -> [(Bool, String)]
+getCorrectMigrations :: NamedMigrations -> [(Bool, Int, String)]
 getCorrectMigrations = either (error.unlines) id . mergeMigrations . Map.elems
 
 -- | Produce the migrations but not execute them. Fails when an unsafe migration occurs.
@@ -61,18 +62,18 @@ createMigration m = liftM snd $ runStateT m Map.empty
 executeMigration :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> NamedMigrations -> m ()
 executeMigration logger m = do
   let migs = getCorrectMigrations m
-  let unsafe = map snd $ filter fst migs
+  let unsafe = filter (\(isUnsafe, _, _) -> isUnsafe) migs
   if null unsafe
-    then mapM_ (executeMigrate logger.snd) migs
+    then mapM_ (\(_, _, query) -> executeMigrate logger query) $ sortBy (compare `on` \(_, i, _) -> i) migs
     else error $ concat
             [ "\n\nDatabase migration: manual intervention required.\n"
             , "The following actions are considered unsafe:\n\n"
-            , unlines $ map (\s -> "    " ++ s ++ ";") unsafe
+            , unlines $ map (\(_, _, query) -> "    " ++ query ++ ";") unsafe
             ]
 
 -- | Execute migrations and log them. Executes the unsafe migrations without warnings
 executeMigrationUnsafe :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> NamedMigrations -> m ()
-executeMigrationUnsafe logger = mapM_ (executeMigrate logger.snd) . getCorrectMigrations
+executeMigrationUnsafe logger = mapM_ (\(_, _, query) -> executeMigrate logger query) . getCorrectMigrations
 
 -- | Pretty print the migrations
 printMigration :: MonadIO m => NamedMigrations -> m ()
@@ -83,8 +84,8 @@ printMigration migs = liftIO $ do
     case v of
       Left errors -> mapM_ (putStrLn . ("\tError:\t" ++)) errors
       Right sqls  -> do
-        let showSql (isUnsafe, sql) = (if isUnsafe then "Unsafe:\t" else "Safe:\t") ++ sql
-        mapM_ (putStrLn . ("\t" ++).showSql) sqls
+        let showSql (isUnsafe, _, sql) = (if isUnsafe then "Unsafe:\t" else "Safe:\t") ++ sql
+        mapM_ (putStrLn . ("\t" ++) . showSql) sqls
 
 -- | Run migrations and log them. Fails when an unsafe migration occurs.
 runMigration :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> Migration m -> m ()

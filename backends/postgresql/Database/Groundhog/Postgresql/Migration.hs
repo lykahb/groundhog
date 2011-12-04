@@ -12,6 +12,7 @@ import Control.Monad.IO.Control (MonadControlIO)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.List (intercalate, groupBy, sort)
+import Data.Maybe (mapMaybe, maybeToList)
 
 {- ********************RULES******************** --
 For type with a single constructor, a single table is created.
@@ -69,7 +70,7 @@ migrate' = migrateRecursively migE migT migL where
             -- no constructor tables can exist if there is no main data table
             let orphans = filter fst res
             return $ if null orphans
-              then mergeMigrations $ Right [(False, mainTableQuery)]:map snd res
+              then mergeMigrations $ Right [(False, 0, mainTableQuery)]:map snd res
               else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
           Just (Right (columns, [])) -> do
             if columns == mainTableColumns
@@ -90,11 +91,12 @@ migrate' = migrateRecursively migE migT migL where
     let fields = zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
     (_, trigger) <- migTriggerOnDelete name $ mkDeletesOnDelete fields
     let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
-    let query = "CREATE TABLE " ++ name ++ " (id INTEGER PRIMARY KEY" ++ fields' ++ ")"
+    let query = "CREATE TABLE " ++ escape name ++ " (id INTEGER PRIMARY KEY" ++ fields' ++ ")"
     x <- checkTable2 name
     let expectedColumns = map (\(fname, ntype) -> mkColumn name fname (getType ntype)) fields
+    let addReferences = mapMaybe (uncurry $ createReference name) fields
     return $ case x of
-      Nothing  -> mergeMigrations [Right [(False, query)], trigger]
+      Nothing  -> mergeMigrations $ Right [(False, 0, query)] : addReferences ++ [trigger]
       Just (Right (columns, [])) -> if columns == expectedColumns
         then Right []
         else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ show columns]
@@ -106,8 +108,8 @@ migrate' = migrateRecursively migE migT migL where
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
-    let mainQuery = "CREATE TABLE " ++ mainName ++ " (id INTEGER PRIMARY KEY)"
-    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
+    let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id INTEGER PRIMARY KEY)"
+    let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (id INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
     x <- checkTable2 mainName
     y <- checkTable2 valuesName
     (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id=old.id;"]
@@ -115,8 +117,9 @@ migrate' = migrateRecursively migE migT migL where
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b] else []
     let expectedMainStructure = ([], [])
     let expectedValuesStructure = ([mkColumn valuesName "ord$" DbInt32, mkColumn valuesName "value" (getType t)], [])
+    let addReferences = maybeToList $ createReference valuesName "value" t
     return $ case (x, y) of
-      (Nothing, Nothing) -> mergeMigrations [Right [(False, mainQuery), (False, valuesQuery)], triggerMain, triggerValues]
+      (Nothing, Nothing) -> mergeMigrations $ [Right [(False, 0, mainQuery), (False, 0, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
       (Just (Right mainStructure), Just (Right valuesStructure)) -> let
         errors = f mainName expectedMainStructure mainStructure ++ f valuesName expectedValuesStructure valuesStructure
         in if null errors then Right [] else Left errors
@@ -126,15 +129,19 @@ migrate' = migrateRecursively migE migT migL where
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 
+createReference :: String -> String -> NamedType -> Maybe SingleMigration
+createReference tname fname typ = fmap (\x -> Right $ [(False, 1, showAlter tname (fname, AddReference x))]) $ go typ where
+  go x = case getType x of
+    DbMaybe a   -> go a
+    DbEntity t  -> Just $ getEntityName t
+    DbTuple _ _ -> Just $ getName x
+    DbList _    -> Just $ getName x
+    _ -> Nothing
+
 sqlColumn :: String -> DbType -> String
 sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ f typ where
-  f (DbMaybe t) = g (getType t)
-  f t = " NOT NULL" ++ g t
-  -- TODO: add references for tuple and list
-  g (DbEntity t) = " REFERENCES " ++ escape (getEntityName t)
-  g (DbTuple n ts) = " REFERENCES " ++ (intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts)
-  g (DbList t) = " REFERENCES " ++ "List$$" ++ getName t
-  g _ = ""
+  f (DbMaybe t) = ""
+  f t = " NOT NULL"
   
 showColumn :: Column -> String
 showColumn (Column n nu t def ref) = concat
@@ -180,11 +187,12 @@ migConstr name constr = do
   let uniques = constrConstrs constr
   let new = mkColumns name constr
   let addTable = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
+  let addReferences = mapMaybe (uncurry $ createReference name) fields
   x <- checkTable2 name
   return $ case x of
     Nothing  -> let
       rest = map (AlterTable name . uncurry AddUniqueConstraint) uniques
-      in (False, Right $ map showAlterDb $ (AddTable addTable):rest)
+      in (False, mergeMigrations $ (Right $ (map showAlterDb $ (AddTable addTable):rest)) : addReferences)
     Just (Right old) -> let
       (acs, ats) = getAlters new old
       acs' = map (AlterColumn name) acs
@@ -371,14 +379,14 @@ findAlters col@(Column name isNull type_ def ref) cols =
              in (modRef ++ modDef ++ modNull ++ modType,
                  filter (\c -> cName c /= name) cols)
 
-showAlterDb :: AlterDB -> (Bool, String)
-showAlterDb (AddTable s) = (False, s)
+showAlterDb :: AlterDB -> (Bool, Int, String)
+showAlterDb (AddTable s) = (False, 0, s)
 showAlterDb (AlterColumn t (c, ac)) =
-    (isUnsafe ac, showAlter t (c, ac))
+    (isUnsafe ac, 0, showAlter t (c, ac))
   where
     isUnsafe Drop = True
     isUnsafe _ = False
-showAlterDb (AlterTable t at) = (False, showAlterTable t at)
+showAlterDb (AlterTable t at) = (False, 0, showAlterTable t at)
 
 showAlterTable :: String -> AlterTable -> String
 showAlterTable table (AddUniqueConstraint cname cols) = concat

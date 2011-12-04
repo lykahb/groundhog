@@ -266,8 +266,8 @@ type Migration m = StateT NamedMigrations m ()
 -- | Datatype names and corresponding migrations
 type NamedMigrations = Map String SingleMigration
 
--- | Either error messages or migration queries with safety flags
-type SingleMigration = Either [String] [(Bool, String)]
+-- | Either error messages or migration queries with safety flag and execution order
+type SingleMigration = Either [String] [(Bool, Int, String)]
 
 -- | Describes an ADT.
 data EntityDef = EntityDef {

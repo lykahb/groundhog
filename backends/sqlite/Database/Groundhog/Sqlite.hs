@@ -144,7 +144,7 @@ migrate' = migrateRecursively migE migT migL where
             -- no constructor tables can exist if there is no main data table
             let orphans = filter (fst.fst) $ zip res constrs
             return $ if null orphans
-              then mergeMigrations $ Right [(False, mainTableQuery)]:map snd res
+              then mergeMigrations $ Right [(False, 0, mainTableQuery)]:map snd res
               else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
           Just sql -> do
             if sql == mainTableQuery
@@ -165,7 +165,7 @@ migrate' = migrateRecursively migE migT migL where
     let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
     let query = "CREATE TABLE " ++ name ++ " (id INTEGER PRIMARY KEY" ++ fields' ++ ")"
     return $ case x of
-      Nothing  -> mergeMigrations [Right [(False, query)], trigger]
+      Nothing  -> mergeMigrations [Right [(False, 0, query)], trigger]
       Just sql -> if sql == query
         then Right []
         else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ sql]
@@ -183,7 +183,7 @@ migrate' = migrateRecursively migE migT migL where
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ a ++ ". Found: " ++ b] else []
     return $ case (x, y) of
-      (Nothing, Nothing) -> mergeMigrations [Right [(False, mainQuery), (False, valuesQuery)], triggerMain, triggerValues]
+      (Nothing, Nothing) -> mergeMigrations [Right [(False, 0, mainQuery), (False, 0, valuesQuery)], triggerMain, triggerValues]
       (Just sql1, Just sql2) -> let errors = f mainName mainQuery sql1 ++ f valuesName valuesQuery sql2
                                 in if null errors then Right [] else Left errors
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
@@ -210,7 +210,7 @@ migConstr name constr = do
   let query = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " INTEGER PRIMARY KEY" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ concatMap sqlUnique uniques ++ ")"
   x <- checkTable name
   return $ case x of
-    Nothing  -> (False, Right [(False, query)])
+    Nothing  -> (False, Right [(False, 0, query)])
     Just sql -> (True, if sql == query
       then Right []
       else Left ["Constructor table must be altered: " ++ name])
@@ -222,9 +222,9 @@ migTriggerOnDelete name deletes = do
   x <- checkTrigger name
   return $ case x of
     Nothing | null deletes -> (False, Right [])
-    Nothing -> (False, Right [(False, query)])
+    Nothing -> (False, Right [(False, 1, query)])
     Just sql -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
-      then Right [(False, "DROP TRIGGER " ++ escape name)]
+      then Right [(False, 1, "DROP TRIGGER " ++ escape name)]
       else if sql == query
         then Right []
         -- this can happen when a field was added or removed. Consider trigger replacement.
@@ -238,7 +238,7 @@ migTriggerOnUpdate name fieldName del = do
   let query = "CREATE TRIGGER " ++ escape tname ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape name ++ " BEGIN " ++ del ++ "END"
   x <- checkTrigger tname
   return $ case x of
-    Nothing -> (False, Right [(False, query)])
+    Nothing -> (False, Right [(False, 1, query)])
     Just sql -> (True, if sql == query
         then Right []
         else Left ["The trigger " ++ tname ++ " is different from expected. Manual migration required.\n" ++ sql ++ "\n" ++ query])
