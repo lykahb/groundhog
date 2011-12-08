@@ -171,7 +171,6 @@ migrate' = migrateRecursively migE migT migL where
         else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ sql]
 
   -- we should consider storing tuples as is, not their id. For example for [(a, b)] this will prevent many unnecessary queries
-  --TODO:finish
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
@@ -334,7 +333,6 @@ sqlColumn :: String -> DbType -> String
 sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ f typ where
   f (DbMaybe t) = g (getType t)
   f t = " NOT NULL" ++ g t
-  -- TODO: add references for tuple and list
   g (DbEntity t) = " REFERENCES " ++ escape (getEntityName t)
   g (DbTuple n ts) = " REFERENCES " ++ (intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts)
   g (DbList t) = " REFERENCES " ++ "List$$" ++ getName t
