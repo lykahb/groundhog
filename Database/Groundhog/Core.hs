@@ -703,19 +703,19 @@ instance PersistField Int8 where
   persistName _ = "Int8"
   toPersistValue = return . toPrim
   fromPersistValue = return . fromPrim
-  dbType _ = DbInt64
+  dbType _ = DbInt32
 
 instance PersistField Int16 where
   persistName _ = "Int16"
   toPersistValue = return . toPrim
   fromPersistValue = return . fromPrim
-  dbType _ = DbInt64
+  dbType _ = DbInt32
 
 instance PersistField Int32 where
   persistName _ = "Int32"
   toPersistValue = return . toPrim
   fromPersistValue = return . fromPrim
-  dbType _ = DbInt64
+  dbType _ = DbInt32
 
 instance PersistField Int64 where
   persistName _ = "Int64"
@@ -727,13 +727,13 @@ instance PersistField Word8 where
   persistName _ = "Word8"
   toPersistValue = return . toPrim
   fromPersistValue = return . fromPrim
-  dbType _ = DbInt64
+  dbType _ = DbInt32
 
 instance PersistField Word16 where
   persistName _ = "Word16"
   toPersistValue = return . toPrim
   fromPersistValue = return . fromPrim
-  dbType _ = DbInt64
+  dbType _ = DbInt32
 
 instance PersistField Word32 where
   persistName _ = "Word32"
