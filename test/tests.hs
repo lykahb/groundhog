@@ -14,39 +14,29 @@ import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit
 import qualified Test.HUnit as H
 
-data User a = U1 {foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Eq, Show)
-data Person = Person {name :: String, age :: Int, height :: Int} deriving (Eq, Show)
 data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, word16 :: Word16, int32 :: Int32, word32 :: Word32, int64 :: Int64, word64 :: Word64} deriving (Eq, Show)
-data TestTriggers = TestTriggers {testList :: [(Int, Int)], testTuple :: Maybe ([String], Int)} deriving (Eq, Show)
+data Single a = Single {single :: a} deriving (Eq, Show)
+data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
 
-deriveEntity ''User Nothing
-deriveEntity ''Person Nothing
+--deriveEntity ''User Nothing
+--deriveEntity ''Person Nothing
 deriveEntity ''Number Nothing
-deriveEntity ''TestTriggers Nothing
+deriveEntity ''Single Nothing
+deriveEntity ''Multi Nothing
 
 main :: IO ()
 main = do
-  let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ setup >> m
-  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ m
-  runPSQL setup
+  let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ m
+  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
+--  runPSQL $ setup >> executeRaw False create_truncate_tables []
   -- we need clean db before each migration test
   defaultMain [ sqliteMigrationTestSuite $ withSqliteConn ":memory:" . runSqliteConn
               , mkTestSuite "Database.Groundhog.Sqlite" $ runSqlite
               , mkTestSuite "Database.Groundhog.Postgresql" $ runPSQL
               ]
 
-setup :: (PersistBackend m, MonadIO m) => m ()
-setup = do
-  m <- createMigration $ do
-    migrate (undefined :: User (String, Maybe (User String)))
-    migrate (undefined :: User [User String])
-    migrate (undefined :: User (Maybe String))
-    migrate (undefined :: User String)
-    migrate (undefined :: Person)
-    migrate (undefined :: Number)
-    migrate (undefined :: TestTriggers)
---  printMigration m
-  executeMigration silentMigrationLogger m
+migr :: (PersistBackend m, MonadIO m) => Migration m -> m ()
+migr = runMigration silentMigrationLogger
 
 mkTestSuite :: (PersistBackend m, MonadIO m) => String -> (m () -> IO ()) -> Test
 mkTestSuite label run = testGroup label $
@@ -54,6 +44,8 @@ mkTestSuite label run = testGroup label $
   , testCase "testInsert" $ run testInsert
   , testCase "testCount" $ run testCount
   , testCase "testEncoding" $ run testEncoding
+  , testCase "testDelete" $ run testDelete
+  , testCase "testDeleteByKey" $ run testDeleteByKey
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testTupleTriggersOnDelete" $ run testTupleTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
@@ -70,13 +62,14 @@ expected @=? actual = liftIO $ expected H.@=? actual
 
 testOrphanConstructors :: (PersistBackend m, MonadIO m) => m ()
 testOrphanConstructors = do
-  setup
-  executeRaw False "drop table User$String" []
-  mig <- createMigration (migrate (undefined :: User String))
-  [("User$String",Left ["Orphan constructor table found: User$String$U1","Orphan constructor table found: User$String$U2","Orphan constructor table found: User$String$U3"])] @=? M.toList mig
+  migr $ migrate (undefined :: Multi String)
+  executeRaw False "drop table Multi$String" []
+  mig <- createMigration (migrate (undefined :: Multi String))
+  [("Multi$String", Left ["Orphan constructor table found: Multi$String$First","Orphan constructor table found: Multi$String$Second"])] @=? M.toList mig
 
 testNumber :: (PersistBackend m, MonadIO m) => m ()
 testNumber = do
+  migr $ migrate (undefined :: Number)
   let minNumber = Number minBound minBound minBound minBound minBound minBound minBound minBound minBound
   let maxNumber = Number maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound
   minNumber' <- insert minNumber >>= get
@@ -86,33 +79,35 @@ testNumber = do
 
 testInsert :: (PersistBackend m, MonadIO m) => m ()
 testInsert = do
-  let jack = Person "Jack" 20 175
-  k <- insert jack
-  jack' <- get k
-  jack' @=? Just jack
+  migr $ migrate (undefined :: Single String)
+  let val = Single "abc"
+  k <- insert val
+  val' <- get k
+  val' @=? Just val
 
 testCount :: (PersistBackend m, MonadIO m) => m ()
 testCount = do
-  insert $ (U1 0 :: User String)
-  insert $ U2 Nothing 0 "abc"
-  insert $ U2 (Just "abc") 0 "def"
-  insert $ (U3 :: User String)
-  num <- countAll (undefined :: User String)
-  4 @=? num
-  num2 <- count $ BarField /=. (Nothing :: Maybe String) ||. AddField /=. "def"
-  2 @=? num2
+  migr $ migrate (undefined :: Multi String)
+  insert $ (First 0 :: Multi String)
+  insert $ (Second "abc")
+  num <- countAll (undefined :: Multi String)
+  2 @=? num
+  num2 <- count $ SecondField ==. "abc"
+  1 @=? num2
 
 testEncoding :: (PersistBackend m, MonadIO m) => m ()
 testEncoding = do
-  let person = Person "\x0001\x0081\x0801\x10001" 0 0
-  k <- insert person
-  Just person' <- get k
-  person @=? person'
+  migr $ migrate (undefined :: Single String)
+  let val = Single "\x0001\x0081\x0801\x10001"
+  k <- insert val
+  Just val' <- get k
+  val @=? val'
 
 testListTriggersOnDelete :: (PersistBackend m, MonadIO m) => m ()
 testListTriggersOnDelete = do
-  k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [listKey] <- queryRaw False "select \"testList\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  migr $ migrate (undefined :: Single [(Int, Int)])
+  k <- insert $ (Single [(0, 0), (0, 0)] :: Single [(Int, Int)])
+  Just [listKey] <- queryRaw False "select \"single\" from \"Single$List$$Tuple2$$Int$Int\" where id$=?" [toPrim k] firstRow
   tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
   deleteByKey k
   -- test if the main list table and the associated values were deleted
@@ -127,8 +122,9 @@ testListTriggersOnDelete = do
 
 testTupleTriggersOnDelete :: (PersistBackend m, MonadIO m) => m ()
 testTupleTriggersOnDelete = do
-  k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [tupleKey] <- queryRaw False "select \"testTuple\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  migr $ migrate (undefined :: Single (Maybe ([String], Int)))
+  k <- insert $ (Single (Just (["abc"], 0)) :: Single (Maybe ([String], Int)))
+  Just [tupleKey] <- queryRaw False "select \"single\" from \"Single$Maybe$Tuple2$$List$$String$Int\" where id$=?" [toPrim k] firstRow
   Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
   deleteByKey k
   -- test if the tuple was deleted
@@ -142,10 +138,11 @@ testTupleTriggersOnDelete = do
 
 testListTriggersOnUpdate :: (PersistBackend m, MonadIO m) => m ()
 testListTriggersOnUpdate = do
-  k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [listKey] <- queryRaw False "select \"testList\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  migr $ migrate (undefined :: Single [(Int, Int)])
+  k <- insert $ (Single [(0, 0), (0, 0)] :: Single [(Int, Int)])
+  Just [listKey] <- queryRaw False "select \"single\" from \"Single$List$$Tuple2$$Int$Int\" where id$=?" [toPrim k] firstRow
   tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
-  replace k $ TestTriggers [] Nothing
+  replace k $ (Single [] :: Single [(Int, Int)])
   -- test if the old main list table and the associated values were deleted
   listMain <- queryRaw False "select * from \"List$$Tuple2$$Int$Int\" where id$=?" [listKey] firstRow
   Nothing @=? listMain
@@ -158,10 +155,11 @@ testListTriggersOnUpdate = do
 
 testTupleTriggersOnUpdate :: (PersistBackend m, MonadIO m) => m ()
 testTupleTriggersOnUpdate = do
-  k <- insert $ TestTriggers [(0, 0), (0, 0)] (Just (["abc"], 0))
-  Just [tupleKey] <- queryRaw False "select \"testTuple\" from \"TestTriggers\" where id$=?" [toPrim k] firstRow
+  migr $ migrate (undefined :: Single (Maybe ([String], Int)))
+  k <- insert $ (Single (Just (["abc"], 0)) :: Single (Maybe ([String], Int)))
+  Just [tupleKey] <- queryRaw False "select \"single\" from \"Single$Maybe$Tuple2$$List$$String$Int\" where id$=?" [toPrim k] firstRow
   Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
-  replace k $ TestTriggers [] Nothing
+  replace k $ (Single Nothing :: Single (Maybe ([String], Int)))
   -- test if the old tuple was deleted
   tupleValues <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
   Nothing @=? tupleValues
@@ -171,8 +169,44 @@ testTupleTriggersOnUpdate = do
   listValues <- queryRaw False "select * from \"List$$String$values\" where id$=?" [listInsideTupleKey] firstRow
   Nothing @=? listValues
 
+testDelete :: (PersistBackend m, MonadIO m) => m ()
+testDelete = do
+  migr $ migrate (undefined :: Multi String)
+  k <- insert $ Second "abc"
+  delete $ SecondField ==. "abc"
+  main <- queryRaw True "SELECT * FROM \"Multi$String\" WHERE id$=?" [toPrim k] firstRow
+  Nothing @=? main
+  constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim k] firstRow
+  Nothing @=? constr
+
+testDeleteByKey :: (PersistBackend m, MonadIO m) => m ()
+testDeleteByKey = do
+  migr $ migrate (undefined :: Multi String)
+  k <- insert $ Second "abc"
+  deleteByKey k
+  main <- queryRaw True "SELECT * FROM \"Multi$String\" WHERE id$=?" [toPrim k] firstRow
+  Nothing @=? main
+  constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim k] firstRow
+  Nothing @=? constr
+
 firstRow pop = pop >>= return
 
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where
   go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
+  
+create_truncate_tables :: String
+create_truncate_tables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN VARCHAR) RETURNS void AS $$\
+\DECLARE\
+\    statements CURSOR FOR SELECT tablename FROM pg_tables WHERE tableowner = username AND schemaname = 'public';\
+\BEGIN\
+\    FOR stmt IN statements LOOP\
+\        EXECUTE 'TRUNCATE TABLE ' || quote_ident(stmt.tablename) || ' CASCADE;';\
+\    END LOOP;\
+\END;\
+\$$ LANGUAGE plpgsql"
+
+clean :: (PersistBackend m, MonadIO m) => m ()
+clean = do
+  executeRaw True "drop schema public cascade" []
+  executeRaw True "create schema public" []
