@@ -11,6 +11,7 @@ import Control.Monad(liftM)
 import Control.Monad.IO.Control (MonadControlIO)
 import Data.Either (partitionEithers)
 import Data.Function (on)
+import Data.Int(Int32)
 import Data.List (intercalate, groupBy, sort)
 import Data.Maybe (mapMaybe, maybeToList)
 
@@ -52,7 +53,7 @@ migrate' = migrateRecursively migE migT migL where
 
     if isSimple constrs
       then do
-        x <- checkTable2 name
+        x <- checkTable name
         -- check whether the table was created for multiple constructors before
         case x of
           Just (Right (columns, _)) | columns == mainTableColumns -> do
@@ -60,7 +61,7 @@ migrate' = migrateRecursively migE migT migL where
           Just (Left errs) -> return (Left errs)
           _ -> liftM snd $ migConstrAndTrigger True name $ head constrs
       else do
-        maincolumns <- checkTable2 name
+        maincolumns <- checkTable name
         let constrTable c = name ++ [defDelim] ++ constrName c
         res <- mapM (\c -> migConstrAndTrigger False name c) constrs
         case maincolumns of
@@ -90,8 +91,8 @@ migrate' = migrateRecursively migE migT migL where
     (_, trigger) <- migTriggerOnDelete name $ mkDeletesOnDelete fields
     let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
     let query = "CREATE TABLE " ++ escape name ++ " (id$ SERIAL PRIMARY KEY UNIQUE" ++ fields' ++ ")"
-    x <- checkTable2 name
-    let expectedColumns = map (\(fname, ntype) -> mkColumn name fname (getType ntype)) fields
+    x <- checkTable name
+    let expectedColumns = map (\(fname, ntype) -> mkColumn name fname ntype) fields
     let addReferences = mapMaybe (uncurry $ createReference name) fields
     return $ case x of
       Nothing  -> mergeMigrations $ Right [(False, 0, query)] : addReferences ++ [trigger]
@@ -102,19 +103,18 @@ migrate' = migrateRecursively migE migT migL where
       Just (Left errs) -> Left errs
 
   -- we should consider storing tuples as is, not their id. For example for [(a, b)] this will prevent many unnecessary queries
-  --TODO:finish
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
     let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id$ SERIAL PRIMARY KEY UNIQUE)"
     let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
-    x <- checkTable2 mainName
-    y <- checkTable2 valuesName
+    x <- checkTable mainName
+    y <- checkTable valuesName
     (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b] else []
     let expectedMainStructure = ([], [])
-    let expectedValuesStructure = ([mkColumn valuesName "ord$" DbInt32, mkColumn valuesName "value" (getType t)], [])
+    let expectedValuesStructure = ([mkColumn valuesName "ord$" (namedType (0 :: Int32)), mkColumn valuesName "value" t], [])
     let addReferences = maybeToList $ createReference valuesName "value" t
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations $ [Right [(False, 0, mainQuery), (False, 0, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
@@ -151,9 +151,6 @@ showColumn (Column n nu t def ref) = concat
     , case def of
         Nothing -> ""
         Just s -> " DEFAULT " ++ s
-    , case ref of
-        Nothing -> ""
-        Just (s, _) -> " REFERENCES " ++ escape s
     ]
 
 sqlUnique :: Constraint -> String
@@ -168,7 +165,7 @@ sqlUnique (cname, cols) = concat
 migConstrAndTrigger :: MonadControlIO m => Bool -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
-  (constrExisted, mig) <- migConstr cName constr
+  (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
   let dels = mkDeletesOnDelete $ constrParams constr
   let allDels = if simple then dels else ("DELETE FROM " ++ escape name ++ " WHERE id=old." ++ constrId ++ ";"):dels
   (triggerExisted, delTrigger) <- migTriggerOnDelete cName allDels
@@ -182,22 +179,23 @@ migConstrAndTrigger simple name constr = do
 -}
   return (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
 
-migConstr :: MonadControlIO m => String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
-migConstr name constr = do
+migConstr :: MonadControlIO m => Maybe String -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
+migConstr mainTableName cName constr = do
   let fields = constrParams constr
   let uniques = constrConstrs constr
-  let new = mkColumns name constr
-  let addTable = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
-  let addReferences = mapMaybe (uncurry $ createReference name) fields
-  x <- checkTable2 name
+  let new = mkColumns cName constr
+  let mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
+  let addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ mainRef ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
+  let addReferences = mapMaybe (uncurry $ createReference cName) fields
+  x <- checkTable cName
   return $ case x of
     Nothing  -> let
-      rest = map (AlterTable name . uncurry AddUniqueConstraint) uniques
+      rest = map (AlterTable cName . uncurry AddUniqueConstraint) uniques
       in (False, mergeMigrations $ (Right $ (map showAlterDb $ (AddTable addTable):rest)) : addReferences)
     Just (Right old) -> let
       (acs, ats) = getAlters new old
-      acs' = map (AlterColumn name) acs
-      ats' = map (AlterTable name) ats
+      acs' = map (AlterColumn cName) acs
+      ats' = map (AlterTable cName) ats
       in (True, Right $ map showAlterDb $ acs' ++ ats')
     Just (Left errs) -> (True, Left errs)
 
@@ -273,8 +271,8 @@ data Column = Column
     , cReference :: Maybe (String, String) -- table name, constraint name
     } deriving (Eq, Show)
 
-checkTable2 :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
-checkTable2 name = do
+checkTable :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
+checkTable name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrim name] firstRow
   case table of
     Just _ -> do
@@ -305,10 +303,10 @@ getColumn tname [column_name, PersistByteString is_nullable, udt_name, d] =
                     return $ Right $ Column cname (is_nullable == "YES") t d'' ref
   where
     getRef cname = do
-        let sql = "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_name=? AND constraint_type='FOREIGN KEY' AND constraint_name=?"
+        let sql = "SELECT u.table_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.table_name=? AND tc.constraint_type='FOREIGN KEY' AND tc.constraint_name=?"
         let ref = refName tname cname
-        Just [PersistInt64 i] <- queryRaw' sql [toPrim tname, toPrim ref] firstRow
-        return $ if i == 0 then Nothing else Just ("", ref)
+        x <- queryRaw' sql [toPrim tname, toPrim ref] firstRow
+        return $ fmap (\name -> (fromPrim $ head name, ref)) x
     d' = case d of
             PersistNull -> Right Nothing
             a@(PersistByteString _) -> Right $ Just $ fromPrim a
@@ -352,7 +350,7 @@ getAlters (c1, u1) (c2, u2) =
 findAlters :: Column -> [Column] -> ([AlterColumn'], [Column])
 findAlters col@(Column name isNull type_ def ref) cols =
     case filter (\c -> cName c == name) cols of
-        [] -> ([(name, Add col)], cols)
+        [] -> ((name, Add col) : (maybeToList $ fmap (\x -> (name, AddReference $ fst x)) ref), cols)
         Column _ isNull' type_' def' ref':_ ->
             let refDrop Nothing = []
                 refDrop (Just (_, cname)) = [(name, DropReference cname)]
@@ -383,10 +381,13 @@ findAlters col@(Column name isNull type_ def ref) cols =
 showAlterDb :: AlterDB -> (Bool, Int, String)
 showAlterDb (AddTable s) = (False, 0, s)
 showAlterDb (AlterColumn t (c, ac)) =
-    (isUnsafe ac, 0, showAlter t (c, ac))
+    (isUnsafe ac, order, showAlter t (c, ac))
   where
     isUnsafe Drop = True
     isUnsafe _ = False
+    order = case ac of
+      AddReference _ -> 1
+      _              -> 0
 showAlterDb (AlterTable t at) = (False, 0, showAlterTable t at)
 
 showAlterTable :: String -> AlterTable -> String
@@ -497,92 +498,25 @@ mkColumns :: String -- ^ constructor table name
           -> ([Column], [Constraint])
 mkColumns cname constr = (cols, uniqs) where
     uniqs = constrConstrs constr
-    cols = map (\(fname, ntype) -> mkColumn cname fname (getType ntype)) $ constrParams constr
+    cols = map (\(fname, ntype) -> mkColumn cname fname ntype) $ constrParams constr
 
---    go :: (String, String, attrs) -> [(String, NamedType)] ->
---    def [] = Nothing
---    def (('d':'e':'f':'a':'u':'l':'t':'=':d):_) = Just d
---    def (_:rest) = def rest
-    
-mkColumn :: String -> String -> DbType -> Column
+mkColumn :: String -> String -> NamedType -> Column
 mkColumn tableName columnName dbtype = Column columnName isNullable (simpleType dbtype) Nothing ref where
   reference = refName tableName columnName
-  simpleType x = case x of
-    DbMaybe a   -> simpleType (getType a)
+  simpleType x = case getType x of
+    DbMaybe a   -> simpleType a
     DbEntity _  -> DbInt32
     DbTuple _ _ -> DbInt32
     DbList _    -> DbInt32
     a -> a
-  (isNullable, ref) = f dbtype where 
-    f (DbMaybe t) = (True, g (getType t))
-    f t = (False, g t)
-    g (DbEntity t)   = Just ("", reference)
-    g (DbTuple n ts) = Just ("", reference)
-    g (DbList t)     = Just ("", reference)
-    g _ = Nothing
-  
-{-  
--- | Create the list of columns for the given entity.
-mkColumns :: String -- ^ constructor table name
-          -> ConstructorDef -- constructor definition
-          -> ([Column], [UniqueDef'])
-mkColumns cname constr = (cols, uniqs) where
-    uniqs = constrConstrs constr
-    cols = map go $ constrParams constr
-
---    go :: (String, String, attrs) -> [(String, NamedType)] ->
-    go :: (String, NamedType) -> Column
-    go (name, ntype) = Column name (nullable dbtype) (dbtype) (def []) (ref name dbtype) where
-      dbtype = getType ntype
-
-    def [] = Nothing
-    def (('d':'e':'f':'a':'u':'l':'t':'=':d):_) = Just d
-    def (_:rest) = def rest
-    
-    nullable (DbMaybe _) = True
-    nullable _ = False
-    
-    ref :: String -> DbType -> Maybe (String, String)
-    ref name (DbEntity t) = Just (getEntityName t, refName cname name)
-    ref name (DbTuple n ts) = Just (intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts, refName cname name)
-    ref name (DbList t) = Just ("List$$" ++ getName t, refName cname name)
-    ref _ _ = Nothing
--}
-{-    
-Person
-    name String
-    age Int Maybe
-BlogPost
-    title String sql=title
-    authorId PersonId
-    -}
---    if type is PersonId then reference table Person and constraint name BlogPost_authorId_fkey
-    -- column name -> type name -> attributes
-{-    ref :: String -> String -> String -> Maybe (String, String)
-    ref c t' [] =
-        let l = length t'
-            (f, b) = splitAt (l - 2) t'
-         in if b == "Id"
-                then Just (RawName f, refName tn c)
-                else Nothing
-    ref _ _ ("noreference":_) = Nothing
-    ref c _ (('r':'e':'f':'e':'r':'e':'n':'c':'e':'=':x):_) =
-        Just (RawName x, refName tn c)
-    ref c x (_:y) = ref c x y -}
-    
---    name, typename, [atributes]
---tableColumns :: EntityDef -> [(RawName, String, [String])]
-
-{-sqlColumn :: String -> DbType -> String
-sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ f typ where
-  f (DbMaybe t) = g (getType t)
-  f t = " NOT NULL" ++ g t
-  -- TODO: add references for tuple and list
-  g (DbEntity t) = " REFERENCES " ++ escape (getEntityName t)
-  g (DbTuple n ts) = " REFERENCES " ++ (intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts)
-  g (DbList t) = " REFERENCES " ++ "List$$" ++ getName t
-  g _ = ""
--}
+  (isNullable, ref) = f $ getType dbtype where 
+    f (DbMaybe t) = (True, g t)
+    f t = (False, g dbtype)
+    g x = case getType x of
+      DbEntity _  -> Just (getName x, reference)
+      DbTuple _ _ -> Just (getName x, reference)
+      DbList _    -> Just (getName x, reference)
+      _           -> Nothing
 
 readSqlType :: String -> Either String DbType
 readSqlType "int4" = Right $ DbInt32
