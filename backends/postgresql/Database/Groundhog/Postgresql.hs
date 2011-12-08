@@ -357,30 +357,22 @@ delete' (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let cond' = renderCond' cond
   let name = getEntityName e
-  let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-  let query = "DELETE FROM " ++ escape qName ++ " WHERE " ++ fromStringS (getQuery cond')
-  -- after removal from the constructor table, entry from the main table is removed by trigger
-  executeRawCached' query (getValues cond' [])
+  if isSimple (constructors e)
+    then do
+      let query = "DELETE FROM " ++ escape name ++ " WHERE " ++ fromStringS (getQuery cond')
+      executeRawCached' query (getValues cond' [])
+    else do
+      let cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
+      let query = "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ " WHERE " ++ fromStringS (getQuery cond') ++ ")"
+      -- the entries in the constructor table are deleted because of the reference on delete cascade
+      executeRawCached' query (getValues cond' [])
 
-      
 deleteByKey' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Postgresql m ()
 deleteByKey' (k :: Key v) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
-  if isSimple (constructors e)
-    then do
-      let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
-      executeRaw True query [toPrim k]
-    else do
-      let query = "SELECT discr$ FROM " ++ escape name
-      x <- queryRawCached' query [] firstRow
-      case x of
-        Just [discr] -> do
-          let cName = name ++ [defDelim] ++ constrName (constructors e !! fromPrim discr)
-          let cQuery = "DELETE FROM " ++ escape cName ++ " WHERE id$=?"
-          executeRaw True cQuery [toPrim k]
-        Just xs -> fail $ "requested 1 column, returned " ++ show xs
-        Nothing -> return ()
+  let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
+  executeRawCached' query [toPrim k]
 
 {-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql IO Int #-}
 count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m Int
