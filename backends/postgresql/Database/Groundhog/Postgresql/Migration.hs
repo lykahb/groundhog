@@ -69,7 +69,7 @@ migrate' = migrateRecursively migE migT migL where
             -- no constructor tables can exist if there is no main data table
             let orphans = filter fst res
             return $ if null orphans
-              then mergeMigrations $ Right [(False, 0, mainTableQuery)]:map snd res
+              then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
               else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
           Just (Right (columns, [])) -> do
             if columns == mainTableColumns
@@ -95,7 +95,7 @@ migrate' = migrateRecursively migE migT migL where
     let expectedColumns = map (\(fname, ntype) -> mkColumn name fname ntype) fields
     let addReferences = mapMaybe (uncurry $ createReference name) fields
     return $ case x of
-      Nothing  -> mergeMigrations $ Right [(False, 0, query)] : addReferences ++ [trigger]
+      Nothing  -> mergeMigrations $ Right [(False, defaultPriority, query)] : addReferences ++ [trigger]
       Just (Right (columns, [])) -> if columns == expectedColumns
         then Right []
         else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ show columns]
@@ -117,7 +117,7 @@ migrate' = migrateRecursively migE migT migL where
     let expectedValuesStructure = ([mkColumn valuesName "ord$" (namedType (0 :: Int32)), mkColumn valuesName "value" t], [])
     let addReferences = maybeToList $ createReference valuesName "value" t
     return $ case (x, y) of
-      (Nothing, Nothing) -> mergeMigrations $ [Right [(False, 0, mainQuery), (False, 0, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
+      (Nothing, Nothing) -> mergeMigrations $ [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
       (Just (Right mainStructure), Just (Right valuesStructure)) -> let
         errors = f mainName expectedMainStructure mainStructure ++ f valuesName expectedValuesStructure valuesStructure
         in if null errors then Right [] else Left errors
@@ -128,7 +128,7 @@ migrate' = migrateRecursively migE migT migL where
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 
 createReference :: String -> String -> NamedType -> Maybe SingleMigration
-createReference tname fname typ = fmap (\x -> Right $ [(False, 1, showAlter tname (fname, AddReference x))]) $ go typ where
+createReference tname fname typ = fmap (\x -> Right $ [(False, referencePriority, showAlter tname (fname, AddReference x))]) $ go typ where
   go x = case getType x of
     DbMaybe a   -> go a
     DbEntity t  -> Just $ getEntityName t
@@ -379,16 +379,16 @@ findAlters col@(Column name isNull type_ def ref) cols =
                  filter (\c -> cName c /= name) cols)
 
 showAlterDb :: AlterDB -> (Bool, Int, String)
-showAlterDb (AddTable s) = (False, 0, s)
+showAlterDb (AddTable s) = (False, defaultPriority, s)
 showAlterDb (AlterColumn t (c, ac)) =
     (isUnsafe ac, order, showAlter t (c, ac))
   where
     isUnsafe Drop = True
     isUnsafe _ = False
     order = case ac of
-      AddReference _ -> 1
-      _              -> 0
-showAlterDb (AlterTable t at) = (False, 0, showAlterTable t at)
+      AddReference _ -> referencePriority
+      _              -> defaultPriority
+showAlterDb (AlterTable t at) = (False, defaultPriority, showAlterTable t at)
 
 showAlterTable :: String -> AlterTable -> String
 showAlterTable table (AddUniqueConstraint cname cols) = concat
@@ -544,3 +544,9 @@ showSqlType (DbMaybe t) = showSqlType (getType t)
 showSqlType (DbList _) = "INTEGER"
 showSqlType (DbTuple _ _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
+
+defaultPriority :: Int
+defaultPriority = 0
+
+referencePriority :: Int
+referencePriority = 1
