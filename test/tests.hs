@@ -12,14 +12,14 @@ import Data.Int
 import Data.Word
 import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit
+import qualified Migration.Old as Old
+import qualified Migration.New as New
 import qualified Test.HUnit as H
 
 data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, word16 :: Word16, int32 :: Int32, word32 :: Word32, int64 :: Int64, word64 :: Word64} deriving (Eq, Show)
 data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
 
---deriveEntity ''User Nothing
---deriveEntity ''Person Nothing
 deriveEntity ''Number Nothing
 deriveEntity ''Single Nothing
 deriveEntity ''Multi Nothing
@@ -35,8 +35,8 @@ main = do
               , mkTestSuite "Database.Groundhog.Postgresql" $ runPSQL
               ]
 
-migr :: (PersistBackend m, MonadIO m) => Migration m -> m ()
-migr = runMigration silentMigrationLogger
+migr :: (PersistEntity v, PersistBackend m, MonadIO m) => v -> m ()
+migr v = runMigration silentMigrationLogger (migrate v)
 
 mkTestSuite :: (PersistBackend m, MonadIO m) => String -> (m () -> IO ()) -> Test
 mkTestSuite label run = testGroup label $
@@ -46,10 +46,13 @@ mkTestSuite label run = testGroup label $
   , testCase "testEncoding" $ run testEncoding
   , testCase "testDelete" $ run testDelete
   , testCase "testDeleteByKey" $ run testDeleteByKey
+  , testCase "testReplaceSingle" $ run testReplaceSingle
+  , testCase "testReplaceMulti" $ run testReplaceMulti
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testTupleTriggersOnDelete" $ run testTupleTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   , testCase "testTupleTriggersOnUpdate" $ run testTupleTriggersOnUpdate
+  , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
   ]
   
 sqliteMigrationTestSuite :: (PersistBackend m, MonadIO m) => (m () -> IO ()) -> Test
@@ -62,14 +65,14 @@ expected @=? actual = liftIO $ expected H.@=? actual
 
 testOrphanConstructors :: (PersistBackend m, MonadIO m) => m ()
 testOrphanConstructors = do
-  migr $ migrate (undefined :: Multi String)
+  migr (undefined :: Multi String)
   executeRaw False "drop table Multi$String" []
   mig <- createMigration (migrate (undefined :: Multi String))
   [("Multi$String", Left ["Orphan constructor table found: Multi$String$First","Orphan constructor table found: Multi$String$Second"])] @=? M.toList mig
 
 testNumber :: (PersistBackend m, MonadIO m) => m ()
 testNumber = do
-  migr $ migrate (undefined :: Number)
+  migr (undefined :: Number)
   let minNumber = Number minBound minBound minBound minBound minBound minBound minBound minBound minBound
   let maxNumber = Number maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound
   minNumber' <- insert minNumber >>= get
@@ -79,7 +82,7 @@ testNumber = do
 
 testInsert :: (PersistBackend m, MonadIO m) => m ()
 testInsert = do
-  migr $ migrate (undefined :: Single String)
+  migr (undefined :: Single String)
   let val = Single "abc"
   k <- insert val
   val' <- get k
@@ -87,7 +90,7 @@ testInsert = do
 
 testCount :: (PersistBackend m, MonadIO m) => m ()
 testCount = do
-  migr $ migrate (undefined :: Multi String)
+  migr (undefined :: Multi String)
   insert $ (First 0 :: Multi String)
   insert $ (Second "abc")
   num <- countAll (undefined :: Multi String)
@@ -97,7 +100,7 @@ testCount = do
 
 testEncoding :: (PersistBackend m, MonadIO m) => m ()
 testEncoding = do
-  migr $ migrate (undefined :: Single String)
+  migr (undefined :: Single String)
   let val = Single "\x0001\x0081\x0801\x10001"
   k <- insert val
   Just val' <- get k
@@ -105,7 +108,7 @@ testEncoding = do
 
 testListTriggersOnDelete :: (PersistBackend m, MonadIO m) => m ()
 testListTriggersOnDelete = do
-  migr $ migrate (undefined :: Single [(Int, Int)])
+  migr (undefined :: Single [(Int, Int)])
   k <- insert $ (Single [(0, 0), (0, 0)] :: Single [(Int, Int)])
   Just [listKey] <- queryRaw False "select \"single\" from \"Single$List$$Tuple2$$Int$Int\" where id$=?" [toPrim k] firstRow
   tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
@@ -122,7 +125,7 @@ testListTriggersOnDelete = do
 
 testTupleTriggersOnDelete :: (PersistBackend m, MonadIO m) => m ()
 testTupleTriggersOnDelete = do
-  migr $ migrate (undefined :: Single (Maybe ([String], Int)))
+  migr (undefined :: Single (Maybe ([String], Int)))
   k <- insert $ (Single (Just (["abc"], 0)) :: Single (Maybe ([String], Int)))
   Just [tupleKey] <- queryRaw False "select \"single\" from \"Single$Maybe$Tuple2$$List$$String$Int\" where id$=?" [toPrim k] firstRow
   Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
@@ -138,7 +141,7 @@ testTupleTriggersOnDelete = do
 
 testListTriggersOnUpdate :: (PersistBackend m, MonadIO m) => m ()
 testListTriggersOnUpdate = do
-  migr $ migrate (undefined :: Single [(Int, Int)])
+  migr (undefined :: Single [(Int, Int)])
   k <- insert $ (Single [(0, 0), (0, 0)] :: Single [(Int, Int)])
   Just [listKey] <- queryRaw False "select \"single\" from \"Single$List$$Tuple2$$Int$Int\" where id$=?" [toPrim k] firstRow
   tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
@@ -155,7 +158,7 @@ testListTriggersOnUpdate = do
 
 testTupleTriggersOnUpdate :: (PersistBackend m, MonadIO m) => m ()
 testTupleTriggersOnUpdate = do
-  migr $ migrate (undefined :: Single (Maybe ([String], Int)))
+  migr (undefined :: Single (Maybe ([String], Int)))
   k <- insert $ (Single (Just (["abc"], 0)) :: Single (Maybe ([String], Int)))
   Just [tupleKey] <- queryRaw False "select \"single\" from \"Single$Maybe$Tuple2$$List$$String$Int\" where id$=?" [toPrim k] firstRow
   Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
@@ -171,7 +174,7 @@ testTupleTriggersOnUpdate = do
 
 testDelete :: (PersistBackend m, MonadIO m) => m ()
 testDelete = do
-  migr $ migrate (undefined :: Multi String)
+  migr (undefined :: Multi String)
   k <- insert $ Second "abc"
   delete $ SecondField ==. "abc"
   main <- queryRaw True "SELECT * FROM \"Multi$String\" WHERE id$=?" [toPrim k] firstRow
@@ -181,13 +184,54 @@ testDelete = do
 
 testDeleteByKey :: (PersistBackend m, MonadIO m) => m ()
 testDeleteByKey = do
-  migr $ migrate (undefined :: Multi String)
+  migr (undefined :: Multi String)
   k <- insert $ Second "abc"
   deleteByKey k
   main <- queryRaw True "SELECT * FROM \"Multi$String\" WHERE id$=?" [toPrim k] firstRow
   Nothing @=? main
   constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim k] firstRow
   Nothing @=? constr
+
+testReplaceMulti :: (PersistBackend m, MonadIO m) => m ()
+testReplaceMulti = do
+  migr (undefined :: Single (Multi String))
+  -- we need Single to test that referenced value cam be replaced
+  k <- insert $ Single (Second "abc")
+  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Multi$String\" WHERE id$=?" [toPrim k] firstRow
+  let valueKey = fromPrim valueKey'
+
+  replace valueKey (Second "def")
+  replaced <- get valueKey
+  Just (Second "def") @=? replaced
+
+  replace valueKey (First 5)
+  replaced <- get valueKey
+  Just (First 5) @=? replaced
+  oldConstructor <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim valueKey] firstRow
+  Nothing @=? oldConstructor
+
+testReplaceSingle :: (PersistBackend m, MonadIO m) => m ()
+testReplaceSingle = do
+  migr (undefined :: Single (Single String))
+  -- we need Single to test that referenced value cam be replaced
+  k <- insert $ Single (Single "abc")
+  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Single$String\" WHERE id$=?" [toPrim k] firstRow
+  let valueKey = fromPrim valueKey'
+  
+  replace valueKey (Single "def")
+  replaced <- get valueKey
+  Just (Single "def") @=? replaced
+
+testMigrateAddColumnSingle :: (PersistBackend m, MonadIO m) => m ()
+testMigrateAddColumnSingle = do
+  migr (undefined :: Old.AddColumn)
+  migr (undefined :: New.AddColumn)
+  let val = New.AddColumn "abc" 5
+  k <- insert val
+  val' <- get k
+  val' @=? Just val
+  
+-- TODO: write test which inserts data before adding new columns
 
 firstRow pop = pop >>= return
 
@@ -210,3 +254,4 @@ clean :: (PersistBackend m, MonadIO m) => m ()
 clean = do
   executeRaw True "drop schema public cascade" []
   executeRaw True "create schema public" []
+
