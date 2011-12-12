@@ -204,9 +204,8 @@ replace' k v = do
               let delQuery = "DELETE FROM " ++ escape oldCName ++ " WHERE " ++ constrId ++ "=?"
               executeRaw True delQuery [toPrim k]
 
-              -- UGLY: reinsert entry with a new discr to the main table after it was deleted by a trigger.
-              let reInsQuery = "INSERT INTO " ++ escape name ++ "(id$,discr$)VALUES(?,?)"
-              executeRaw True reInsQuery [toPrim k, head vals]
+              let updateDiscrQuery = "UPDATE " ++ escape name ++ " SET discr$=? WHERE id$=?"
+              executeRaw True updateDiscrQuery [head vals, toPrim k]
         Nothing -> return ()
 
 -- | receives constructor number and row of values from the constructor table
@@ -231,7 +230,8 @@ selectEnum' (cond :: Cond v c) ords limit offset = start where
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
   conds' = renderCond' cond
-  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
+  fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+  mkQuery tname = "SELECT " ++ fields ++ " FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
   binds = getValues conds' limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
 
@@ -239,10 +239,13 @@ selectAllEnum' :: forall m v a.(MonadControlIO m, PersistEntity v) => Enumerator
 selectAllEnum' = start where
   start = if isSimple (constructors e)
     then let
-      query = "SELECT * FROM " ++ escape name
+      constr = head $ constructors e
+      fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+      query = "SELECT " ++ fields ++ " FROM " ++ escape name
       in joinE (queryEnum query []) (EL.mapM (mkEntity 0))
     else concatEnums $ zipWith q [0..] (constructors e) where
       q cNum constr = let
+        fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
         cName = name ++ [defDelim] ++ constrName constr
         query = "SELECT * FROM " ++ escape cName
         in joinE (queryEnum query []) (EL.mapM (mkEntity cNum))
@@ -268,7 +271,8 @@ select' (cond :: Cond v c) ords limit offset = start where
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
   conds' = renderCond' cond
-  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
+  fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+  mkQuery tname = "SELECT " ++ fields ++ " FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
   doSelectQuery query cNum = queryRawCached' query binds $ mapAllRows (mkEntity cNum)
   binds = getValues conds' limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
@@ -277,9 +281,12 @@ selectAll' :: forall m v.(MonadControlIO m, PersistEntity v) => DbPersist Postgr
 selectAll' = start where
   start = if isSimple (constructors e)
     then let
-      query = "SELECT * FROM " ++ escape name
+      constr = head $ constructors e
+      fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+      query = "SELECT " ++ fields ++ " FROM " ++ escape name
       in queryRawCached' query [] $ mapAllRows (mkEntity 0)
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(i, constr) -> do
+        let fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
         let cName = name ++ [defDelim] ++ constrName constr
         let query = "SELECT * FROM " ++ escape cName
         queryRawCached' query [] $ mapAllRows (mkEntity i)
@@ -319,7 +326,9 @@ get' (k :: Key v) = do
   let name = getEntityName e
   if isSimple (constructors e)
     then do
-      let query = "SELECT * FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
+      let constr = head $ constructors e
+      let fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+      let query = "SELECT " ++ fields ++ " FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
       x <- queryRawCached' query [toPrim k] firstRow
       case x of
         Just (_:xs) -> liftM Just $ fromPersistValues $ PersistInt64 0:xs
@@ -333,7 +342,8 @@ get' (k :: Key v) = do
           let constructorNum = fromPrim discr
           let constr = constructors e !! constructorNum
           let cName = name ++ [defDelim] ++ constrName constr
-          let cQuery = "SELECT * FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
+          let fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+          let cQuery = "SELECT " ++ fields ++ " FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
           x2 <- queryRawCached' cQuery [toPrim k] firstRow
           case x2 of
             Just (_:xs) -> liftM Just $ fromPersistValues $ discr:xs
