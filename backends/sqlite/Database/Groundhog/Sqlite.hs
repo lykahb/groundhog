@@ -144,7 +144,7 @@ migrate' = migrateRecursively migE migT migL where
             -- no constructor tables can exist if there is no main data table
             let orphans = filter (fst.fst) $ zip res constrs
             return $ if null orphans
-              then mergeMigrations $ Right [(False, 0, mainTableQuery)]:map snd res
+              then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
               else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
           Just sql -> do
             if sql == mainTableQuery
@@ -165,7 +165,7 @@ migrate' = migrateRecursively migE migT migL where
     let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
     let query = "CREATE TABLE " ++ name ++ " (id$ INTEGER PRIMARY KEY" ++ fields' ++ ")"
     return $ case x of
-      Nothing  -> mergeMigrations [Right [(False, 0, query)], trigger]
+      Nothing  -> mergeMigrations [Right [(False, defaultPriority, query)], trigger]
       Just sql -> if sql == query
         then Right []
         else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ sql]
@@ -182,7 +182,7 @@ migrate' = migrateRecursively migE migT migL where
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ a ++ ". Found: " ++ b] else []
     return $ case (x, y) of
-      (Nothing, Nothing) -> mergeMigrations [Right [(False, 0, mainQuery), (False, 0, valuesQuery)], triggerMain, triggerValues]
+      (Nothing, Nothing) -> mergeMigrations [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)], triggerMain, triggerValues]
       (Just sql1, Just sql2) -> let errors = f mainName mainQuery sql1 ++ f valuesName valuesQuery sql2
                                 in if null errors then Right [] else Left errors
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
@@ -191,28 +191,28 @@ migrate' = migrateRecursively migE migT migL where
 migConstrAndTrigger :: MonadControlIO m => Bool -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
-  (constrExisted, mig) <- migConstr cName constr
+  (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
   let dels = mkDeletesOnDelete $ constrParams constr
-  let allDels = if simple then dels else ("DELETE FROM " ++ escape name ++ " WHERE id$=old." ++ constrId ++ ";"):dels
-  (triggerExisted, delTrigger) <- migTriggerOnDelete cName allDels
+  (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
   let updDels = mkDeletesOnUpdate $ constrParams constr
   updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) updDels
-  return $ if constrExisted == triggerExisted || (constrExisted && null allDels)
+  return $ if constrExisted == triggerExisted || (constrExisted && null dels)
     then (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
     -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
     else (constrExisted, Left ["Both trigger and constructor table must exist: " ++ cName])
 
-migConstr :: MonadControlIO m => String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
-migConstr name constr = do
+migConstr :: MonadControlIO m => Maybe String -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
+migConstr mainTableName cName constr = do
   let fields = constrParams constr
   let uniques = constrConstrs constr
-  let query = "CREATE TABLE " ++ escape name ++ " (" ++ constrId ++ " INTEGER PRIMARY KEY" ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ concatMap sqlUnique uniques ++ ")"
-  x <- checkTable name
+  let mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
+  let query = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " INTEGER PRIMARY KEY" ++ mainRef ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ concatMap sqlUnique uniques ++ ")"
+  x <- checkTable cName
   return $ case x of
-    Nothing  -> (False, Right [(False, 0, query)])
+    Nothing  -> (False, Right [(False, defaultPriority, query)])
     Just sql -> (True, if sql == query
       then Right []
-      else Left ["Constructor table must be altered: " ++ name])
+      else Left ["Constructor table must be altered: " ++ cName])
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
 migTriggerOnDelete :: MonadControlIO m => String -> [String] -> DbPersist Sqlite m (Bool, SingleMigration)
@@ -221,9 +221,9 @@ migTriggerOnDelete name deletes = do
   x <- checkTrigger name
   return $ case x of
     Nothing | null deletes -> (False, Right [])
-    Nothing -> (False, Right [(False, 1, query)])
+    Nothing -> (False, Right [(False, triggerPriority, query)])
     Just sql -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
-      then Right [(False, 1, "DROP TRIGGER " ++ escape name)]
+      then Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
       else if sql == query
         then Right []
         -- this can happen when a field was added or removed. Consider trigger replacement.
@@ -237,7 +237,7 @@ migTriggerOnUpdate name fieldName del = do
   let query = "CREATE TRIGGER " ++ escape tname ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape name ++ " BEGIN " ++ del ++ "END"
   x <- checkTrigger tname
   return $ case x of
-    Nothing -> (False, Right [(False, 1, query)])
+    Nothing -> (False, Right [(False, triggerPriority, query)])
     Just sql -> (True, if sql == query
         then Right []
         else Left ["The trigger " ++ tname ++ " is different from expected. Manual migration required.\n" ++ sql ++ "\n" ++ query])
@@ -451,9 +451,8 @@ replace' k v = do
               let delQuery = "DELETE FROM " ++ escape oldCName ++ " WHERE " ++ constrId ++ "=?"
               executeRawCached' delQuery [toPrim k]
 
-              -- UGLY: reinsert entry with a new discr to the main table after it was deleted by a trigger.
-              let reInsQuery = "INSERT INTO " ++ escape name ++ "(id$,discr$)VALUES(?,?)"
-              executeRawCached' reInsQuery [toPrim k, head vals]
+              let updateDiscrQuery = "UPDATE " ++ escape name ++ " SET discr$=? WHERE id$=?"
+              executeRaw True updateDiscrQuery [head vals, toPrim k]
         Nothing -> return ()
 
 -- | receives constructor number and row of values from the constructor table
@@ -613,29 +612,22 @@ delete' (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let cond' = renderCond' cond
   let name = getEntityName e
-  let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-  let query = "DELETE FROM " ++ escape qName ++ " WHERE " ++ fromStringS (getQuery cond')
-  -- after removal from the constructor table, entry from the main table is removed by trigger
-  executeRawCached' query (getValues cond' [])
+  if isSimple (constructors e)
+    then do
+      let query = "DELETE FROM " ++ escape name ++ " WHERE " ++ fromStringS (getQuery cond')
+      executeRawCached' query (getValues cond' [])
+    else do
+      let cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
+      let query = "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ " WHERE " ++ fromStringS (getQuery cond') ++ ")"
+      -- the entries in the constructor table are deleted because of the reference on delete cascade
+      executeRawCached' query (getValues cond' [])
       
 deleteByKey' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Sqlite m ()
 deleteByKey' (k :: Key v) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
-  if isSimple (constructors e)
-    then do
-      let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
-      executeRawCached' query [toPrim k]
-    else do
-      let query = "SELECT discr$ FROM " ++ escape name
-      x <- queryRawTyped query [DbInt64] [] firstRow
-      case x of
-        Just [discr] -> do
-          let cName = name ++ [defDelim] ++ constrName (constructors e !! fromPrim discr)
-          let cQuery = "DELETE FROM " ++ escape cName ++ " WHERE id$=?"
-          executeRawCached' cQuery [toPrim k]
-        Just xs -> fail $ "requested 1 column, returned " ++ show xs
-        Nothing -> return ()
+  let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
+  executeRawCached' query [toPrim k]
 
 {-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite IO Int #-}
 count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m Int
@@ -710,7 +702,7 @@ bind stmt = go 1 where
       PersistDay d           -> S.bindText stmt i $ show d
       PersistTimeOfDay d     -> S.bindText stmt i $ show d
       PersistUTCTime d       -> S.bindText stmt i $ show d
-    go (i+1) xs
+    go (i + 1) xs
 
 executeRaw' :: MonadIO m => String -> [PersistValue] -> DbPersist Sqlite m ()
 executeRaw' query vals = do
@@ -824,3 +816,9 @@ renderCond' = renderCond escape constrId renderEquals renderNotEquals where
 isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True
 isSimple _   = False
+
+defaultPriority :: Int
+defaultPriority = 0
+
+triggerPriority :: Int
+triggerPriority = 1
