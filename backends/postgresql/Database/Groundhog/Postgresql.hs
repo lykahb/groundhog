@@ -98,13 +98,6 @@ open' s = do
 close' :: Postgresql -> IO ()
 close' (Postgresql conn _) = H.disconnect conn
 
-{-
-DbMaybe prim -> name type
-prim         -> name type NOT NULL
-comp         -> name type NOT NULL REFERENCES table
-DbMaybe comp -> name type REFERENCES table
--}
-
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Postgresql IO (Key v) #-}
 {-# INLINE insert' #-}
 insert' :: (PersistEntity v, MonadControlIO m) => v -> DbPersist Postgresql m (Key v)

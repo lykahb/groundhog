@@ -330,10 +330,11 @@ DbMaybe comp -> name type REFERENCES table
 -}
 
 sqlColumn :: String -> DbType -> String
-sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ f typ where
-  f (DbMaybe t) = g (getType t)
-  f t = " NOT NULL" ++ g t
-  g (DbEntity t) = " REFERENCES " ++ escape (getEntityName t)
+sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ reference where
+  (isNullable, reference) = case typ of
+    (DbMaybe t) -> (True, g (getType t))
+    t           -> (False, " NOT NULL" ++ g t)
+  g (DbEntity t) = " REFERENCES " ++ escape (getEntityName t) ++ (if isNullable then " ON DELETE SET NULL" else "")
   g (DbTuple n ts) = " REFERENCES " ++ (intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts)
   g (DbList t) = " REFERENCES " ++ "List$$" ++ getName t
   g _ = ""

@@ -8,9 +8,12 @@ data Person = Person {name :: String, age :: Int, height :: Int} deriving (Eq, S
 
 deriveEntity ''Person Nothing
 
--- 0.0.1.1
+-- 0.0.1.1 sqlite
 -- 100000 $ insert ~1.54
 -- 100000 $ get ~0.98
+-- postgresql
+-- 10000  $ insert ~6.5
+-- 10000  $ get ~6
 main :: IO ()
 main = withSqliteConn ":memory:" $ runSqliteConn $ do
   runMigration silentMigrationLogger $ migrate (undefined :: Person)

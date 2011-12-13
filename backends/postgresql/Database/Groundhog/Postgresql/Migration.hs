@@ -93,7 +93,7 @@ migrate' = migrateRecursively migE migT migL where
     let query = "CREATE TABLE " ++ escape name ++ " (id$ SERIAL PRIMARY KEY UNIQUE" ++ fields' ++ ")"
     x <- checkTable name
     let expectedColumns = map (\(fname, ntype) -> mkColumn name fname ntype) fields
-    let addReferences = mapMaybe (uncurry $ createReference name) fields
+    let addReferences = mapMaybe (createReference name) expectedColumns
     return $ case x of
       Nothing  -> mergeMigrations $ Right [(False, defaultPriority, query)] : addReferences ++ [trigger]
       Just (Right (columns, [])) -> if columns == expectedColumns
@@ -114,8 +114,9 @@ migrate' = migrateRecursively migE migT migL where
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b] else []
     let expectedMainStructure = ([], [])
-    let expectedValuesStructure = ([mkColumn valuesName "ord$" (namedType (0 :: Int32)), mkColumn valuesName "value" t], [])
-    let addReferences = maybeToList $ createReference valuesName "value" t
+    let valueCol = mkColumn valuesName "value" t
+    let expectedValuesStructure = ([mkColumn valuesName "ord$" (namedType (0 :: Int32)), valueCol], [])
+    let addReferences = maybeToList $ createReference valuesName valueCol
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations $ [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
       (Just (Right mainStructure), Just (Right valuesStructure)) -> let
@@ -127,14 +128,9 @@ migrate' = migrateRecursively migE migT migL where
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 
-createReference :: String -> String -> NamedType -> Maybe SingleMigration
-createReference tname fname typ = fmap (\x -> Right $ [(False, referencePriority, showAlter tname (fname, AddReference x))]) $ go typ where
-  go x = case getType x of
-    DbMaybe a   -> go a
-    DbEntity t  -> Just $ getEntityName t
-    DbTuple _ _ -> Just $ getName x
-    DbList _    -> Just $ getName x
-    _ -> Nothing
+createReference :: String -> Column -> Maybe SingleMigration
+createReference tname col@(Column name isNull type_ def ref) = fmap f ref where
+  f (x, _) = Right [(False, referencePriority, showAlter tname (name, AddReference isNull x))]
 
 sqlColumn :: String -> DbType -> String
 sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ f typ where
@@ -186,7 +182,7 @@ migConstr mainTableName cName constr = do
   let new = mkColumns cName constr
   let mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
   let addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ mainRef ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
-  let addReferences = mapMaybe (uncurry $ createReference cName) fields
+  let addReferences = mapMaybe (createReference cName) $ fst new
   x <- checkTable cName
   return $ case x of
     Nothing  -> let
@@ -315,7 +311,7 @@ getColumn _ x = return $ Left $ "Invalid result from information_schema: " ++ sh
 
 data AlterColumn = Type DbType | IsNull | NotNull | Add Column | Drop
                  | Default String | NoDefault | Update String
-                 | AddReference String | DropReference String
+                 | AddReference Bool String | DropReference String
 type AlterColumn' = (String, AlterColumn)
 
 data AlterTable = AddUniqueConstraint String [String]
@@ -350,12 +346,12 @@ getAlters (c1, u1) (c2, u2) =
 findAlters :: Column -> [Column] -> ([AlterColumn'], [Column])
 findAlters col@(Column name isNull type_ def ref) cols =
     case filter (\c -> cName c == name) cols of
-        [] -> ((name, Add col) : (maybeToList $ fmap (\x -> (name, AddReference $ fst x)) ref), cols)
+        [] -> ((name, Add col) : (maybeToList $ fmap (\x -> (name, AddReference isNull $ fst x)) ref), cols)
         Column _ isNull' type_' def' ref':_ ->
             let refDrop Nothing = []
                 refDrop (Just (_, cname)) = [(name, DropReference cname)]
                 refAdd Nothing = []
-                refAdd (Just (tname, _)) = [(name, AddReference tname)]
+                refAdd (Just (tname, _)) = [(name, AddReference isNull tname)]
                 modRef =
                     if fmap snd ref == fmap snd ref'
                         then []
@@ -386,8 +382,8 @@ showAlterDb (AlterColumn t (c, ac)) =
     isUnsafe Drop = True
     isUnsafe _ = False
     order = case ac of
-      AddReference _ -> referencePriority
-      _              -> defaultPriority
+      AddReference _ _ -> referencePriority
+      _                -> defaultPriority
 showAlterDb (AlterTable t at) = (False, defaultPriority, showAlterTable t at)
 
 showAlterTable :: String -> AlterTable -> String
@@ -474,7 +470,7 @@ showAlter table (n, Update s) = concat
     , escape n
     , " IS NULL"
     ]
-showAlter table (n, AddReference t2) = concat
+showAlter table (n, AddReference isNull t2) = concat
     [ "ALTER TABLE "
     , escape table
     , " ADD CONSTRAINT "
@@ -483,7 +479,7 @@ showAlter table (n, AddReference t2) = concat
     , escape n
     , ") REFERENCES "
     , escape t2
-    ]
+    ] ++ if isNull then " ON DELETE SET NULL" else ""
 showAlter table (_, DropReference cname) =
     "ALTER TABLE " ++ escape table ++ " DROP CONSTRAINT " ++ escape cname
     
