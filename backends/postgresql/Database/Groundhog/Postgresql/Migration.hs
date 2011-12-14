@@ -12,7 +12,7 @@ import Control.Monad.IO.Control (MonadControlIO)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int(Int32)
-import Data.List (intercalate, groupBy, sort)
+import Data.List (intercalate, group, groupBy, sort)
 import Data.Maybe (mapMaybe, maybeToList)
 
 {- ********************RULES******************** --
@@ -73,11 +73,14 @@ migrate' = migrateRecursively migE migT migL where
               else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
           Just (Right (columns, [])) -> do
             if columns == mainTableColumns
-              then do -- the datatype had also many constructors before
--- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
-                return $ if any (not.fst) res
-                  then Left ["Migration with constructors addition will be implemented soon. Datatype: " ++ name]
-                  else mergeMigrations $ map snd res
+              then do
+                -- the datatype had also many constructors before
+                -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
+                let updateDiscriminators = Right . go 0 . map (head &&& length) . group $ map fst $ res where
+                    go acc ((False, n):(True, n2):xs) = (False, defaultPriority, "UPDATE " ++ escape name ++ " SET discr$ = discr$ + " ++ show n ++ " WHERE discr$ >= " ++ show acc) : go (acc + n + n2) xs
+                    go acc ((True, n):xs) = go (acc + n) xs
+                    go _ _ = []
+                return $ mergeMigrations $ updateDiscriminators: (map snd res)
               else do
                 return $ Left ["Migration from one constructor to many will be implemented soon. Datatype: " ++ name]
           Just (Right (_, constraints)) -> do
@@ -112,7 +115,7 @@ migrate' = migrateRecursively migE migT migL where
     y <- checkTable valuesName
     (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
-    let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b] else []
+    let f name a b = if a == b then [] else ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b]
     let expectedMainStructure = ([], [])
     let valueCol = mkColumn valuesName "value" t
     let expectedValuesStructure = ([mkColumn valuesName "ord$" (namedType (0 :: Int32)), valueCol], [])

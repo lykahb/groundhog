@@ -15,6 +15,7 @@ import Database.Groundhog.Generic.Sql.String
 
 import qualified Database.Sqlite as S
 
+import Control.Arrow ((&&&))
 import Control.Exception.Control (bracket, onException, finally)
 import Control.Monad(liftM, forM, (>=>))
 import Control.Monad.IO.Control (MonadControlIO)
@@ -24,7 +25,7 @@ import Control.Monad.Trans.Reader(ask)
 import Data.Enumerator(Enumerator, Iteratee(..), Stream(..), checkContinue0, (>>==), joinE, runIteratee, continue, concatEnums)
 import qualified Data.Enumerator.List as EL
 import Data.Int (Int64)
-import Data.List (intercalate)
+import Data.List (group, intercalate)
 import Data.IORef
 import qualified Data.Map as Map
 import Data.Pool
@@ -148,11 +149,14 @@ migrate' = migrateRecursively migE migT migL where
               else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
           Just sql -> do
             if sql == mainTableQuery
-              then do -- the datatype had also many constructors before
--- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
-                return $ if any (not.fst) res
-                  then Left ["Migration with constructors addition will be implemented soon. Datatype: " ++ name]
-                  else mergeMigrations $ map snd res
+              then do
+                -- the datatype had also many constructors before
+                -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
+                let updateDiscriminators = Right . go 0 . map (head &&& length) . group $ map fst $ res where
+                    go acc ((False, n):(True, n2):xs) = (False, defaultPriority, "UPDATE " ++ escape name ++ " SET discr$ = discr$ + " ++ show n ++ " WHERE discr$ >= " ++ show acc) : go (acc + n + n2) xs
+                    go acc ((True, n):xs) = go (acc + n) xs
+                    go _ _ = []
+                return $ mergeMigrations $ updateDiscriminators: (map snd res)
               else do
                 return $ Left ["Migration from one constructor to many will be implemented soon. Datatype: " ++ name]
             

@@ -3,7 +3,7 @@
 import qualified Data.Map as M
 import Control.Exception.Base(SomeException)
 import Control.Exception.Control (catch)
-import Control.Monad(replicateM_, liftM, forM_, (>=>))
+import Control.Monad(replicateM_, liftM, forM_, (>=>), unless)
 import Control.Monad.IO.Class(liftIO)
 import Control.Monad.IO.Control (MonadControlIO)
 import Database.Groundhog.Core
@@ -56,6 +56,7 @@ mkTestSuite label run = testGroup label $
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   , testCase "testTupleTriggersOnUpdate" $ run testTupleTriggersOnUpdate
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
+  , testCase "testMigrateAddConstructorToMany" $ run testMigrateAddConstructorToMany
   , testCase "testReference" $ run testReference
   , testCase "testMaybeReference" $ run testMaybeReference
   ]
@@ -236,6 +237,20 @@ testMigrateAddColumnSingle = do
   val' <- get k
   Just val @=? val'
 
+testMigrateAddConstructorToMany :: (PersistBackend m, MonadControlIO m) => m ()
+testMigrateAddConstructorToMany = do
+  migr (undefined :: Old.AddConstructorToMany)
+  Key k1 <- insert $ Old.AddConstructorToMany1 1
+  Key k2 <- insert $ Old.AddConstructorToMany2 "abc"
+  migr (undefined :: New.AddConstructorToMany)
+  k0 <- insert $ New.AddConstructorToMany0 5
+  val1 <- get (Key k1 :: Key (New.AddConstructorToMany))
+  Just (New.AddConstructorToMany1 1) @=? val1
+  val2 <- get (Key k2 :: Key (New.AddConstructorToMany))
+  Just (New.AddConstructorToMany2 "abc") @=? val2
+  val0 <- get k0
+  Just (New.AddConstructorToMany0 5) @=? val0
+
 testReference :: (PersistBackend m, MonadControlIO m) => m ()
 testReference = do
   migr (undefined :: Single (Single String))
@@ -276,8 +291,7 @@ clean = do
   executeRaw True "drop schema public cascade" []
   executeRaw True "create schema public" []
 
-assertExc :: (PersistBackend m, MonadControlIO m) => String -> m () -> m ()
-assertExc err m = catch action handler where
-  action = m >> liftIO (H.assertFailure err)
-  handler :: Monad m => SomeException -> m ()
-  handler = const $ return ()
+assertExc :: (PersistBackend m, MonadControlIO m) => String -> m a -> m ()
+assertExc err m = do
+  happened <- catch (m >> return False) $ \e -> const (return True) (e :: SomeException)
+  unless happened $ liftIO (H.assertFailure err)
