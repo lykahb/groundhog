@@ -74,7 +74,7 @@ withSqliteConn :: MonadControlIO m
                => String
                -> (Sqlite -> m a)
                -> m a
-withSqliteConn s = bracket (liftIO $ open' s) (liftIO.close')
+withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
 
 {-# SPECIALIZE runSqlitePool :: DbPersist Sqlite IO a -> Pool Sqlite -> IO a #-}
 runSqlitePool :: MonadControlIO m => DbPersist Sqlite m a -> Pool Sqlite -> m a
@@ -152,7 +152,7 @@ migrate' = migrateRecursively migE migT migL where
               then do
                 -- the datatype had also many constructors before
                 -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
-                let updateDiscriminators = Right . go 0 . map (head &&& length) . group $ map fst $ res where
+                let updateDiscriminators = Right . go 0 . map (head &&& length) . group . map fst $ res where
                     go acc ((False, n):(True, n2):xs) = (False, defaultPriority, "UPDATE " ++ escape name ++ " SET discr$ = discr$ + " ++ show n ++ " WHERE discr$ >= " ++ show acc) : go (acc + n + n2) xs
                     go acc ((True, n):xs) = go (acc + n) xs
                     go _ _ = []
@@ -267,7 +267,7 @@ mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
     go a = case getType a of
       DbMaybe x -> go x
       _         -> getName a
-  ephemerals = filter (isEphemeral.snd) types
+  ephemerals = filter (isEphemeral . snd) types
 
 isEphemeral :: NamedType -> Bool
 isEphemeral a = case getType a of
@@ -441,7 +441,7 @@ replace' k v = do
     then executeRawCached' (mkQuery name) (tail vals ++ [toPrim k])
     else do
       let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
-      x <- queryRawTyped query [DbInt32] [toPrim k] (firstRow >=> return.fmap (fromPrim . head))
+      x <- queryRawTyped query [DbInt32] [toPrim k] (firstRow >=> return . fmap (fromPrim . head))
       case x of
         Just discr -> do
           let cName = name ++ [defDelim] ++ constrName constr

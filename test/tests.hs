@@ -11,6 +11,7 @@ import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
 import Data.Int
+import qualified Data.Map as Map
 import Data.Word
 import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit
@@ -232,6 +233,8 @@ testMigrateAddColumnSingle :: (PersistBackend m, MonadControlIO m) => m ()
 testMigrateAddColumnSingle = do
   migr (undefined :: Old.AddColumn)
   migr (undefined :: New.AddColumn)
+  m <- createMigration $ migrate (undefined :: New.AddColumn)
+  Map.singleton "AddColumn" (Right []) @=? m
   let val = New.AddColumn "abc" 5
   k <- insert val
   val' <- get k

@@ -223,7 +223,7 @@ selectEnum' (cond :: Cond v c) ords limit offset = start where
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
   conds' = renderCond' cond
-  fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+  fields = intercalate "," $ constrId : map (escape . fst) (constrParams constr)
   mkQuery tname = "SELECT " ++ fields ++ " FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
   binds = getValues conds' limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
@@ -233,7 +233,7 @@ selectAllEnum' = start where
   start = if isSimple (constructors e)
     then let
       constr = head $ constructors e
-      fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+      fields = intercalate "," $ constrId : map (escape . fst) (constrParams constr)
       query = "SELECT " ++ fields ++ " FROM " ++ escape name
       in joinE (queryEnum query []) (EL.mapM (mkEntity 0))
     else concatEnums $ zipWith q [0..] (constructors e) where
@@ -264,7 +264,7 @@ select' (cond :: Cond v c) ords limit offset = start where
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
   conds' = renderCond' cond
-  fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+  fields = intercalate "," $ constrId : map (escape . fst) (constrParams constr)
   mkQuery tname = "SELECT " ++ fields ++ " FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
   doSelectQuery query cNum = queryRawCached' query binds $ mapAllRows (mkEntity cNum)
   binds = getValues conds' limps
@@ -275,7 +275,7 @@ selectAll' = start where
   start = if isSimple (constructors e)
     then let
       constr = head $ constructors e
-      fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+      fields = intercalate "," $ constrId : map (escape . fst) (constrParams constr)
       query = "SELECT " ++ fields ++ " FROM " ++ escape name
       in queryRawCached' query [] $ mapAllRows (mkEntity 0)
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(i, constr) -> do
@@ -320,7 +320,7 @@ get' (k :: Key v) = do
   if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+      let fields = intercalate "," $ constrId : map (escape . fst) (constrParams constr)
       let query = "SELECT " ++ fields ++ " FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
       x <- queryRawCached' query [toPrim k] firstRow
       case x of
@@ -335,7 +335,7 @@ get' (k :: Key v) = do
           let constructorNum = fromPrim discr
           let constr = constructors e !! constructorNum
           let cName = name ++ [defDelim] ++ constrName constr
-          let fields = intercalate "," $ constrId : map (escape.fst) (constrParams constr)
+          let fields = intercalate "," $ constrId : map (escape . fst) (constrParams constr)
           let cQuery = "SELECT " ++ fields ++ " FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
           x2 <- queryRawCached' cQuery [toPrim k] firstRow
           case x2 of

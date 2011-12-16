@@ -92,11 +92,10 @@ migrate' = migrateRecursively migE migT migL where
     let name = intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts
     let fields = zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
     (_, trigger) <- migTriggerOnDelete name $ mkDeletesOnDelete fields
-    let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
-    let query = "CREATE TABLE " ++ escape name ++ " (id$ SERIAL PRIMARY KEY UNIQUE" ++ fields' ++ ")"
     x <- checkTable name
     let expectedColumns = map (\(fname, ntype) -> mkColumn name fname ntype) fields
     let addReferences = mapMaybe (createReference name) expectedColumns
+    let query = "CREATE TABLE " ++ escape name ++ " (id$ SERIAL PRIMARY KEY UNIQUE," ++ intercalate "," (map showColumn expectedColumns) ++ ")"
     return $ case x of
       Nothing  -> mergeMigrations $ Right [(False, defaultPriority, query)] : addReferences ++ [trigger]
       Just (Right (columns, [])) -> if columns == expectedColumns
@@ -109,15 +108,15 @@ migrate' = migrateRecursively migE migT migL where
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
+    let valueCol = mkColumn valuesName "value" t
     let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id$ SERIAL PRIMARY KEY UNIQUE)"
-    let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
+    let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL," ++ showColumn valueCol ++ ")"
     x <- checkTable mainName
     y <- checkTable valuesName
     (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
     let f name a b = if a == b then [] else ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b]
     let expectedMainStructure = ([], [])
-    let valueCol = mkColumn valuesName "value" t
     let expectedValuesStructure = ([mkColumn valuesName "ord$" (namedType (0 :: Int32)), valueCol], [])
     let addReferences = maybeToList $ createReference valuesName valueCol
     return $ case (x, y) of
@@ -132,16 +131,11 @@ migrate' = migrateRecursively migE migT migL where
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 
 createReference :: String -> Column -> Maybe SingleMigration
-createReference tname col@(Column name isNull type_ def ref) = fmap f ref where
+createReference tname (Column name isNull _ _ ref) = fmap f ref where
   f (x, _) = Right [(False, referencePriority, showAlter tname (name, AddReference isNull x))]
-
-sqlColumn :: String -> DbType -> String
-sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ f typ where
-  f (DbMaybe t) = ""
-  f t = " NOT NULL"
   
 showColumn :: Column -> String
-showColumn (Column n nu t def ref) = concat
+showColumn (Column n nu t def _) = concat
     [ escape n
     , " "
     , showSqlType t
@@ -149,16 +143,7 @@ showColumn (Column n nu t def ref) = concat
     , if nu then "NULL" else "NOT NULL"
     , case def of
         Nothing -> ""
-        Just s -> " DEFAULT " ++ s
-    ]
-
-sqlUnique :: Constraint -> String
-sqlUnique (cname, cols) = concat
-    [ ", CONSTRAINT "
-    , escape cname
-    , " UNIQUE ("
-    , intercalate "," $ map escape cols
-    , ")"
+        Just s  -> " DEFAULT " ++ s
     ]
 
 migConstrAndTrigger :: MonadControlIO m => Bool -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
@@ -180,12 +165,11 @@ migConstrAndTrigger simple name constr = do
 
 migConstr :: MonadControlIO m => Maybe String -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstr mainTableName cName constr = do
-  let fields = constrParams constr
   let uniques = constrConstrs constr
-  let new = mkColumns cName constr
-  let mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
-  let addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ mainRef ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ ")"
-  let addReferences = mapMaybe (createReference cName) $ fst new
+  let new@(newColumns,_) = mkColumns cName constr
+  let mainRef = maybe "," (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE,") mainTableName
+  let addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " SERIAL PRIMARY KEY UNIQUE" ++ mainRef ++ intercalate "," (map showColumn newColumns) ++ ")"
+  let addReferences = mapMaybe (createReference cName) newColumns
   x <- checkTable cName
   return $ case x of
     Nothing  -> let
@@ -493,7 +477,7 @@ refName table column = table ++ '_' : column ++ "_fkey"
 
 -- | Create the list of columns for the given entity.
 mkColumns :: String -- ^ constructor table name
-          -> ConstructorDef -- constructor definition
+          -> ConstructorDef -- ^ constructor definition
           -> ([Column], [Constraint])
 mkColumns cname constr = (cols, uniqs) where
     uniqs = constrConstrs constr
