@@ -132,7 +132,7 @@ persistentNamingStyle = fieldNamingStyle {
 -- > ...
 conciseNamingStyle :: NamingStyle
 conciseNamingStyle = fieldNamingStyle {
-  mkExprFieldName = \_ cName _ fName _ -> firstLetter toUpper fName
+  mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName
 }
 
 -- | Set name of the table for the datatype
@@ -308,10 +308,10 @@ mkPersistEntityInstance def = do
     let mkField c fNum f = do
         a <- newName "a"
         let fname = dbFieldName f
-        let pats = replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrParams c) - fNum - 1) wildP
-        let nvar = case hasFreeVars (fieldType f) of
-             True ->  appE (lamE [conP (thConstrName c) pats] (varE a)) (varE v)
-             False -> [| undefined :: $(return $ fieldType f) |]
+        let nvar = if hasFreeVars (fieldType f)
+             then let pat = conP (thConstrName c) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrParams c) - fNum - 1) wildP
+                  in caseE (varE v) [match pat (normalB $ varE a) [], match wildP (normalB [| undefined |]) []]
+             else [| undefined :: $(return $ fieldType f) |]
         [| (fname, namedType $nvar) |]
          
     let constrs = listE $ zipWith (\cNum c@(THConstructorDef _ _ name params conss) -> [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) conss |]) [0..] $ thConstructors def
@@ -324,7 +324,6 @@ mkPersistEntityInstance def = do
     let body = normalB $ [| sequence $(listE $ map (appE (varE 'toPersistValue)) ([|cNum::Int|]:map varE names) ) |]
     clause [pat] body []
   
---  fromPersistValues' <- funD 'fromPersistValues $ [ clause [wildP] (normalB [| error "fromPersistValues" |])[] ]
   fromPersistValues' <- do
     clauses <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
       names <- mapM (const $ newName "x") $ thConstrParams c
@@ -333,7 +332,6 @@ mkPersistEntityInstance def = do
       let result = noBindS (appE (varE 'return) ( foldl (\a -> appE a . varE) (conE (thConstrName c)) names'))
       let getField name name' f = bindS (varP name') [| fromPersistValue $(varE name) |]
       let body = normalB $ doE $ (zipWith3 getField names names' (thConstrParams c)) ++ [result]
---      let body = normalB [|undefined|]
       clause [pat] body []
     unexpected <- newName "xs" >>= \xs -> clause [varP xs] (normalB [| fail $ "Invalid values: " ++ show $(varE xs) |]) []
     return $ FunD 'fromPersistValues $ clauses ++ [unexpected]
