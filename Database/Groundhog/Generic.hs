@@ -34,18 +34,18 @@ import qualified Data.Map as Map
 -- The stateful Map is used to avoid duplicate migrations when an entity type
 -- occurs several times in a datatype
 migrateRecursively :: (Monad m, PersistEntity e) => 
-     (EntityDef -> m SingleMigration)          -- ^ migrate entity
-  -> (Int -> [NamedType] -> m SingleMigration) -- ^ migrate tuple
-  -> (NamedType -> m SingleMigration)          -- ^ migrate list
-  -> e                                         -- ^ initial entity
+     (EntityDef   -> m SingleMigration) -- ^ migrate entity
+  -> ([NamedType] -> m SingleMigration) -- ^ migrate tuple
+  -> (NamedType   -> m SingleMigration) -- ^ migrate list
+  -> e                                  -- ^ initial entity
   -> StateT NamedMigrations m ()
 migrateRecursively migE migT migL = go . namedType where
   go w = case getType w of
-    (DbList t)     -> f (getName w) (migL t) (go t)
-    (DbTuple n ts) -> f (getName w) (migT n ts) (mapM_ go ts)
-    (DbEntity e)   -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
-    (DbMaybe t)    -> go t
-    _              -> return ()    -- ordinary types need not migration
+    (DbList t)   -> f (getName w) (migL t) (go t)
+    (DbTuple ts) -> f (getName w) (migT ts) (mapM_ go ts)
+    (DbEntity e) -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
+    (DbMaybe t)  -> go t
+    _            -> return ()    -- ordinary types need not migration
   f name mig cont = do
     v <- gets (Map.lookup name)
     case v of
@@ -152,13 +152,13 @@ data Column = Column
 mkColumns :: String -> NamedType -> [Column]
 mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
   go prefix (fname, typ) acc = case getType typ of
-    DbTuple _ ts -> foldr (go $ prefix ++ fname ++ "$") acc $ zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
-    _            -> column:acc where
+    DbTuple ts -> foldr (go $ prefix ++ fname ++ "$") acc $ zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
+    _          -> column:acc where
       column = Column (prefix ++ fname) isNullable simpleType Nothing ref
       (isNullable, simpleType, ref) = analyze typ
       analyze x = case getType x of
-        DbMaybe a   -> let (_, t', ref') = analyze a in (True, t', ref')
-        DbEntity _  -> (False, DbInt32, Just $ getName x)
-        DbList _    -> (False, DbInt32, Just $ getName x)
-        DbTuple _ _ -> error "mkColumn: unexpected DbTuple"
-        a           -> (False, a, Nothing)
+        DbMaybe a  -> let (_, t', ref') = analyze a in (True, t', ref')
+        DbEntity _ -> (False, DbInt32, Just $ getName x)
+        DbList _   -> (False, DbInt32, Just $ getName x)
+        DbTuple _  -> error "mkColumn: unexpected DbTuple"
+        a          -> (False, a, Nothing)

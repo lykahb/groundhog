@@ -154,12 +154,12 @@ renderFields :: StringLike s => (s -> s) -> [(String, NamedType)] -> s
 renderFields esc = commasJoin . foldr flatten [] where
   nameTupFields ts = zipWith (\i t -> ("val" <> fromString (show i), t)) ([0..] :: [Int]) ts
   flatten (fname, typ) acc = case getType typ of
-    DbTuple _ ts -> case nameTupFields ts of
+    DbTuple ts -> case nameTupFields ts of
       [] -> acc
       (t':ts') -> flattenP (fromString fname) t' $ foldr (flattenP (fromString fname)) acc ts'
     _            -> esc (fromString fname) : acc
   flattenP prefix (fname, typ) acc = (case getType typ of
-    DbTuple _ ts -> case nameTupFields ts of
+    DbTuple ts -> case nameTupFields ts of
       [] -> acc
       (t':ts') -> flattenP fullName t' $ foldr (flattenP fullName) acc ts'
     _            -> esc fullName : acc) where
@@ -168,7 +168,7 @@ renderFields esc = commasJoin . foldr flatten [] where
   commasJoin (x:xs) = x <> go xs where
     comma = fromChar ','
     go [] = mempty
-    go (x:xs) = comma <> x <> go xs
+    go (f:fs) = comma <> f <> go fs
 
 {-# INLINABLE renderUpdates #-}
 renderUpdates :: (PersistEntity v, StringLike s) => (String -> String) -> [Update v c] -> RenderS s

@@ -88,7 +88,7 @@ migrate' = migrateRecursively migE migT migL where
           Just (Left errs) -> return (Left errs)
             
   -- we don't need any escaping because tuple table name and fields are always valid
-  migT n ts = return $ Right []
+  migT ts = return $ Right []
 
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
@@ -226,10 +226,10 @@ mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
 
 isEphemeral :: NamedType -> Bool
 isEphemeral a = case getType a of
-  DbMaybe x   -> isEphemeral x
-  DbList _    -> True
-  DbTuple _ _ -> True
-  _           -> False
+  DbMaybe x -> isEphemeral x
+  DbList _  -> True
+  DbTuple _ -> True
+  _         -> False
 
 checkTable :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
 checkTable name = do
@@ -476,7 +476,7 @@ showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbBlob = "BYTEA"
 showSqlType (DbMaybe t) = showSqlType (getType t)
 showSqlType (DbList _) = "INTEGER"
-showSqlType (DbTuple _ _) = "INTEGER"
+showSqlType (DbTuple _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
 
 defaultPriority :: Int

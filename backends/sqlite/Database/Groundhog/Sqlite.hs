@@ -160,7 +160,7 @@ migrate' = migrateRecursively migE migT migL where
                 return $ Left ["Migration from one constructor to many will be implemented soon. Datatype: " ++ name]
             
   -- we don't need any escaping because tuple table name and fields are always valid
-  migT _ _ = return $ Right []
+  migT _ = return $ Right []
   {-migT n ts =  do
     let name = intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts
     let fields = zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
@@ -313,7 +313,7 @@ showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbBlob = "BLOB"
 showSqlType (DbMaybe t) = showSqlType (getType t)
 showSqlType (DbList _) = "INTEGER"
-showSqlType (DbTuple _ _) = "INTEGER"
+showSqlType (DbTuple _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
 
 {-
@@ -767,7 +767,7 @@ typeToSqlite DbDayTime = Nothing
 typeToSqlite DbBlob = Just S.BlobColumn
 typeToSqlite (DbMaybe _) = Nothing
 typeToSqlite (DbList _) = Just S.IntegerColumn
-typeToSqlite (DbTuple _ _) = Just S.IntegerColumn
+typeToSqlite (DbTuple _) = Just S.IntegerColumn
 typeToSqlite (DbEntity _) = Just S.IntegerColumn
 
 getConstructorTypes :: ConstructorDef -> [DbType]
@@ -775,8 +775,8 @@ getConstructorTypes = foldr getDbTypes [] . map snd . constrParams where
 
 getDbTypes :: NamedType -> [DbType] -> [DbType]
 getDbTypes typ acc = case getType typ of
-  DbTuple _ ts -> foldr getDbTypes acc ts
-  t            -> t:acc
+  DbTuple ts -> foldr getDbTypes acc ts
+  t          -> t:acc
 
 firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
 firstRow pop = pop >>= return

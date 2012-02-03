@@ -317,7 +317,7 @@ data DbType = DbString
 -- More complex types
             | DbMaybe NamedType
             | DbList NamedType
-            | DbTuple Int [NamedType]
+            | DbTuple [NamedType]
             | DbEntity EntityDef
   deriving (Eq, Show)
 
@@ -812,7 +812,7 @@ instance PersistField () where
   persistName _ = "Unit$"
   toPersistValue _ = return id
   fromPersistValue xs = return ((), xs)
-  dbType _ = DbTuple 0 []
+  dbType _ = DbTuple []
 
 instance (PersistField a, PersistField b) => PersistField (a, b) where
   persistName (_ :: (a, b)) = "Tuple2$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b)
@@ -824,7 +824,7 @@ instance (PersistField a, PersistField b) => PersistField (a, b) where
     (a, rest0) <- fromPersistValue xs
     (b, rest1) <- fromPersistValue rest0
     return ((a, b), rest1)
-  dbType (_ :: (a, b)) = DbTuple 2 [namedType (undefined :: a), namedType (undefined :: b)]
+  dbType (_ :: (a, b)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b)]
   
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
   persistName (_ :: (a, b, c)) = "Tuple3$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c)
@@ -838,7 +838,7 @@ instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b,
     (b, rest1) <- fromPersistValue rest0
     (c, rest2) <- fromPersistValue rest1
     return ((a, b, c), rest2)
-  dbType (_ :: (a, b, c)) = DbTuple 3 [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c)]
+  dbType (_ :: (a, b, c)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c)]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
   persistName (_ :: (a, b, c, d)) = "Tuple4$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c) ++ "$" ++ persistName (undefined :: d)
@@ -854,7 +854,7 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d) => Per
     (c, rest2) <- fromPersistValue rest1
     (d, rest3) <- fromPersistValue rest2
     return ((a, b, c, d), rest3)
-  dbType (_ :: (a, b, c, d)) = DbTuple 4 [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d)]
+  dbType (_ :: (a, b, c, d)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d)]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
   persistName (_ :: (a, b, c, d, e)) = "Tuple5$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c) ++ "$" ++ persistName (undefined :: d) ++ "$" ++ persistName (undefined :: e)
@@ -872,4 +872,4 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d, Persis
     (d, rest3) <- fromPersistValue rest2
     (e, rest4) <- fromPersistValue rest3
     return ((a, b, c, d, e), rest4)
-  dbType (_ :: (a, b, c, d, e)) = DbTuple 5 [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d), namedType (undefined :: e)]
+  dbType (_ :: (a, b, c, d, e)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d), namedType (undefined :: e)]
