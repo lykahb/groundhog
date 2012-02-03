@@ -17,6 +17,7 @@ deriveEntity ''Person Nothing
 main :: IO ()
 main = withSqliteConn ":memory:" $ runSqliteConn $ do
   runMigration silentMigrationLogger $ migrate (undefined :: Person)
-  k <- insert $ Person "abc" 22 180
-  replicateM_ 100000 $ get k
---  replicateM_ 100000 $ insert $ Person "abc" 22 180
+  let person = Person "abc" 22 180
+  k <- insert $ person
+  replicateM_ 1000000 $ get k
+--  replicateM_ 100000 $ insert person

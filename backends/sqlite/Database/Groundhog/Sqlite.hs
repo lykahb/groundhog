@@ -10,7 +10,7 @@ module Database.Groundhog.Sqlite
 
 import Database.Groundhog
 import Database.Groundhog.Core
-import Database.Groundhog.Generic
+import Database.Groundhog.Generic hiding (cName)
 import Database.Groundhog.Generic.Sql.String
 
 import qualified Database.Sqlite as S
@@ -29,6 +29,7 @@ import Data.List (group, intercalate)
 import Data.IORef
 import qualified Data.Map as Map
 import Data.Pool
+import Data.String (fromString)
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 data Sqlite = Sqlite S.Database (IORef (Map.Map String S.Statement))
@@ -57,8 +58,6 @@ instance MonadControlIO m => PersistBackend (DbPersist Sqlite m) where
 
   insertList l = insertList' l
   getList k = getList' k
-  insertTuple t ts = insertTuple' t ts
-  getTuple t k = getTuple' t k
 
 --{-# SPECIALIZE withSqlitePool :: String -> Int -> (Pool Sqlite -> IO a) -> IO a #-}
 withSqlitePool :: MonadControlIO m
@@ -161,7 +160,8 @@ migrate' = migrateRecursively migE migT migL where
                 return $ Left ["Migration from one constructor to many will be implemented soon. Datatype: " ++ name]
             
   -- we don't need any escaping because tuple table name and fields are always valid
-  migT n ts = do
+  migT _ _ = return $ Right []
+  {-migT n ts =  do
     let name = intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts
     let fields = zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
     (_, trigger) <- migTriggerOnDelete name $ mkDeletesOnDelete fields
@@ -173,17 +173,18 @@ migrate' = migrateRecursively migE migT migL where
       Just sql -> if sql == query
         then Right []
         else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ sql]
-
+  -}
   -- we should consider storing tuples as is, not their id. For example for [(a, b)] this will prevent many unnecessary queries
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
+    let valueCols = mkColumns "value" t
     let mainQuery = "CREATE TABLE " ++ mainName ++ " (id$ INTEGER PRIMARY KEY)"
-    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL" ++ sqlColumn "value" (getType t) ++ ")"
+    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL" ++ concatMap sqlColumn valueCols ++ ")"
     x <- checkTable mainName
     y <- checkTable valuesName
     (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
-    (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
+    (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete valueCols
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ a ++ ". Found: " ++ b] else []
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)], triggerMain, triggerValues]
@@ -196,9 +197,10 @@ migConstrAndTrigger :: MonadControlIO m => Bool -> String -> ConstructorDef -> D
 migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
   (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
-  let dels = mkDeletesOnDelete $ constrParams constr
+  let columns = concatMap (uncurry mkColumns) $ constrParams constr
+  let dels = mkDeletesOnDelete columns
   (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
-  let updDels = mkDeletesOnUpdate $ constrParams constr
+  let updDels = mkDeletesOnUpdate columns
   updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) updDels
   return $ if constrExisted == triggerExisted || (constrExisted && null dels)
     then (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
@@ -207,10 +209,10 @@ migConstrAndTrigger simple name constr = do
 
 migConstr :: MonadControlIO m => Maybe String -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstr mainTableName cName constr = do
-  let fields = constrParams constr
+  let fields = concatMap (uncurry mkColumns) $ constrParams constr
   let uniques = constrConstrs constr
   let mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
-  let query = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " INTEGER PRIMARY KEY" ++ mainRef ++ concatMap (\(n, t) -> sqlColumn n (getType t)) fields ++ concatMap sqlUnique uniques ++ ")"
+  let query = "CREATE TABLE " ++ escape cName ++ " (" ++ constrId ++ " INTEGER PRIMARY KEY" ++ mainRef ++ concatMap sqlColumn fields ++ concatMap sqlUnique uniques ++ ")"
   x <- checkTable cName
   return $ case x of
     Nothing  -> (False, Right [(False, defaultPriority, query)])
@@ -248,33 +250,21 @@ migTriggerOnUpdate name fieldName del = do
 
 -- on delete removes all ephemeral data
 -- TODO: merge several delete queries for a case when a constructor has several fields of the same ephemeral type
-mkDeletesOnDelete :: [(String, NamedType)] -> [String]
-mkDeletesOnDelete types = map (uncurry delField) ephemerals where
-  -- we have the same query structure for tuples and lists
-  delField field t = "DELETE FROM " ++ ephemeralTableName ++ " WHERE id$=old." ++ escape field ++ ";" where
-    ephemeralTableName = go t
-    go a = case getType a of
-      DbMaybe x -> go x
-      _         -> getName a
-  ephemerals = filter (isEphemeral.snd) types
+mkDeletesOnDelete :: [Column] -> [String]
+mkDeletesOnDelete columns = map delField ephemerals where
+  delField (Column name _ _ _ (Just ref)) = "DELETE FROM " ++ ref ++ " WHERE id$=old." ++ escape name ++ ";"
+  ephemerals = filter (isEphemeral . cType) columns
   
 -- on delete removes all ephemeral data
-mkDeletesOnUpdate :: [(String, NamedType)] -> [(String, String)]
-mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
-  -- we have the same query structure for tuples and lists
-  delField field t = (field, "DELETE FROM " ++ ephemeralTableName ++ " WHERE id$=old." ++ escape field ++ ";") where
-    ephemeralTableName = go t
-    go a = case getType a of
-      DbMaybe x -> go x
-      _         -> getName a
-  ephemerals = filter (isEphemeral . snd) types
+mkDeletesOnUpdate :: [Column] -> [(String, String)]
+mkDeletesOnUpdate columns = map delField ephemerals where
+  delField (Column name _ _ _ (Just ref)) = (name, "DELETE FROM " ++ ref ++ " WHERE id$=old." ++ escape name ++ ";")
+  ephemerals = filter (isEphemeral . cType) columns
 
-isEphemeral :: NamedType -> Bool
-isEphemeral a = case getType a of
-  DbMaybe x   -> isEphemeral x
-  DbList _    -> True
-  DbTuple _ _ -> True
-  _           -> False
+isEphemeral :: DbType -> Bool
+isEphemeral (DbMaybe x) = isEphemeral (getType x)
+isEphemeral (DbList _) = True
+isEphemeral _ = False
 
 checkTrigger :: MonadControlIO m => String -> DbPersist Sqlite m (Maybe String)
 checkTrigger = checkSqliteMaster "trigger"
@@ -332,16 +322,13 @@ prim         -> name type NOT NULL
 comp         -> name type NOT NULL REFERENCES table
 DbMaybe comp -> name type REFERENCES table
 -}
-
-sqlColumn :: String -> DbType -> String
-sqlColumn name typ = ", " ++ escape name ++ " " ++ showSqlType typ ++ reference where
-  (isNullable, reference) = case typ of
-    (DbMaybe t) -> (True, g (getType t))
-    t           -> (False, " NOT NULL" ++ g t)
-  g (DbEntity t) = " REFERENCES " ++ escape (getEntityName t) ++ (if isNullable then " ON DELETE SET NULL" else "")
-  g (DbTuple n ts) = " REFERENCES " ++ (intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts)
-  g (DbList t) = " REFERENCES " ++ "List$$" ++ getName t
-  g _ = ""
+sqlColumn :: Column -> String
+sqlColumn (Column name isNull typ _ ref) = ", " ++ escape name ++ " " ++ showSqlType typ ++ rest where
+  rest = case (isNull, ref) of
+    (False, Nothing) -> " NOT NULL"
+    (False, Just ref') -> " NOT NULL REFERENCES " ++ escape ref'
+    (True, Nothing) -> ""
+    (True, Just ref') -> " REFERENCES " ++ escape ref' ++ " ON DELETE SET NULL"
 
 sqlUnique :: Constraint -> String
 sqlUnique (cname, cols) = concat
@@ -352,6 +339,14 @@ sqlUnique (cname, cols) = concat
     , ")"
     ]
 
+{-allColumns :: ConstructorDef -> String
+allColumns constr = go "" $ constrParams constr where
+  go :: String -> [(String, NamedType)] -> String
+  go acc [] = acc
+  go acc ((name, typ):xs) = case typ of
+    DbTuple _ ts -> 
+    _ -> (name ++) . acc
+-}
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Sqlite IO (Key v) #-}
 {-# INLINE insert' #-}
 insert' :: (PersistEntity v, MonadControlIO m) => v -> DbPersist Sqlite m (Key v)
@@ -382,8 +377,9 @@ insert' v = do
 -- in Sqlite we can insert null to the id column. If so, id will be generated automatically
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> String
 insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(" ++ fieldNames ++ ")VALUES(" ++ placeholders ++ ")" where
-  fieldNames   = intercalate "," $ (if withId then (constrId:) else id) $ map (escape.fst) (constrParams c)
-  placeholders = intercalate "," $ (if withId then ("?":) else id) $ map (const "?") (constrParams c)
+  fields = if withId then (constrId, namedType (0 :: Int64)):constrParams c else constrParams c
+  fieldNames   = fromStringS (renderFields escapeS fields) ""
+  placeholders = fromStringS (renderFields (const $ fromChar '?') fields) ""
 
 {-# SPECIALIZE insertBy' :: PersistEntity v => v -> DbPersist Sqlite IO (Either (Key v) (Key v)) #-}
 insertBy' :: (MonadControlIO m, PersistEntity v) => v -> DbPersist Sqlite m (Either (Key v) (Key v))
@@ -434,7 +430,7 @@ replace' k v = do
   let constructorNum = fromPrim (head vals)
   let constr = constructors e !! constructorNum
 
-  let upds = intercalate "," $ map (\f -> escape (fst f) ++ "=?") $ constrParams constr
+  let upds = fromStringS (renderFields (\f -> f <> "=?") $ constrParams constr) ""
   let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ upds ++ " WHERE " ++ constrId ++ "=?"
 
   if isSimple (constructors e)
@@ -482,7 +478,7 @@ selectEnum' (cond :: Cond v c) ords limit offset = start where
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
   conds' = renderCond' cond
-  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
+  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim) ""
   binds = getValues conds' limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
   types = DbInt64:getConstructorTypes constr
@@ -522,7 +518,7 @@ select' (cond :: Cond v c) ords limit offset = start where
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
   conds' = renderCond' cond
-  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim)
+  mkQuery tname = "SELECT * FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery conds' <> orders <> lim) ""
   doSelectQuery query cNum = queryRawTyped query types binds $ mapAllRows (mkEntity cNum)
   binds = getValues conds' limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
@@ -544,32 +540,6 @@ selectAll' = start where
   e = entityDef (undefined :: v)
   name = getEntityName e
 
-{-
-insertList :: PersistField a => [a] -> DbPersist conn m Int64
-insertList xs = do
-  xs' <- mapM toPersistValue xs
-  let name = persistName xs
-  let query = "INSERT INTO " ++ name ++ " ("
-  getStatement 
--}
-
-insertTuple' :: MonadIO m => NamedType -> [PersistValue] -> DbPersist Sqlite m Int64
-insertTuple' t vals = do
-  let name = getName t
-  let (DbTuple _ ts) = getType t
-  let fields = map (\i -> "val" ++ show i) [0 .. length ts - 1] 
-  let query = "INSERT INTO " ++ name ++ " (" ++ intercalate ", " fields ++ ")VALUES(" ++ intercalate ", " (replicate (length ts) "?") ++ ")"
-  executeRawCached' query vals
-  getLastInsertRowId
-
-getTuple' :: MonadControlIO m => NamedType -> Int64 -> DbPersist Sqlite m [PersistValue]
-getTuple' t k = do
-  let name = getName t
-  let (DbTuple _ ts) = getType t
-  let query = "SELECT * FROM " ++ name ++ " WHERE id$=?"
-  x <- queryRawTyped query (DbInt64:map getType ts) [toPrim k] firstRow
-  maybe (fail $ "No tuple with id " ++ show k) (return . tail) x
-
 {-# SPECIALIZE get' :: PersistEntity v => Key v -> DbPersist Sqlite IO (Maybe v) #-}
 {-# INLINE get' #-}
 get' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Sqlite m (Maybe v)
@@ -579,7 +549,8 @@ get' (k :: Key v) = do
   if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let query = "SELECT * FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
+      let fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
+      let query = fromStringS ("SELECT " <> fields) $ "FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
       x <- queryRawTyped query (DbInt64:getConstructorTypes constr) [toPrim k] firstRow
       case x of
         Just (_:xs) -> liftM Just $ fromPersistValues $ PersistInt64 0:xs
@@ -593,7 +564,8 @@ get' (k :: Key v) = do
           let constructorNum = fromPrim discr
           let constr = constructors e !! constructorNum
           let cName = name ++ [defDelim] ++ constrName constr
-          let cQuery = "SELECT * FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
+          let fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
+          let cQuery = fromStringS ("SELECT " <> fields) $ "FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
           x2 <- queryRawTyped cQuery (DbInt64:getConstructorTypes constr) [toPrim k] firstRow
           case x2 of
             Just (_:xs) -> liftM Just $ fromPersistValues $ discr:xs
@@ -608,7 +580,7 @@ update' upds (cond :: Cond v c) = do
   let name = getEntityName e
   let conds' = renderCond' cond
   let upds' = renderUpdates escape upds
-  let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ fromStringS (getQuery upds' <> " WHERE " <> getQuery conds')
+  let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ fromStringS (getQuery upds' <> " WHERE " <> getQuery conds') ""
   let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
   executeRawCached' (mkQuery qName) (getValues upds' <> getValues conds' $ [])
 
@@ -619,11 +591,11 @@ delete' (cond :: Cond v c) = do
   let name = getEntityName e
   if isSimple (constructors e)
     then do
-      let query = "DELETE FROM " ++ escape name ++ " WHERE " ++ fromStringS (getQuery cond')
+      let query = "DELETE FROM " ++ escape name ++ " WHERE " ++ fromStringS (getQuery cond') ""
       executeRawCached' query (getValues cond' [])
     else do
       let cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-      let query = "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ " WHERE " ++ fromStringS (getQuery cond') ++ ")"
+      let query = "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ " WHERE " ++ fromStringS (getQuery cond') ")"
       -- the entries in the constructor table are deleted because of the reference on delete cascade
       executeRawCached' query (getValues cond' [])
       
@@ -637,10 +609,14 @@ deleteByKey' (k :: Key v) = do
 {-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite IO Int #-}
 count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m Int
 count' (cond :: Cond v c) = do
-  let cName = persistName (undefined :: v) ++ [defDelim] ++ phantomConstrName (undefined :: c)
+  let e = entityDef (undefined :: v)
   let cond' = renderCond' cond
-  let query = "SELECT COUNT(*) FROM " ++ cName ++ " WHERE " ++ fromStringS (getQuery cond')
-  x <- queryRawTyped query [DbInt64] (getValues cond' []) firstRow
+  let name = getEntityName e
+  let tname = if isSimple (constructors e)
+       then name
+       else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
+  let query = "SELECT COUNT(*) FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery cond') ""
+  x <- queryRawCached' query (getValues cond' []) firstRow
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -656,18 +632,20 @@ countAll' (_ :: v) = do
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
-    
+
+-- TODO: support multiple columns for field
 insertList' :: forall m a.(MonadControlIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
 insertList' l = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   executeRaw True ("INSERT INTO " ++ mainName ++ " DEFAULT VALUES") []
   k <- getLastInsertRowId
   let valuesName = mainName ++ "$" ++ "values"
-  let query = "INSERT INTO " ++ valuesName ++ "(id$,ord$,value)VALUES(?,?,?)"
+  let fields = [("ord$", namedType (0 :: Int)), ("value", namedType (undefined :: a))]
+  let query = "INSERT INTO " ++ escape valuesName ++ "(id$," ++ fromStringS (renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields) ")"
   let go :: Int -> [a] -> DbPersist Sqlite m ()
       go n (x:xs) = do
        x' <- toPersistValue x
-       executeRaw True query [toPrim k, toPrim n, x']
+       executeRaw True query $ (toPrim k:) . (toPrim n:) . x' $ []
        go (n + 1) xs
       go _ [] = return ()
   go 0 l
@@ -677,7 +655,10 @@ getList' :: forall m a.(MonadControlIO m, PersistField a) => Int64 -> DbPersist 
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   let valuesName = mainName ++ "$values"
-  queryRawTyped ("SELECT value FROM " ++ valuesName ++ " WHERE id$=? ORDER BY ord$") [dbType (undefined :: a)] [toPrim k] $ mapAllRows (fromPersistValue.head)
+  let value = ("value", namedType (undefined :: a))
+  let query = fromStringS ("SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS (fromString valuesName)) " WHERE id$=? ORDER BY ord$"
+  -- TODO: put proper types
+  queryRawTyped query (getDbTypes (namedType (undefined :: a)) []) [toPrim k] $ mapAllRows (liftM fst . fromPersistValue)
     
 {-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO Int64 #-}
 getLastInsertRowId :: MonadIO m => DbPersist Sqlite m Int64
@@ -790,7 +771,12 @@ typeToSqlite (DbTuple _ _) = Just S.IntegerColumn
 typeToSqlite (DbEntity _) = Just S.IntegerColumn
 
 getConstructorTypes :: ConstructorDef -> [DbType]
-getConstructorTypes = map (getType.snd) . constrParams
+getConstructorTypes = foldr getDbTypes [] . map snd . constrParams where
+
+getDbTypes :: NamedType -> [DbType] -> [DbType]
+getDbTypes typ acc = case getType typ of
+  DbTuple _ ts -> foldr getDbTypes acc ts
+  t            -> t:acc
 
 firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
 firstRow pop = pop >>= return
@@ -809,6 +795,9 @@ pFromSql (S.SQLNull)      = PersistNull
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String
 escape s = '\"' : s ++ "\""
+
+escapeS :: StringS -> StringS
+escapeS a = let q = fromChar '"' in q <> a <> q
 
 renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> RenderS StringS
 renderCond' = renderCond escape constrId renderEquals renderNotEquals where

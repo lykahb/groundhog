@@ -13,6 +13,8 @@ module Database.Groundhog.Generic
   , defaultMigrationLogger
   , defaultSelect
   , defaultSelectAll
+  , Column(..)
+  , mkColumns
   ) where
 
 import Database.Groundhog.Core
@@ -138,3 +140,25 @@ defaultSelectAll = do
     case res of
         Left e -> error $ show e
         Right x -> return x
+
+data Column = Column
+    { cName :: String
+    , cNull :: Bool
+    , cType :: DbType
+    , cDefault :: Maybe String
+    , cReference :: Maybe String -- table name
+    } deriving (Eq, Show)
+
+mkColumns :: String -> NamedType -> [Column]
+mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
+  go prefix (fname, typ) acc = case getType typ of
+    DbTuple _ ts -> foldr (go $ prefix ++ fname ++ "$") acc $ zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
+    _            -> column:acc where
+      column = Column (prefix ++ fname) isNullable simpleType Nothing ref
+      (isNullable, simpleType, ref) = analyze typ
+      analyze x = case getType x of
+        DbMaybe a   -> let (_, t', ref') = analyze a in (True, t', ref')
+        DbEntity _  -> (False, DbInt32, Just $ getName x)
+        DbList _    -> (False, DbInt32, Just $ getName x)
+        DbTuple _ _ -> error "mkColumn: unexpected DbTuple"
+        a           -> (False, a, Nothing)

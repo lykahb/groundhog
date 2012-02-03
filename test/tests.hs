@@ -21,12 +21,16 @@ import qualified Test.HUnit as H
 import Prelude hiding (catch)
 
 data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, word16 :: Word16, int32 :: Int32, word32 :: Word32, int64 :: Int64, word64 :: Word64} deriving (Eq, Show)
+data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
 data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
+data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String), refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String))}
 
 deriveEntity ''Number Nothing
+deriveEntity ''MaybeContext Nothing
 deriveEntity ''Single Nothing
 deriveEntity ''Multi Nothing
+deriveEntity ''Keys Nothing
 
 main :: IO ()
 main = do
@@ -52,10 +56,14 @@ mkTestSuite label run = testGroup label $
   , testCase "testDeleteByKey" $ run testDeleteByKey
   , testCase "testReplaceSingle" $ run testReplaceSingle
   , testCase "testReplaceMulti" $ run testReplaceMulti
+  , testCase "testTuple" $ run testTuple
+  , testCase "testTupleList" $ run testTupleList
+  {-
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testTupleTriggersOnDelete" $ run testTupleTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   , testCase "testTupleTriggersOnUpdate" $ run testTupleTriggersOnUpdate
+  -}
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
   , testCase "testMigrateAddConstructorToMany" $ run testMigrateAddConstructorToMany
   , testCase "testReference" $ run testReference
@@ -84,8 +92,8 @@ testNumber = do
   let maxNumber = Number maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound
   minNumber' <- insert minNumber >>= get
   maxNumber' <- insert maxNumber >>= get
-  minNumber' @=? Just minNumber
-  maxNumber' @=? Just maxNumber
+  Just minNumber @=? minNumber'
+  Just maxNumber @=? maxNumber'
 
 testInsert :: (PersistBackend m, MonadControlIO m) => m ()
 testInsert = do
@@ -104,15 +112,36 @@ testCount = do
   2 @=? num
   num2 <- count $ SecondField ==. "abc"
   1 @=? num2
+  migr (undefined :: Single String)
+  insert $ Single "abc"
+  num3 <- count (SingleField ==. "abc")
+  1 @=? num3
 
 testEncoding :: (PersistBackend m, MonadControlIO m) => m ()
 testEncoding = do
   migr (undefined :: Single String)
   let val = Single "\x0001\x0081\x0801\x10001"
   k <- insert val
-  Just val' <- get k
-  val @=? val'
+  val' <- get k
+  Just val @=? val'
 
+testTuple :: (PersistBackend m, MonadControlIO m) => m ()
+testTuple = do
+  let val = Single ("abc", ("def", 5 :: Int))
+  migr val
+  k <- insert val
+  val' <- get k
+  Just val @=? val'
+
+testTupleList :: (PersistBackend m, MonadControlIO m) => m ()
+testTupleList = do
+  let val = Single [("abc", 4), ("def", 5)] :: Single [(String, Int)]
+  migr val
+  k <- insert val
+  val' <- get k
+  Just val @=? val'
+  
+{-
 testListTriggersOnDelete :: (PersistBackend m, MonadControlIO m) => m ()
 testListTriggersOnDelete = do
   migr (undefined :: Single [(Int, Int)])
@@ -178,7 +207,7 @@ testTupleTriggersOnUpdate = do
   Nothing @=? listMain
   listValues <- queryRaw False "select * from \"List$$String$values\" where id$=?" [listInsideTupleKey] firstRow
   Nothing @=? listValues
-
+-}
 testDelete :: (PersistBackend m, MonadControlIO m) => m ()
 testDelete = do
   migr (undefined :: Multi String)
@@ -269,6 +298,15 @@ testMaybeReference = do
   deleteByKey (fromPrim valueKey' :: Key (Single String))
   val' <- get k
   Just (Single Nothing) @=? val'
+
+-- This test must just compile
+testKeys :: (PersistBackend m, MonadControlIO m) => m ()
+testKeys = do
+  migr (undefined :: Keys)
+  k <- insert $ Single ""
+  let cond = RefDirectField ==. k ||. RefKeyField ==. wrapPrim k ||. RefDirectMaybeField ==. Just k ||. RefKeyMaybeField ==. wrapPrim (Just k)
+  select cond [] 0 0
+  return ()
   
 -- TODO: write test which inserts data before adding new columns
 

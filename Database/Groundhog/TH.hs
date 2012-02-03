@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse #-}
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
@@ -18,10 +18,10 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core(PersistEntity(..), PersistField(..), NeverNull, Primitive(toPrim), PersistBackend(..), DbType(DbEntity), Constraint, Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..))
+import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), Primitive(..), PersistBackend(..), DbType(DbEntity), Constraint, Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), failMessage)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax(StrictType, VarStrictType)
-import Control.Monad(liftM, forM, forM_)
+import Control.Monad(liftM, forM, forM_, foldM)
 import Control.Monad.Trans.State(State, runState, modify)
 import Data.Char(toUpper, toLower, isSpace)
 import Data.List(nub, (\\))
@@ -272,6 +272,7 @@ mkDecs def = do
     [ mkPhantomConstructors def
     , mkPhantomConstructorInstances def
     , mkPersistFieldInstance def
+    , mkSinglePersistFieldInstance def
     , mkPersistEntityInstance def
     ]
 --  runIO $ putStrLn $ pprint decs
@@ -310,7 +311,8 @@ mkPersistEntityInstance def = do
         let fname = dbFieldName f
         let nvar = if hasFreeVars (fieldType f)
              then let pat = conP (thConstrName c) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrParams c) - fNum - 1) wildP
-                  in caseE (varE v) [match pat (normalB $ varE a) [], match wildP (normalB [| undefined |]) []]
+                      wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
+                  in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
              else [| undefined :: $(return $ fieldType f) |]
         [| (fname, namedType $nvar) |]
          
@@ -319,11 +321,20 @@ mkPersistEntityInstance def = do
     funD 'entityDef $ [ clause [varP v] body [] ]
 
   toPersistValues' <- liftM (FunD 'toPersistValues) $ forM (zip [0..] $ thConstructors def) $ \(cNum, c) -> do
-    names <- mapM (const $ newName "f") $ thConstrParams c
-    let pat = conP (thConstrName c) (map varP names)
-    let body = normalB $ [| sequence $(listE $ map (appE (varE 'toPersistValue)) ([|cNum::Int|]:map varE names) ) |]
-    clause [pat] body []
-  
+    vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ thConstrParams c
+    let pat = conP (thConstrName c) $ map (varP . fst) vars
+    (lastPrims, fields) <- spanM (isPrim . snd) $ reverse vars
+    let lastPrims' = map (appE (varE 'toPrim) . varE . fst) $ reverse $ lastPrims
+    let body = if null fields
+        then [| return $ $(listE $ [|toPrim (cNum :: Int)|]:lastPrims') |]
+        else do
+          let go (m, f) (fname, t) = isPrim t >>= \isP -> if isP
+              then return (m, [| (toPrim $(varE fname):) |]:f)
+              else newName "x" >>= \x -> return (bindS (varP x) [| toPersistValue $(varE fname) |]:m, varE x:f)
+          (stmts, func) <- foldM go ([], []) fields        -- foldM puts reversed fields in normal order
+          doE $ stmts ++ [noBindS [| return $ (toPrim (cNum :: Int):) . $(foldr1 (\a b -> [|$a . $b|]) func) $ $(listE lastPrims') |]]
+    clause [pat] (normalB body) []
+{-  
   fromPersistValues' <- do
     clauses <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
       names <- mapM (const $ newName "x") $ thConstrParams c
@@ -335,6 +346,37 @@ mkPersistEntityInstance def = do
       clause [pat] body []
     unexpected <- newName "xs" >>= \xs -> clause [varP xs] (normalB [| fail $ "Invalid values: " ++ show $(varE xs) |]) []
     return $ FunD 'fromPersistValues $ clauses ++ [unexpected]
+  -}  
+  fromPersistValues' <- let
+    goField xs vars result failure = do
+      (fields, rest) <- spanM (liftM not . isPrim . snd) vars
+      xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
+      let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValue $(varE oldXs) |]
+      let stmts = zipWith3 f xss (tail xss) fields
+      doE $ stmts ++ [noBindS $ goPrim (last xss) rest result failure]
+    goPrim xs vars result failure = do
+      xs' <- newName "xs"
+      (prim, rest) <- spanM (isPrim . snd) vars
+      let (pat, body') = if null rest then (conP '[] [], result) else (varP xs', goField xs' rest result failure)
+      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []
+      caseE (varE xs) [m, failure]
+    mkArg (fname, t) = isPrim t >>= \isP -> (if isP then appE (varE 'fromPrim) else id) (varE fname)
+    in do
+      xs <- newName "xs"
+      let failureBody = normalB [| (\a -> fail (failMessage a $(varE xs)) >> return a) undefined |]
+      failureName <- newName "failure"
+      let failure = match wildP (normalB $ varE failureName) []
+      matches <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
+        vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ thConstrParams c
+        let result = appE (varE 'return) $ foldl (\a f -> appE a $ mkArg f) (conE $ thConstrName c) vars
+        let cNum' = conP 'PersistInt64 [litP $ integerL cNum]
+        xs' <- newName "xs"
+        (prim, rest) <- spanM (isPrim . snd) vars
+        let (pat, body') = if null rest then (conP '[] [], result) else (varP xs', goField xs' rest result failure)
+        return $ match (infixP cNum' '(:) $ foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []
+      let start = caseE (varE xs) $ matches ++ [failure]
+      let failureFunc = funD failureName [clause [] failureBody []]
+      funD 'fromPersistValues [clause [varP xs] (normalB start) [failureFunc]]
   
   getConstraints' <- let
     hasConstraints = not . null . thConstrConstrs
@@ -342,7 +384,7 @@ mkPersistEntityInstance def = do
     mkClause cNum cdef | not (hasConstraints cdef) = clause [conP (thConstrName cdef) pats] (normalB [| (cNum, []) |]) [] where
       pats = map (const wildP) $ thConstrParams cdef
     mkClause cNum cdef = clause [conP (thConstrName cdef) (map varP names)] body [] where
-      getFieldName n = case filter ((==n).dbFieldName) $ thConstrParams cdef of
+      getFieldName n = case filter ((== n) . dbFieldName) $ thConstrParams cdef of
         [f] -> varE $ mkName $ fieldName f
         []  -> error $ "Database field name " ++ show n ++ " declared in constraint not found"
         _   -> error $ "It can never happen. Found several fields with one database name " ++ show n
@@ -351,11 +393,11 @@ mkPersistEntityInstance def = do
     in funD 'getConstraints clauses
   
   showField' <- do
-    let fields = concatMap thConstrParams $ thConstructors def
-    funD 'showField $ map (\f -> clause [conP (mkName $ exprName f) []] (normalB $ stringE $ dbFieldName f)[] ) fields
+    let fields = thConstructors def >>= thConstrParams
+    funD 'showField $ map (\f -> clause [conP (mkName $ exprName f) []] (normalB $ stringE $ dbFieldName f) []) fields
 
   eqField' <- let
-    fieldNames = thConstructors def >>= thConstrParams >>= return.mkName.exprName
+    fieldNames = thConstructors def >>= thConstrParams >>= return . mkName . exprName
     clauses = map (\n -> clause [conP n [], conP n []] (normalB [| True |]) []) fieldNames
     in funD 'eqField $ if length clauses > 1
      then clauses ++ [clause [wildP, wildP] (normalB [| False |]) []]
@@ -382,20 +424,38 @@ mkPersistFieldInstance def = do
     funD 'persistName $ [ clause [varP v] body [] ]
   
   toPersistValue' <- do
-    let body = normalB [| liftM (either toPrim toPrim) . insertBy |]
+    let body = normalB [| liftM (:) . toSinglePersistValue |]
     funD 'toPersistValue $ [ clause [] body [] ]
   fromPersistValue' <- do
     x <- newName "x"
-    let body = normalB [| fromPersistValue $(varE x) >>= get >>= maybe (fail $ "No data with id " ++ show $(varE x)) return |]
-    funD 'fromPersistValue $ [ clause [varP x] body [] ]
+    xs <- newName "xs"
+    let body = normalB [| fromSinglePersistValue $(varE x) >>= \a -> return (a, $(varE xs)) |]
+    funD 'fromPersistValue $ [ clause [infixP (varP x) '(:) (varP xs)] body [], clause [wildP] (normalB [| error "fromPersistValue: empty list" |]) [] ]
   dbType' <- funD 'dbType $ [ clause [] (normalB [| DbEntity . entityDef |]) [] ]
 
   let context = paramsContext def
   let decs = [persistName', toPersistValue', fromPersistValue', dbType']
   return $ [InstanceD context (AppT (ConT ''PersistField) entity) decs]
 
+mkSinglePersistFieldInstance :: THEntityDef -> Q [Dec]
+mkSinglePersistFieldInstance def = do
+  let types = map getType $ thTypeParams def
+  let entity = foldl AppT (ConT (dataName def)) types
+
+  toSinglePersistValue' <- do
+    let body = normalB [| liftM (either toPrim toPrim) . insertBy |]
+    funD 'toSinglePersistValue $ [ clause [] body [] ]
+  fromSinglePersistValue' <- do
+    x <- newName "x"
+    let body = normalB [| get (fromPrim $(varE x)) >>= maybe (fail $ "No data with id " ++ show $(varE x)) return |]
+    funD 'fromSinglePersistValue $ [ clause [varP x] body []]
+
+  let context = paramsContext def
+  let decs = [toSinglePersistValue', fromSinglePersistValue']
+  return $ [InstanceD context (AppT (ConT ''SinglePersistField) entity) decs]
+
 paramsContext :: THEntityDef -> Cxt
-paramsContext def = classPred ''PersistField params ++ classPred ''NeverNull maybys where
+paramsContext def = classPred ''PersistField params ++ classPred ''SinglePersistField maybys where
   classPred clazz = map (\t -> ClassP clazz [t])
   -- every type must be an instance of PersistField
   params = map getType $ thTypeParams def
@@ -407,6 +467,24 @@ paramsContext def = classPred ''PersistField params ++ classPred ''NeverNull may
 getType :: TyVarBndr -> Type
 getType (PlainTV name) = VarT name
 getType (KindedTV name _) = VarT name
+
+{-
+isPrim :: Type -> Q Bool
+isPrim t | hasFreeVars t = return False
+         | otherwise = isClassInstance ''Primitive [t] >>= \b -> runIO (print t >> print b) >> return b
+-}
+
+isPrim :: Type -> Q Bool
+-- we cannot use simply isClassInstance because it crashes on type vars and in this case
+-- class Primitive a
+-- instance Primitive Int
+-- instance Primitive a => Maybe a
+-- it will consider (Maybe anytype) instance of Primitive
+isPrim t | hasFreeVars t = return False
+isPrim t@(ConT _) = isClassInstance ''Primitive [t]
+isPrim (AppT (ConT key) _)  | key == ''Key = return True
+isPrim (AppT (ConT tcon) t) | tcon == ''Maybe = isPrim t
+isPrim _ = return False
 
 foldType :: (Type -> a) -> (a -> a -> a) -> Type -> a
 foldType f (<>) = go where
@@ -424,3 +502,13 @@ insideMaybe :: Type -> [Type]
 insideMaybe = foldType f (++) where
   f (AppT (ConT c) t@(VarT _)) | c == ''Maybe = [t]
   f _ = []
+
+spanM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
+spanM p = go  where
+  go [] = return ([], [])
+  go (x:xs) = do
+    flg <- p x
+    if flg then do
+        (ys, zs) <- go xs
+        return (x:ys, zs)
+      else return ([], x:xs)

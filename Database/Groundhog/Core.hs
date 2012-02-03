@@ -8,6 +8,7 @@ module Database.Groundhog.Core
     PersistEntity(..)
   , PersistValue(..)
   , PersistField(..)
+  , SinglePersistField(..)
   , Key(..)
   -- * Constructing expressions
   -- $exprDoc
@@ -20,7 +21,6 @@ module Database.Groundhog.Core
   , Primitive(..)
   , HasOrder
   , Numeric
-  , NeverNull
   , Arith(..)
   , Expr(..)
   , Order(..)
@@ -43,10 +43,11 @@ module Database.Groundhog.Core
   , RowPopper
   , DbPersist(..)
   , runDbPersist
+  -- * Other
+  , failMessage
   ) where
 
 import Control.Applicative(Applicative)
-import Control.Monad(liftM, liftM2, liftM3, liftM4, liftM5)
 import Control.Monad.Trans.Class(MonadTrans(..))
 import Control.Monad.IO.Class(MonadIO(..))
 import Control.Monad.IO.Control (MonadControlIO)
@@ -253,9 +254,6 @@ class Monad m => PersistBackend m where
                 -> [PersistValue] -- ^ positional parameters
                 -> (RowPopper m -> m a) -- ^ results processing function
                 -> m a
-  -- TODO: we need to supply names of the tables or other info
-  insertTuple   :: NamedType -> [PersistValue] -> m Int64
-  getTuple      :: NamedType -> Int64 -> m [PersistValue]
   insertList    :: PersistField a => [a] -> m Int64
   getList       :: PersistField a => Int64 -> m [a]
   
@@ -430,13 +428,21 @@ class PersistField a where
   persistName :: a -> String
   -- | Convert a value into something which can be stored in a database column.
   -- Note that for complex datatypes it may insert them to return identifier
-  toPersistValue :: PersistBackend m => a -> m PersistValue
+  toPersistValue :: PersistBackend m => a -> m ([PersistValue] -> [PersistValue])
   -- | Constructs a value from a 'PersistValue'. For complex datatypes it may query the database
-  fromPersistValue :: PersistBackend m => PersistValue -> m a
+  fromPersistValue :: PersistBackend m => [PersistValue] -> m (a, [PersistValue])
   -- | Description of value type
   dbType :: a -> DbType
 
+class PersistField a => SinglePersistField a where
+  toSinglePersistValue :: PersistBackend m => a -> m PersistValue
+  fromSinglePersistValue :: PersistBackend m => PersistValue -> m a
+
 ---- INSTANCES
+
+instance (Primitive a, PersistField a) => SinglePersistField a where
+  toSinglePersistValue = return . toPrim
+  fromSinglePersistValue = return . fromPrim
 
 instance Numeric Int
 instance Numeric Int8
@@ -578,11 +584,6 @@ instance NeverNull Day
 instance NeverNull TimeOfDay
 instance NeverNull UTCTime
 instance NeverNull (Key a)
-instance NeverNull [a]
-instance NeverNull (a, b)
-instance NeverNull (a, b, c)
-instance NeverNull (a, b, c, d)
-instance NeverNull (a, b, c, d, e)
 instance PersistEntity a => NeverNull a
 
 instance Expression (Expr v c a) where
@@ -675,167 +676,200 @@ readHelper s errMessage = case s of
       (a, _):_ -> a
       _        -> error errMessage
 
+failMessage :: PersistField a => a -> [PersistValue] -> String
+failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs
+
+primFromPersistValue :: (PersistBackend m, PersistField a, Primitive a) => [PersistValue] -> m (a, [PersistValue])
+primFromPersistValue (x:xs) = return (fromPrim x, xs)
+primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
+--primFromPersistValue [] = fail "primFromPersistValue: empty list"
+
 instance PersistField ByteString where
   persistName _ = "ByteString"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbBlob
 
 instance PersistField String where
   persistName _ = "String"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbString
 
 instance PersistField T.Text where
   persistName _ = "Text"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbString
 
 instance PersistField Int where
   persistName _ = "Int"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType a = if bitSize a == 32 then DbInt32 else DbInt64
 
 instance PersistField Int8 where
   persistName _ = "Int8"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt32
 
 instance PersistField Int16 where
   persistName _ = "Int16"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt32
 
 instance PersistField Int32 where
   persistName _ = "Int32"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt32
 
 instance PersistField Int64 where
   persistName _ = "Int64"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt64
 
 instance PersistField Word8 where
   persistName _ = "Word8"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt32
 
 instance PersistField Word16 where
   persistName _ = "Word16"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt32
 
 instance PersistField Word32 where
   persistName _ = "Word32"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt64
 
 instance PersistField Word64 where
   persistName _ = "Word64"
-  toPersistValue = return . toPrim
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (toPrim a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbInt64
 
 instance PersistField Double where
   persistName _ = "Double"
-  toPersistValue = return . PersistDouble
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (PersistDouble a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbReal
 
 instance PersistField Bool where
   persistName _ = "Bool"
-  toPersistValue = return . PersistBool
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (PersistBool a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbBool
 
 instance PersistField Day where
   persistName _ = "Day"
-  toPersistValue = return . PersistDay
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (PersistDay a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbDay
 
 instance PersistField TimeOfDay where
   persistName _ = "TimeOfDay"
-  toPersistValue = return . PersistTimeOfDay
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (PersistTimeOfDay a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbTime
 
 instance PersistField UTCTime where
   persistName _ = "UTCTime"
-  toPersistValue = return . PersistUTCTime
-  fromPersistValue = return . fromPrim
+  toPersistValue a = return (PersistUTCTime a:)
+  fromPersistValue = primFromPersistValue
   dbType _ = DbDayTime
 
-instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
+instance SinglePersistField a => PersistField (Maybe a) where
   persistName (_ :: Maybe a) = "Maybe$" ++ persistName (undefined :: a)
-  toPersistValue = maybe (return PersistNull) toPersistValue
-  fromPersistValue PersistNull = return Nothing
-  fromPersistValue x = liftM Just $ fromPersistValue x
+  toPersistValue Nothing = return (PersistNull:)
+  toPersistValue (Just a) = toSinglePersistValue a >>= \x -> return (x:)
+  fromPersistValue [] = fail "fromPersistValue Maybe: empty list"
+  fromPersistValue (PersistNull:xs) = return (Nothing, xs)
+  fromPersistValue (x:xs) = fromSinglePersistValue x >>= \x' -> return (Just x', xs)
   dbType (_ :: Maybe a) = DbMaybe $ namedType (undefined :: a)
   
 instance (PersistEntity a) => PersistField (Key a) where
   persistName (_ :: Key a) = "Key$" ++ persistName (undefined :: a)
-  toPersistValue (Key a) = return $ PersistInt64 a
-  fromPersistValue = return . fromPrim
+  toPersistValue (Key a) = return (PersistInt64 a:)
+  fromPersistValue = primFromPersistValue
   dbType (_ :: Key a) = DbEntity $ entityDef (undefined :: a)
 
 instance (PersistField a) => PersistField [a] where
   persistName (_ :: [a]) = "List$$" ++ persistName (undefined :: a)
   toPersistValue l = insertList l >>= toPersistValue
-  fromPersistValue k = getList (fromPrim k)
+  fromPersistValue [] = fail "fromPersistValue []: empty list"
+  fromPersistValue (x:xs) = getList (fromPrim x) >>= \l -> return (l, xs)
   dbType (_ :: [a]) = DbList $ namedType (undefined :: a)
+
+instance PersistField () where
+  persistName _ = "Unit$"
+  toPersistValue _ = return id
+  fromPersistValue xs = return ((), xs)
+  dbType _ = DbTuple 0 []
 
 instance (PersistField a, PersistField b) => PersistField (a, b) where
   persistName (_ :: (a, b)) = "Tuple2$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b)
-  toPersistValue x@(a, b) = do
-    vals <- sequence [toPersistValue a, toPersistValue b]
-    liftM PersistInt64 $ insertTuple (namedType x) vals 
-  fromPersistValue (PersistInt64 key) = do
-    [a, b] <- getTuple (namedType (undefined :: (a, b))) key
-    liftM2 (,) (fromPersistValue a) (fromPersistValue b)
-  fromPersistValue x = fail $ "Expected Integer(tuple key), received: " ++ show x
+  toPersistValue (a, b) = do
+    a' <- toPersistValue a
+    b' <- toPersistValue b
+    return $ a' . b'
+  fromPersistValue xs = do
+    (a, rest0) <- fromPersistValue xs
+    (b, rest1) <- fromPersistValue rest0
+    return ((a, b), rest1)
   dbType (_ :: (a, b)) = DbTuple 2 [namedType (undefined :: a), namedType (undefined :: b)]
   
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
   persistName (_ :: (a, b, c)) = "Tuple3$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c)
-  toPersistValue x@(a, b, c) = do
-    vals <- sequence [toPersistValue a, toPersistValue b, toPersistValue c]
-    liftM PersistInt64 $ insertTuple (namedType x) vals 
-  fromPersistValue (PersistInt64 key) = do
-    [a, b, c] <- getTuple (namedType (undefined :: (a, b, c))) key
-    liftM3 (,,) (fromPersistValue a) (fromPersistValue b) (fromPersistValue c)
-  fromPersistValue x = fail $ "Expected Integer(tuple key), received: " ++ show x
+  toPersistValue (a, b, c) = do
+    a' <- toPersistValue a
+    b' <- toPersistValue b
+    c' <- toPersistValue c
+    return $ a' . b' . c'
+  fromPersistValue xs = do
+    (a, rest0) <- fromPersistValue xs
+    (b, rest1) <- fromPersistValue rest0
+    (c, rest2) <- fromPersistValue rest1
+    return ((a, b, c), rest2)
   dbType (_ :: (a, b, c)) = DbTuple 3 [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c)]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
   persistName (_ :: (a, b, c, d)) = "Tuple4$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c) ++ "$" ++ persistName (undefined :: d)
-  toPersistValue x@(a, b, c, d) = do
-    vals <- sequence [toPersistValue a, toPersistValue b, toPersistValue c, toPersistValue d]
-    liftM PersistInt64 $ insertTuple (namedType x) vals 
-  fromPersistValue (PersistInt64 key) = do
-    [a, b, c, d] <- getTuple (namedType (undefined :: (a, b, c, d))) key
-    liftM4 (,,,) (fromPersistValue a) (fromPersistValue b) (fromPersistValue c) (fromPersistValue d)
-  fromPersistValue x = fail $ "Expected Integer(tuple key), received: " ++ show x
+  toPersistValue (a, b, c, d) = do
+    a' <- toPersistValue a
+    b' <- toPersistValue b
+    c' <- toPersistValue c
+    d' <- toPersistValue d
+    return $ a' . b' . c' . d'
+  fromPersistValue xs = do
+    (a, rest0) <- fromPersistValue xs
+    (b, rest1) <- fromPersistValue rest0
+    (c, rest2) <- fromPersistValue rest1
+    (d, rest3) <- fromPersistValue rest2
+    return ((a, b, c, d), rest3)
   dbType (_ :: (a, b, c, d)) = DbTuple 4 [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d)]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
   persistName (_ :: (a, b, c, d, e)) = "Tuple5$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c) ++ "$" ++ persistName (undefined :: d) ++ "$" ++ persistName (undefined :: e)
-  toPersistValue x@(a, b, c, d, e) = do
-    vals <- sequence [toPersistValue a, toPersistValue b, toPersistValue c, toPersistValue d, toPersistValue e]
-    liftM PersistInt64 $ insertTuple (namedType x) vals 
-  fromPersistValue (PersistInt64 key) = do
-    [a, b, c, d, e] <- getTuple (namedType (undefined :: (a, b, c, d, e))) key
-    liftM5 (,,,,) (fromPersistValue a) (fromPersistValue b) (fromPersistValue c) (fromPersistValue d) (fromPersistValue e)
-  fromPersistValue x = fail $ "Expected Integer(tuple key), received: " ++ show x
+  toPersistValue (a, b, c, d, e) = do
+    a' <- toPersistValue a
+    b' <- toPersistValue b
+    c' <- toPersistValue c
+    d' <- toPersistValue d
+    e' <- toPersistValue e
+    return $ a' . b' . c' . d' . e'
+  fromPersistValue xs = do
+    (a, rest0) <- fromPersistValue xs
+    (b, rest1) <- fromPersistValue rest0
+    (c, rest2) <- fromPersistValue rest1
+    (d, rest3) <- fromPersistValue rest2
+    (e, rest4) <- fromPersistValue rest3
+    return ((a, b, c, d, e), rest4)
   dbType (_ :: (a, b, c, d, e)) = DbTuple 5 [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d), namedType (undefined :: e)]

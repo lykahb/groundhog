@@ -1,20 +1,7 @@
 {-# LANGUAGE Rank2Types #-}
 module Database.Groundhog.Generic.Sql.String
-    ( renderCond
-    , defaultShowPrim
-    , renderArith
-    , renderOrders
-    , renderUpdates
-    , defId
-    , defDelim
-    , defRenderEquals
-    , defRenderNotEquals
-    , renderExpr
-    , RenderS(..)
-    , StringS
-    , (<>)
-    , fromChar
-    , fromStringS
+    ( module Database.Groundhog.Generic.Sql
+    , StringS (..)
     ) where
 
 import Database.Groundhog.Core
@@ -22,19 +9,16 @@ import Database.Groundhog.Generic.Sql
 import Data.Monoid
 import Data.String
 
-newtype StringS = StringS ShowS
-
-fromStringS :: StringS -> String
-fromStringS (StringS s) = s ""
+newtype StringS = StringS { fromStringS :: ShowS }
 
 instance Monoid StringS where
-  mempty = StringS mempty
+  mempty = StringS id
   (StringS s1) `mappend` (StringS s2) = StringS (s1 . s2)
 
 instance IsString StringS where
   fromString s = StringS (s++)
 
-instance Smth StringS where
+instance StringLike StringS where
   fromChar c = StringS (c:)
 
 {-# SPECIALIZE (<>) :: RenderS StringS -> RenderS StringS -> RenderS StringS #-}
@@ -56,3 +40,5 @@ instance Smth StringS where
 {-# SPECIALIZE renderOrders :: PersistEntity v => (String -> String) -> [Order v c] -> StringS #-}
 
 {-# SPECIALIZE renderUpdates :: PersistEntity v => (String -> String) -> [Update v c] -> RenderS StringS #-}
+
+{-# SPECIALIZE renderFields :: (StringS -> StringS) -> [(String, NamedType)] -> StringS #-}

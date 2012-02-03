@@ -12,8 +12,9 @@ module Database.Groundhog.Generic.Sql
     , defRenderEquals
     , defRenderNotEquals
     , renderExpr
+    , renderFields
     , RenderS(..)
-    , Smth(..)
+    , StringLike(..)
     , (<>)
     , parens
     ) where
@@ -22,7 +23,7 @@ import Database.Groundhog.Core
 import Data.Monoid
 import Data.String
 
-class (Monoid a, IsString a) => Smth a where
+class (Monoid a, IsString a) => StringLike a where
   fromChar :: Char -> a
 
 data RenderS s = RenderS {
@@ -35,22 +36,22 @@ instance Monoid s => Monoid (RenderS s) where
   (RenderS f1 g1) `mappend` (RenderS f2 g2) = RenderS (f1 `mappend` f2) (g1.g2)
 
 {-# INLINABLE parens #-}
-parens :: Smth s => Int -> Int -> RenderS s -> RenderS s
+parens :: StringLike s => Int -> Int -> RenderS s -> RenderS s
 parens p1 p2 expr = if p1 < p2 then char '(' <> expr <> char ')' else expr
 
 {-# INLINABLE (<>) #-}
---(<>) :: Smth s => RenderS s -> RenderS s -> RenderS s
+--(<>) :: StringLike s => RenderS s -> RenderS s -> RenderS s
 (<>) :: Monoid m => m -> m -> m
 (<>) = mappend
 
-string :: Smth s => String -> RenderS s
+string :: StringLike s => String -> RenderS s
 string s = RenderS (fromString s) id
 
-char :: Smth s => Char -> RenderS s
+char :: StringLike s => Char -> RenderS s
 char c = RenderS (fromChar c) id
 
 {-# INLINABLE renderArith #-}
-renderArith :: (PersistEntity v, Smth s) => (String -> String) -> Arith v c a -> RenderS s
+renderArith :: (PersistEntity v, StringLike s) => (String -> String) -> Arith v c a -> RenderS s
 renderArith escape arith = go arith 0 where
   go (Plus a b)     p = parens 6 p $ go a 6 <> char '+' <> go b 6
   go (Minus a b)    p = parens 6 p $ go a 6 <> char '-' <> go b 6
@@ -60,7 +61,7 @@ renderArith escape arith = go arith 0 where
   go (Lit a)        _ = renderPrim a
 
 {-# INLINABLE renderCond #-}
-renderCond :: (PersistEntity v, Smth s)
+renderCond :: (PersistEntity v, StringLike s)
   => (String -> String) -- escape
   -> String -- name of id in constructor table
   -> (forall a.PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS s) -- render equals
@@ -79,7 +80,7 @@ renderCond esc idName rendEq rendNotEq (cond :: Cond v c) = go cond 0 where
 
 -- TODO: they don't support all cases
 {-# INLINABLE defRenderEquals #-}
-defRenderEquals :: (PersistField a, Smth s) => (String -> String) -> Expr v c a -> Expr v c a -> RenderS s
+defRenderEquals :: (PersistField a, StringLike s) => (String -> String) -> Expr v c a -> Expr v c a -> RenderS s
 defRenderEquals esc a b | not (isNullable a) = renderExpr esc a <> char '=' <> renderExpr esc b
 -- only ExprPrim and ExprField can come here here
 -- if one of arguments is Nothing, compare the other with NULL
@@ -95,7 +96,7 @@ defRenderEquals esc (ExprField a) (ExprField b) = char '(' <> a' <> char '=' <> 
 defRenderEquals _ _ _ = error "for nullable values there must be no other expressions than ExprField and ExprPlain"
 
 {-# INLINABLE defRenderNotEquals #-}
-defRenderNotEquals :: (PersistField a, Smth s) => (String -> String) -> Expr v c a -> Expr v c a -> RenderS s
+defRenderNotEquals :: (PersistField a, StringLike s) => (String -> String) -> Expr v c a -> Expr v c a -> RenderS s
 defRenderNotEquals esc a b | not (isNullable a) = renderExpr esc a <> string "<>" <> renderExpr esc b
 -- if one of arguments is Nothing, compare the other with NULL
 defRenderNotEquals _ (ExprPlain a) (ExprPlain b) | isNull a && isNull b = string "NULL IS NOT NULL"
@@ -112,13 +113,13 @@ isNull :: Primitive a => a -> Bool
 isNull a = toPrim a == PersistNull
 
 {-# INLINABLE renderExpr #-}
-renderExpr :: Smth s => (String -> String) -> Expr v c a -> RenderS s
+renderExpr :: StringLike s => (String -> String) -> Expr v c a -> RenderS s
 renderExpr esc (ExprField a) = string $ esc (show a)
 renderExpr _   (ExprPrim a)  = renderPrim a
 renderExpr _   (ExprPlain a) = renderPrim a
 renderExpr esc (ExprArith a) = renderArith esc a
 
-renderPrim :: (Primitive a, Smth s) => a -> RenderS s
+renderPrim :: (Primitive a, StringLike s) => a -> RenderS s
 renderPrim a = RenderS (fromChar '?') (toPrim a:)
 
 isNullable :: PersistField a => Expr v c a -> Bool
@@ -138,15 +139,39 @@ defaultShowPrim (PersistUTCTime x) = show x
 defaultShowPrim (PersistNull) = "NULL"
 
 {-# INLINABLE renderOrders #-}
-renderOrders :: (PersistEntity v, Smth s) => (String -> String) -> [Order v c] -> s
+renderOrders :: (PersistEntity v, StringLike s) => (String -> String) -> [Order v c] -> s
 renderOrders _ [] = mempty
 renderOrders esc (x:xs) = " ORDER BY " <> f x <> rest where
   rest = foldr (\ord r -> fromChar ',' <> f ord <> r) mempty xs
   f (Asc a)  = fromString $ esc (show a)
   f (Desc a) = fromString (esc (show a)) <> " DESC"
 
+{-# INLINABLE renderFields #-}
+-- Returns string with comma separated escaped fields like "name,age"
+-- If there are other columns before renderFields result, do not put comma because the result might be an empty string. This happens when the fields have no columns like ().
+-- One solution is to add one more field with datatype that is known to have columns, eg renderFields id (("id$", namedType (0 :: Int64)) : constrParams constr)
+renderFields :: StringLike s => (s -> s) -> [(String, NamedType)] -> s
+renderFields esc = commasJoin . foldr flatten [] where
+  nameTupFields ts = zipWith (\i t -> ("val" <> fromString (show i), t)) ([0..] :: [Int]) ts
+  flatten (fname, typ) acc = case getType typ of
+    DbTuple _ ts -> case nameTupFields ts of
+      [] -> acc
+      (t':ts') -> flattenP (fromString fname) t' $ foldr (flattenP (fromString fname)) acc ts'
+    _            -> esc (fromString fname) : acc
+  flattenP prefix (fname, typ) acc = (case getType typ of
+    DbTuple _ ts -> case nameTupFields ts of
+      [] -> acc
+      (t':ts') -> flattenP fullName t' $ foldr (flattenP fullName) acc ts'
+    _            -> esc fullName : acc) where
+      fullName = prefix <> fromChar '$' <> fromString fname
+  commasJoin [] = mempty
+  commasJoin (x:xs) = x <> go xs where
+    comma = fromChar ','
+    go [] = mempty
+    go (x:xs) = comma <> x <> go xs
+
 {-# INLINABLE renderUpdates #-}
-renderUpdates :: (PersistEntity v, Smth s) => (String -> String) -> [Update v c] -> RenderS s
+renderUpdates :: (PersistEntity v, StringLike s) => (String -> String) -> [Update v c] -> RenderS s
 renderUpdates _ [] = mempty
 renderUpdates esc (x:xs) = f x <> rest where
   rest = foldr (\upd r -> char ',' <> f upd <> r) mempty xs

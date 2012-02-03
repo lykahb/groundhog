@@ -1,19 +1,7 @@
 {-# LANGUAGE Rank2Types #-}
 module Database.Groundhog.Generic.Sql.Utf8
-    ( renderCond
-    , defaultShowPrim
-    , renderArith
-    , renderOrders
-    , renderUpdates
-    , defId
-    , defDelim
-    , defRenderEquals
-    , defRenderNotEquals
-    , renderExpr
-    , RenderS(..)
-    , Utf8
-    , (<>)
-    , fromChar
+    ( module Database.Groundhog.Generic.Sql
+    , Utf8 (..)
     , fromUtf8
     ) where
 
@@ -37,7 +25,7 @@ instance Monoid Utf8 where
 instance IsString Utf8 where
   fromString = Utf8 . B.fromString
 
-instance Smth Utf8 where
+instance StringLike Utf8 where
   fromChar = Utf8 . B.fromChar
 
 {-# SPECIALIZE (<>) :: RenderS Utf8 -> RenderS Utf8 -> RenderS Utf8 #-}
@@ -59,3 +47,5 @@ instance Smth Utf8 where
 {-# SPECIALIZE renderOrders :: PersistEntity v => (String -> String) -> [Order v c] -> Utf8 #-}
 
 {-# SPECIALIZE renderUpdates :: PersistEntity v => (String -> String) -> [Update v c] -> RenderS Utf8 #-}
+
+{-# SPECIALIZE renderFields :: (Utf8 -> Utf8) -> [(String, NamedType)] -> Utf8 #-}
