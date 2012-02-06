@@ -58,16 +58,16 @@ mkTestSuite label run = testGroup label $
   , testCase "testReplaceMulti" $ run testReplaceMulti
   , testCase "testTuple" $ run testTuple
   , testCase "testTupleList" $ run testTupleList
-  {-
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
-  , testCase "testTupleTriggersOnDelete" $ run testTupleTriggersOnDelete
-  , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
-  , testCase "testTupleTriggersOnUpdate" $ run testTupleTriggersOnUpdate
-  -}
+--  , testCase "testTupleTriggersOnDelete" $ run testTupleTriggersOnDelete
+--  , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
+--  , testCase "testTupleTriggersOnUpdate" $ run testTupleTriggersOnUpdate
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
   , testCase "testMigrateAddConstructorToMany" $ run testMigrateAddConstructorToMany
+  , testCase "testLongNames" $ run testLongNames
   , testCase "testReference" $ run testReference
   , testCase "testMaybeReference" $ run testMaybeReference
+  , testCase "testDoubleMigration" $ run testDoubleMigration
   ]
   
 sqliteMigrationTestSuite :: (PersistBackend m, MonadControlIO m) => (m () -> IO ()) -> Test
@@ -141,24 +141,23 @@ testTupleList = do
   val' <- get k
   Just val @=? val'
   
-{-
 testListTriggersOnDelete :: (PersistBackend m, MonadControlIO m) => m ()
 testListTriggersOnDelete = do
-  migr (undefined :: Single [(Int, Int)])
-  k <- insert $ (Single [(0, 0), (0, 0)] :: Single [(Int, Int)])
-  Just [listKey] <- queryRaw False "select \"single\" from \"Single$List$$Tuple2$$Int$Int\" where id$=?" [toPrim k] firstRow
-  tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
+  migr (undefined :: Single (String, [[String]]))
+  k <- insert $ (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
+  Just [listKey] <- queryRaw False "select \"single$val1\" from \"Single$Tuple2$$String$List$$List$$String\" where id$=?" [toPrim k] firstRow
+  listsInsideListKeys <- queryRaw False "select value from \"List$$List$$String$values\" where id$=?" [listKey] $ mapAllRows return
   deleteByKey k
   -- test if the main list table and the associated values were deleted
-  listMain <- queryRaw False "select * from \"List$$Tuple2$$Int$Int\" where id$=?" [listKey] firstRow
+  listMain <- queryRaw False "select * from \"List$$List$$String\" where id$=?" [listKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] firstRow
+  listValues <- queryRaw False "select * from \"List$$List$$String$values\" where id$=?" [listKey] firstRow
   Nothing @=? listValues
   -- test if the ephemeral values associated with the list were deleted
-  forM_ tupleInsideListKeys $ \tupleInsideListKey -> do
-    tupleValues <- queryRaw False "select * from \"Tuple2$$Int$Int\" where id$=?" tupleInsideListKey firstRow
-    Nothing @=? tupleValues
-
+  forM_ listsInsideListKeys $ \listsInsideListKey -> do
+    sublist <- queryRaw False "select * from \"List$$String\" where id$=?" listsInsideListKey firstRow
+    Nothing @=? sublist
+{-
 testTupleTriggersOnDelete :: (PersistBackend m, MonadControlIO m) => m ()
 testTupleTriggersOnDelete = do
   migr (undefined :: Single (Maybe ([String], Int)))
@@ -282,6 +281,41 @@ testMigrateAddConstructorToMany = do
   Just (New.AddConstructorToMany2 "abc") @=? val2
   val0 <- get k0
   Just (New.AddConstructorToMany0 5) @=? val0
+
+testDoubleMigration :: (PersistBackend m, MonadControlIO m) => m ()
+testDoubleMigration = do
+  let val1 = Single ([""], 0 :: Int)
+  migr val1
+  m1 <- createMigration (migrate val1)
+  [] @=? filter (/= Right []) (Map.elems m1)
+
+  let val2 = Single [("", Single "")]
+  migr val2
+  m2 <- createMigration (migrate val2)
+  executeMigration silentMigrationLogger m2
+  [] @=? filter (/= Right []) (Map.elems m2)
+
+  let val3 = Second ("", [""])
+  migr val3
+  m3 <- createMigration (migrate val3)
+  [] @=? filter (/= Right []) (Map.elems m3)
+  return ()
+
+testLongNames :: (PersistBackend m, MonadControlIO m) => m ()
+testLongNames = do
+  let val = Single [(Single [Single ""], 0 :: Int, [""], (), [""])]
+  migr val
+  k <- insert val
+  val' <- get k
+  Just val @=? val'
+
+  let val2 = Single [([""], Single "", 0 :: Int)]
+  migr val2
+  m2 <- createMigration (migrate val2)
+  executeMigration silentMigrationLogger m2
+  -- this might fail because the constraint names are too long. They constraints are created successfully, but with stripped names. Then during the second migration the stripped names differ from expected and this leads to migration errors.
+  [] @=? filter (/= Right []) (Map.elems m2)
+
 
 testReference :: (PersistBackend m, MonadControlIO m) => m ()
 testReference = do

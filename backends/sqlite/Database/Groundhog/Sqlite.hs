@@ -180,11 +180,12 @@ migrate' = migrateRecursively migE migT migL where
     let valuesName = mainName ++ "$" ++ "values"
     let valueCols = mkColumns "value" t
     let mainQuery = "CREATE TABLE " ++ mainName ++ " (id$ INTEGER PRIMARY KEY)"
-    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL" ++ concatMap sqlColumn valueCols ++ ")"
+    let valuesQuery = "CREATE TABLE " ++ valuesName ++ " (id$ INTEGER REFERENCES " ++ mainName ++ ", ord$ INTEGER NOT NULL" ++ concatMap sqlColumn valueCols ++ ")"
     x <- checkTable mainName
     y <- checkTable valuesName
-    (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
-    (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete valueCols
+    let triggerMain = Right []
+--    (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
+    (_, triggerValues) <- migTriggerOnDelete valuesName $ map snd $ mkDeletes valueCols
     let f name a b = if a /= b then ["List table " ++ name ++ " error. Expected: " ++ a ++ ". Found: " ++ b] else []
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)], triggerMain, triggerValues]
@@ -198,10 +199,9 @@ migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
   (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
   let columns = concatMap (uncurry mkColumns) $ constrParams constr
-  let dels = mkDeletesOnDelete columns
-  (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
-  let updDels = mkDeletesOnUpdate columns
-  updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) updDels
+  let dels = mkDeletes columns
+  (triggerExisted, delTrigger) <- migTriggerOnDelete cName (map snd dels)
+  updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) dels
   return $ if constrExisted == triggerExisted || (constrExisted && null dels)
     then (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
     -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
@@ -247,18 +247,14 @@ migTriggerOnUpdate name fieldName del = do
     Just sql -> (True, if sql == query
         then Right []
         else Left ["The trigger " ++ tname ++ " is different from expected. Manual migration required.\n" ++ sql ++ "\n" ++ query])
-
--- on delete removes all ephemeral data
--- TODO: merge several delete queries for a case when a constructor has several fields of the same ephemeral type
-mkDeletesOnDelete :: [Column] -> [String]
-mkDeletesOnDelete columns = map delField ephemerals where
-  delField (Column name _ _ _ (Just ref)) = "DELETE FROM " ++ ref ++ " WHERE id$=old." ++ escape name ++ ";"
-  ephemerals = filter (isEphemeral . cType) columns
   
 -- on delete removes all ephemeral data
-mkDeletesOnUpdate :: [Column] -> [(String, String)]
-mkDeletesOnUpdate columns = map delField ephemerals where
-  delField (Column name _ _ _ (Just ref)) = (name, "DELETE FROM " ++ ref ++ " WHERE id$=old." ++ escape name ++ ";")
+-- returns column name and delete statement for the referenced table
+mkDeletes :: [Column] -> [(String, String)]
+mkDeletes columns = map delField ephemerals where
+  delField (Column name _ t _ (Just ref)) = (name, maybe "" id delVal ++ delMain) where
+    delMain = "DELETE FROM " ++ ref ++ " WHERE id$=old." ++ escape name ++ ";"
+    delVal = case t of DbList _ -> Just ("DELETE FROM " ++ ref ++ "$values" ++ " WHERE id$=old." ++ escape name ++ ";"); _ -> Nothing
   ephemerals = filter (isEphemeral . cType) columns
 
 isEphemeral :: DbType -> Bool

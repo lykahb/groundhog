@@ -72,7 +72,7 @@ migrate' = migrateRecursively migE migT migL where
               then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
               else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
           Just (Right (columns, [])) -> do
-            if columns == mainTableColumns
+            if compareColumns columns mainTableColumns
               then do
                 -- the datatype had also many constructors before
                 -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
@@ -88,7 +88,7 @@ migrate' = migrateRecursively migE migT migL where
           Just (Left errs) -> return (Left errs)
             
   -- we don't need any escaping because tuple table name and fields are always valid
-  migT ts = return $ Right []
+  migT _ = return $ Right []
 
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
@@ -100,13 +100,15 @@ migrate' = migrateRecursively migE migT migL where
     y <- checkTable valuesName
     (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
-    let f name a b = if a == b then [] else ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b]
-    let expectedMainStructure = ([], [])
-    let expectedValuesStructure = (mkColumns "ord$" (namedType (0 :: Int32)) ++ valueCols, [])
     let addReferences = mapMaybe (createReference valuesName) valueCols
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations $ [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
       (Just (Right mainStructure), Just (Right valuesStructure)) -> let
+        f name a@(cols1, cons1) b@(cols2, cons2) = if compareColumns cols1 cols2 && cons1 == cons2
+          then []
+          else ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b]
+        expectedMainStructure = ([], [])
+        expectedValuesStructure = (mkColumns "ord$" (namedType (0 :: Int32)) ++ valueCols, [])
         errors = f mainName expectedMainStructure mainStructure ++ f valuesName expectedValuesStructure valuesStructure
         in if null errors then Right [] else Left errors
       (Just (Left errs1), Just (Left errs2)) -> Left $ errs1 ++ errs2
@@ -228,7 +230,6 @@ isEphemeral :: NamedType -> Bool
 isEphemeral a = case getType a of
   DbMaybe x -> isEphemeral x
   DbList _  -> True
-  DbTuple _ -> True
   _         -> False
 
 checkTable :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
@@ -328,13 +329,11 @@ findAlters col@(Column name isNull type_ def ref) cols =
                                             Just s -> (:) (name, Update s)
                                  in up [(name, NotNull)]
                             _ -> []
-                modType = if type_ == type_' then [] else [(name, Type type_)]
+                modType = if simplifyType type_ == simplifyType type_' then [] else [(name, Type type_)]
                 modDef =
                     if def == def'
                         then []
-                        else case def of
-                                Nothing -> [(name, NoDefault)]
-                                Just s -> [(name, Default s)]
+                        else [(name, maybe NoDefault Default def)]
              in (modRef ++ modDef ++ modNull ++ modType,
                  filter (\c -> cName c /= name) cols)
 
@@ -478,6 +477,16 @@ showSqlType (DbMaybe t) = showSqlType (getType t)
 showSqlType (DbList _) = "INTEGER"
 showSqlType (DbTuple _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
+
+compareColumns :: [Column] -> [Column] -> Bool
+compareColumns = (all . flip elem) `on` map f where
+  f col = col {cType = simplifyType (cType col)}
+  
+-- | Converts complex datatypes that reference other data to id type DbInt32. Does not handle DbTuple
+simplifyType :: DbType -> DbType
+simplifyType (DbEntity _) = DbInt32
+simplifyType (DbList _) = DbInt32
+simplifyType x = x
 
 defaultPriority :: Int
 defaultPriority = 0

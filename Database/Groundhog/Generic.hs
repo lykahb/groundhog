@@ -141,6 +141,7 @@ defaultSelectAll = do
         Left e -> error $ show e
         Right x -> return x
 
+-- Describes a database column. Field cType always contains DbType that maps to one column (no )
 data Column = Column
     { cName :: String
     , cNull :: Bool
@@ -157,8 +158,8 @@ mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
       column = Column (prefix ++ fname) isNullable simpleType Nothing ref
       (isNullable, simpleType, ref) = analyze typ
       analyze x = case getType x of
-        DbMaybe a  -> let (_, t', ref') = analyze a in (True, t', ref')
-        DbEntity _ -> (False, DbInt32, Just $ getName x)
-        DbList _   -> (False, DbInt32, Just $ getName x)
-        DbTuple _  -> error "mkColumn: unexpected DbTuple"
-        a          -> (False, a, Nothing)
+        DbMaybe a      -> let (_, t', ref') = analyze a in (True, t', ref')
+        t@(DbEntity _) -> (False, t, Just $ getName x)
+        t@(DbList _)   -> (False, t, Just $ getName x)
+        DbTuple _      -> error "mkColumn: unexpected DbTuple"
+        a              -> (False, a, Nothing)
