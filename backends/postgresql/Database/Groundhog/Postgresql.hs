@@ -102,7 +102,7 @@ close' (Postgresql conn _) = H.disconnect conn
 insert' :: (PersistEntity v, MonadControlIO m) => v -> DbPersist Postgresql m (Key v)
 insert' v = do
   -- constructor number and the rest of the field values
-  vals <- toPersistValues v
+  vals <- toEntityPersistValues v
   let e = entityDef v
   let name = getEntityName e
   let constructorNum = fromPrim (head vals)
@@ -153,14 +153,14 @@ insertBy' v = do
       let constr = head $ constructors e
       ifAbsent name $ do
         let query = insertIntoConstructorTable False name constr
-        vals <- toPersistValues v
+        vals <- toEntityPersistValues v
         queryRawCached' query (tail vals) getKey
     else do
       let constr = constructors e !! constructorNum
       let cName = name ++ [defDelim] ++ constrName constr
       ifAbsent cName $ do
         let query = "INSERT INTO " ++ escape name ++ "(discr$)VALUES(?)RETURNING(id$)"
-        vals <- toPersistValues v
+        vals <- toEntityPersistValues v
         rowid <- queryRawCached' query (take 1 vals) getKey
         let cQuery = insertIntoConstructorTable True cName constr
         executeRaw True cQuery $ PersistInt64 rowid :(tail vals)
@@ -168,7 +168,7 @@ insertBy' v = do
 
 replace' :: (MonadControlIO m, PersistEntity v) => Key v -> v -> DbPersist Postgresql m ()
 replace' k v = do
-  vals <- toPersistValues v
+  vals <- toEntityPersistValues v
   let e = entityDef v
   let name = getEntityName e
   let constructorNum = fromPrim (head vals)
@@ -202,7 +202,7 @@ replace' k v = do
 
 -- | receives constructor number and row of values from the constructor table
 mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (Key v, v)
-mkEntity i (k:xs) = fromPersistValues (toPrim i:xs) >>= \v -> return (fromPrim k, v)
+mkEntity i (k:xs) = fromEntityPersistValues (toPrim i:xs) >>= \v -> return (fromPrim k, v)
 mkEntity _ [] = error "Unable to create entity. No values supplied"
 
 selectEnum' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> Enumerator (Key v, v) (DbPersist Postgresql m) a
@@ -297,7 +297,7 @@ get' (k :: Key v) = do
       let query = fromStringS ("SELECT " <> fields) $ " FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
       x <- queryRawCached' query [toPrim k] firstRow
       case x of
-        Just (_:xs) -> liftM Just $ fromPersistValues $ PersistInt64 0:xs
+        Just (_:xs) -> liftM Just $ fromEntityPersistValues $ PersistInt64 0:xs
         Just x'    -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
     else do
@@ -312,7 +312,7 @@ get' (k :: Key v) = do
           let cQuery = fromStringS ("SELECT " <> fields) $ " FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
           x2 <- queryRawCached' cQuery [toPrim k] firstRow
           case x2 of
-            Just (_:xs) -> liftM Just $ fromPersistValues $ discr:xs
+            Just (_:xs) -> liftM Just $ fromEntityPersistValues $ discr:xs
             Just x2'    -> fail $ "Unexpected number of columns returned: " ++ show x2'
             Nothing     -> fail "Missing entry in constructor table"
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
@@ -377,7 +377,6 @@ countAll' (_ :: v) = do
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
     
--- TODO: support multiple columns for field
 insertList' :: forall m a.(MonadControlIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' (l :: [a]) = do
   let mainName = "List$$" ++ persistName (undefined :: a)
@@ -387,7 +386,7 @@ insertList' (l :: [a]) = do
   let query = "INSERT INTO " ++ escape valuesName ++ "(id$," ++ fromStringS (renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields) ")"
   let go :: Int -> [a] -> DbPersist Postgresql m ()
       go n (x:xs) = do
-       x' <- toPersistValue x
+       x' <- toPersistValues x
        executeRaw True query $ (toPrim k:) . (toPrim n:) . x' $ []
        go (n + 1) xs
       go _ [] = return ()
@@ -400,7 +399,7 @@ getList' k = do
   let valuesName = mainName ++ "$values"
   let value = ("value", namedType (undefined :: a))
   let query = fromStringS ("SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS (fromString valuesName)) " WHERE id$=? ORDER BY ord$"
-  queryRawCached' query [toPrim k] $ mapAllRows (liftM fst . fromPersistValue)
+  queryRawCached' query [toPrim k] $ mapAllRows (liftM fst . fromPersistValues)
 
 {-# SPECIALIZE getKey :: RowPopper (DbPersist Postgresql IO) -> DbPersist Postgresql IO Int64 #-}
 getKey :: MonadIO m => RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m Int64

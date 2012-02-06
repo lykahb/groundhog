@@ -320,7 +320,7 @@ mkPersistEntityInstance def = do
     let body = normalB [| EntityDef $(stringE $ dbEntityName def) $typeParams' $constrs |]
     funD 'entityDef $ [ clause [varP v] body [] ]
 
-  toPersistValues' <- liftM (FunD 'toPersistValues) $ forM (zip [0..] $ thConstructors def) $ \(cNum, c) -> do
+  toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0..] $ thConstructors def) $ \(cNum, c) -> do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ thConstrParams c
     let pat = conP (thConstrName c) $ map (varP . fst) vars
     (lastPrims, fields) <- spanM (isPrim . snd) $ reverse vars
@@ -330,28 +330,16 @@ mkPersistEntityInstance def = do
         else do
           let go (m, f) (fname, t) = isPrim t >>= \isP -> if isP
               then return (m, [| (toPrim $(varE fname):) |]:f)
-              else newName "x" >>= \x -> return (bindS (varP x) [| toPersistValue $(varE fname) |]:m, varE x:f)
+              else newName "x" >>= \x -> return (bindS (varP x) [| toPersistValues $(varE fname) |]:m, varE x:f)
           (stmts, func) <- foldM go ([], []) fields        -- foldM puts reversed fields in normal order
           doE $ stmts ++ [noBindS [| return $ (toPrim (cNum :: Int):) . $(foldr1 (\a b -> [|$a . $b|]) func) $ $(listE lastPrims') |]]
     clause [pat] (normalB body) []
-{-  
-  fromPersistValues' <- do
-    clauses <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
-      names <- mapM (const $ newName "x") $ thConstrParams c
-      names' <- mapM (const $ newName "x'") $ thConstrParams c
-      let pat = conP '(:) [conP 'PersistInt64 [litP $ integerL cNum], listP $ map varP names]
-      let result = noBindS (appE (varE 'return) ( foldl (\a -> appE a . varE) (conE (thConstrName c)) names'))
-      let getField name name' f = bindS (varP name') [| fromPersistValue $(varE name) |]
-      let body = normalB $ doE $ (zipWith3 getField names names' (thConstrParams c)) ++ [result]
-      clause [pat] body []
-    unexpected <- newName "xs" >>= \xs -> clause [varP xs] (normalB [| fail $ "Invalid values: " ++ show $(varE xs) |]) []
-    return $ FunD 'fromPersistValues $ clauses ++ [unexpected]
-  -}  
-  fromPersistValues' <- let
+
+  fromEntityPersistValues' <- let
     goField xs vars result failure = do
       (fields, rest) <- spanM (liftM not . isPrim . snd) vars
       xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
-      let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValue $(varE oldXs) |]
+      let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValues $(varE oldXs) |]
       let stmts = zipWith3 f xss (tail xss) fields
       doE $ stmts ++ [noBindS $ goPrim (last xss) rest result failure]
     goPrim xs vars result failure = do
@@ -376,7 +364,7 @@ mkPersistEntityInstance def = do
         return $ match (infixP cNum' '(:) $ foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []
       let start = caseE (varE xs) $ matches ++ [failure]
       let failureFunc = funD failureName [clause [] failureBody []]
-      funD 'fromPersistValues [clause [varP xs] (normalB start) [failureFunc]]
+      funD 'fromEntityPersistValues [clause [varP xs] (normalB start) [failureFunc]]
   
   getConstraints' <- let
     hasConstraints = not . null . thConstrConstrs
@@ -404,7 +392,7 @@ mkPersistEntityInstance def = do
      else clauses
 
   let context = paramsContext def
-  let decs = [fields', entityDef', toPersistValues', fromPersistValues', getConstraints', showField', eqField']
+  let decs = [fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getConstraints', showField', eqField']
   return $ [InstanceD context (AppT (ConT ''PersistEntity) entity) decs]
   
 mkPersistFieldInstance :: THEntityDef -> Q [Dec]
@@ -423,18 +411,18 @@ mkPersistFieldInstance def = do
     let body = normalB $ namesList
     funD 'persistName $ [ clause [varP v] body [] ]
   
-  toPersistValue' <- do
+  toPersistValues' <- do
     let body = normalB [| liftM (:) . toSinglePersistValue |]
-    funD 'toPersistValue $ [ clause [] body [] ]
+    funD 'toPersistValues $ [ clause [] body [] ]
   fromPersistValue' <- do
     x <- newName "x"
     xs <- newName "xs"
     let body = normalB [| fromSinglePersistValue $(varE x) >>= \a -> return (a, $(varE xs)) |]
-    funD 'fromPersistValue $ [ clause [infixP (varP x) '(:) (varP xs)] body [], clause [wildP] (normalB [| error "fromPersistValue: empty list" |]) [] ]
+    funD 'fromPersistValues $ [ clause [infixP (varP x) '(:) (varP xs)] body [], clause [wildP] (normalB [| error "fromPersistValue: empty list" |]) [] ]
   dbType' <- funD 'dbType $ [ clause [] (normalB [| DbEntity . entityDef |]) [] ]
 
   let context = paramsContext def
-  let decs = [persistName', toPersistValue', fromPersistValue', dbType']
+  let decs = [persistName', toPersistValues', fromPersistValue', dbType']
   return $ [InstanceD context (AppT (ConT ''PersistField) entity) decs]
 
 mkSinglePersistFieldInstance :: THEntityDef -> Q [Dec]
