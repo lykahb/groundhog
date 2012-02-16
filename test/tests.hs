@@ -59,9 +59,7 @@ mkTestSuite label run = testGroup label $
   , testCase "testTuple" $ run testTuple
   , testCase "testTupleList" $ run testTupleList
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
---  , testCase "testTupleTriggersOnDelete" $ run testTupleTriggersOnDelete
---  , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
---  , testCase "testTupleTriggersOnUpdate" $ run testTupleTriggersOnUpdate
+  , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
   , testCase "testMigrateAddConstructorToMany" $ run testMigrateAddConstructorToMany
   , testCase "testLongNames" $ run testLongNames
@@ -157,56 +155,24 @@ testListTriggersOnDelete = do
   forM_ listsInsideListKeys $ \listsInsideListKey -> do
     sublist <- queryRaw False "select * from \"List$$String\" where id$=?" listsInsideListKey firstRow
     Nothing @=? sublist
-{-
-testTupleTriggersOnDelete :: (PersistBackend m, MonadControlIO m) => m ()
-testTupleTriggersOnDelete = do
-  migr (undefined :: Single (Maybe ([String], Int)))
-  k <- insert $ (Single (Just (["abc"], 0)) :: Single (Maybe ([String], Int)))
-  Just [tupleKey] <- queryRaw False "select \"single\" from \"Single$Maybe$Tuple2$$List$$String$Int\" where id$=?" [toPrim k] firstRow
-  Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
-  deleteByKey k
-  -- test if the tuple was deleted
-  tupleValues <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
-  Nothing @=? tupleValues
-  -- test if the ephemeral values associated with the tuple were deleted
-  listMain <- queryRaw False "select * from \"List$$String\" where id$=?" [listInsideTupleKey] firstRow
-  Nothing @=? listMain
-  listValues <- queryRaw False "select * from \"List$$String$values\" where id$=?" [listInsideTupleKey] firstRow
-  Nothing @=? listValues
 
 testListTriggersOnUpdate :: (PersistBackend m, MonadControlIO m) => m ()
 testListTriggersOnUpdate = do
-  migr (undefined :: Single [(Int, Int)])
-  k <- insert $ (Single [(0, 0), (0, 0)] :: Single [(Int, Int)])
-  Just [listKey] <- queryRaw False "select \"single\" from \"Single$List$$Tuple2$$Int$Int\" where id$=?" [toPrim k] firstRow
-  tupleInsideListKeys <- queryRaw False "select value from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] $ mapAllRows return
-  replace k $ (Single [] :: Single [(Int, Int)])
-  -- test if the old main list table and the associated values were deleted
-  listMain <- queryRaw False "select * from \"List$$Tuple2$$Int$Int\" where id$=?" [listKey] firstRow
+  migr (undefined :: Single (String, [[String]]))
+  k <- insert $ (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
+  Just [listKey] <- queryRaw False "select \"single$val1\" from \"Single$Tuple2$$String$List$$List$$String\" where id$=?" [toPrim k] firstRow
+  listsInsideListKeys <- queryRaw False "select value from \"List$$List$$String$values\" where id$=?" [listKey] $ mapAllRows return
+  replace k $ (Single ("", []) :: Single (String, [[String]]))
+  -- test if the main list table and the associated values were deleted
+  listMain <- queryRaw False "select * from \"List$$List$$String\" where id$=?" [listKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from \"List$$Tuple2$$Int$Int$values\" where id$=?" [listKey] firstRow
+  listValues <- queryRaw False "select * from \"List$$List$$String$values\" where id$=?" [listKey] firstRow
   Nothing @=? listValues
-  -- test if the ephemeral values associated with the old list were deleted
-  forM_ tupleInsideListKeys $ \tupleInsideListKey -> do
-    tupleValues <- queryRaw False "select * from \"Tuple2$$Int$Int\" where id$=?" tupleInsideListKey firstRow
-    Nothing @=? tupleValues
+  -- test if the ephemeral values associated with the list were deleted
+  forM_ listsInsideListKeys $ \listsInsideListKey -> do
+    sublist <- queryRaw False "select * from \"List$$String\" where id$=?" listsInsideListKey firstRow
+    Nothing @=? sublist
 
-testTupleTriggersOnUpdate :: (PersistBackend m, MonadControlIO m) => m ()
-testTupleTriggersOnUpdate = do
-  migr (undefined :: Single (Maybe ([String], Int)))
-  k <- insert $ (Single (Just (["abc"], 0)) :: Single (Maybe ([String], Int)))
-  Just [tupleKey] <- queryRaw False "select \"single\" from \"Single$Maybe$Tuple2$$List$$String$Int\" where id$=?" [toPrim k] firstRow
-  Just [listInsideTupleKey] <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
-  replace k $ (Single Nothing :: Single (Maybe ([String], Int)))
-  -- test if the old tuple was deleted
-  tupleValues <- queryRaw False "select val0 from \"Tuple2$$List$$String$Int\" where id$=?" [tupleKey] firstRow
-  Nothing @=? tupleValues
-  -- test if the ephemeral values associated with the old tuple were deleted
-  listMain <- queryRaw False "select * from \"List$$String\" where id$=?" [listInsideTupleKey] firstRow
-  Nothing @=? listMain
-  listValues <- queryRaw False "select * from \"List$$String$values\" where id$=?" [listInsideTupleKey] firstRow
-  Nothing @=? listValues
--}
 testDelete :: (PersistBackend m, MonadControlIO m) => m ()
 testDelete = do
   migr (undefined :: Multi String)
