@@ -9,6 +9,7 @@ module Database.Groundhog.Core
   , PersistValue(..)
   , PersistField(..)
   , SinglePersistField(..)
+  , PurePersistField(..)
   , Key(..)
   -- * Constructing expressions
   -- $exprDoc
@@ -390,7 +391,7 @@ class HasOrder a
 class NeverNull a
 
 -- | Datatypes which can be converted directly to 'PersistValue'
-class Primitive a where
+class (SinglePersistField a, PurePersistField a) => Primitive a where
   toPrim :: a -> PersistValue
   fromPrim :: PersistValue -> a
 
@@ -423,6 +424,7 @@ wrapPrim :: Primitive a => a -> Expr Any Any a
 -- because of the type families overlap restrictions. Neither we can create different instances for Key a
 wrapPrim = ExprPrim
 
+-- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where
   -- | Return name of the type. If it is polymorhic, the names of parameter types are separated with \"$\" symbol
   persistName :: a -> String
@@ -434,15 +436,64 @@ class PersistField a where
   -- | Description of value type
   dbType :: a -> DbType
 
+-- | Represents all datatypes that map into a single column. Getting value for that column might require monadic actions to access other tables.
 class PersistField a => SinglePersistField a where
   toSinglePersistValue :: PersistBackend m => a -> m PersistValue
   fromSinglePersistValue :: PersistBackend m => PersistValue -> m a
 
+-- | Represents all datatypes that map into several columns. Getting values for those columns is pure.
+class PersistField a => PurePersistField a where
+  toPurePersistValues :: a -> ([PersistValue] -> [PersistValue])
+  fromPurePersistValues :: [PersistValue] -> (a, [PersistValue])
+
 ---- INSTANCES
 
-instance (Primitive a, PersistField a) => SinglePersistField a where
+instance Primitive a => SinglePersistField a where
   toSinglePersistValue = return . toPrim
   fromSinglePersistValue = return . fromPrim
+
+instance Primitive a => PurePersistField a where
+  toPurePersistValues a = (toPrim a:)
+  fromPurePersistValues (x:xs) = (fromPrim x, xs)
+  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
+
+instance PurePersistField () where
+  toPurePersistValues _ = id
+  fromPurePersistValues xs = ((), xs)
+
+instance (PurePersistField a, PurePersistField b) => PurePersistField (a, b) where
+  toPurePersistValues (a, b) = toPurePersistValues a . toPurePersistValues b
+  fromPurePersistValues xs = let
+    (a, rest0) = fromPurePersistValues xs
+    (b, rest1) = fromPurePersistValues rest0
+    in ((a, b), rest1)
+ 
+instance (PurePersistField a, PurePersistField b, PurePersistField c) => PurePersistField (a, b, c) where
+  toPurePersistValues (a, b, c) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c
+  fromPurePersistValues xs = let
+    (a, rest0) = fromPurePersistValues xs
+    (b, rest1) = fromPurePersistValues rest0
+    (c, rest2) = fromPurePersistValues rest1
+    in ((a, b, c), rest2)
+  
+instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d) => PurePersistField (a, b, c, d) where
+  toPurePersistValues (a, b, c, d) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c . toPurePersistValues d
+  fromPurePersistValues xs = let
+    (a, rest0) = fromPurePersistValues xs
+    (b, rest1) = fromPurePersistValues rest0
+    (c, rest2) = fromPurePersistValues rest1
+    (d, rest3) = fromPurePersistValues rest2
+    in ((a, b, c, d), rest3)
+  
+instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d, PurePersistField e) => PurePersistField (a, b, c, d, e) where
+  toPurePersistValues (a, b, c, d, e) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c . toPurePersistValues d . toPurePersistValues e
+  fromPurePersistValues xs = let
+    (a, rest0) = fromPurePersistValues xs
+    (b, rest1) = fromPurePersistValues rest0
+    (c, rest2) = fromPurePersistValues rest1
+    (d, rest3) = fromPurePersistValues rest2
+    (e, rest4) = fromPurePersistValues rest3
+    in ((a, b, c, d, e), rest4)
 
 instance Numeric Int
 instance Numeric Int8
@@ -563,7 +614,7 @@ instance Primitive UTCTime where
   fromPrim (PersistUTCTime a) = a
   fromPrim x = readHelper x ("Expected UTCTime, received: " ++ show x)
 
-instance Primitive (Key a) where
+instance PersistEntity a => Primitive (Key a) where
   toPrim (Key a) = PersistInt64 a
   fromPrim (PersistInt64 a) = Key a
   fromPrim x = error $ "Expected Integer(entity key), received: " ++ show x
@@ -610,7 +661,7 @@ instance (Expression a, Primitive a, NeverNull a) => Expression (Maybe a) where
   type FuncA (Maybe a) = (Maybe (FuncA a))
   wrap = ExprPlain
 
-instance Expression (Key a) where
+instance PersistEntity a => Expression (Key a) where
   type FuncV (Key a) = Any; type FuncC (Key a) = Any; type FuncA (Key a) = a
   wrap = ExprPlain
 
@@ -682,7 +733,6 @@ failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs
 primFromPersistValue :: (PersistBackend m, PersistField a, Primitive a) => [PersistValue] -> m (a, [PersistValue])
 primFromPersistValue (x:xs) = return (fromPrim x, xs)
 primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
---primFromPersistValue [] = fail "primFromPersistValue: empty list"
 
 instance PersistField ByteString where
   persistName _ = "ByteString"
