@@ -149,19 +149,16 @@ renderOrders esc (x:xs) = " ORDER BY " <> f x <> rest where
 {-# INLINABLE renderFields #-}
 -- Returns string with comma separated escaped fields like "name,age"
 -- If there are other columns before renderFields result, do not put comma because the result might be an empty string. This happens when the fields have no columns like ().
--- One solution is to add one more field with datatype that is known to have columns, eg renderFields id (("id$", namedType (0 :: Int64)) : constrParams constr)
+-- One of the solutions is to add one more field with datatype that is known to have columns, eg renderFields id (("id$", namedType (0 :: Int64)) : constrParams constr)
 renderFields :: StringLike s => (s -> s) -> [(String, NamedType)] -> s
 renderFields esc = commasJoin . foldr flatten [] where
-  nameTupFields ts = zipWith (\i t -> ("val" <> fromString (show i), t)) ([0..] :: [Int]) ts
   flatten (fname, typ) acc = case getType typ of
-    DbTuple ts -> case nameTupFields ts of
-      [] -> acc
-      (t':ts') -> flattenP (fromString fname) t' $ foldr (flattenP (fromString fname)) acc ts'
+    DbEmbedded False ts -> foldr (flattenP (fromString fname)) acc ts
+    DbEmbedded True  ts -> foldr flatten acc ts
     _            -> esc (fromString fname) : acc
   flattenP prefix (fname, typ) acc = (case getType typ of
-    DbTuple ts -> case nameTupFields ts of
-      [] -> acc
-      (t':ts') -> flattenP fullName t' $ foldr (flattenP fullName) acc ts'
+    DbEmbedded False ts -> foldr (flattenP fullName) acc ts
+    DbEmbedded True  ts -> foldr flatten acc ts
     _            -> esc fullName : acc) where
       fullName = prefix <> fromChar '$' <> fromString fname
   commasJoin [] = mempty

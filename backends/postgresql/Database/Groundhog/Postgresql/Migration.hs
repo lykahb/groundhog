@@ -44,7 +44,7 @@ The triggers are used to delete:
 
 -- ********************************************* --}
 migrate' :: (PersistEntity v, MonadControlIO m) => v -> Migration (DbPersist Postgresql m)
-migrate' = migrateRecursively migE migT migL where
+migrate' = migrateRecursively migE migL where
   migE e = do
     let name = getEntityName e
     let constrs = constructors e
@@ -86,10 +86,6 @@ migrate' = migrateRecursively migE migT migL where
           Just (Right (_, constraints)) -> do
             return $ Left ["Unexpected constraints on main table datatype. Datatype: " ++ name ++ ". Constraints: " ++ show constraints]
           Just (Left errs) -> return (Left errs)
-            
-  -- we don't need any escaping because tuple table name and fields are always valid
-  migT _ = return $ Right []
-
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
@@ -475,8 +471,8 @@ showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbBlob = "BYTEA"
 showSqlType (DbMaybe t) = showSqlType (getType t)
 showSqlType (DbList _) = "INTEGER"
-showSqlType (DbTuple _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
+showSqlType t@(DbEmbedded _ _) = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
 compareColumns :: [Column] -> [Column] -> Bool
 compareColumns = (all . flip elem) `on` map f where

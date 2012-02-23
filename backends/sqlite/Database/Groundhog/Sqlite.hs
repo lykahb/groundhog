@@ -122,7 +122,7 @@ TABLE List$Int(id, value)
 
 -- ********************************************* --}
 migrate' :: (PersistEntity v, MonadControlIO m) => v -> Migration (DbPersist Sqlite m)
-migrate' = migrateRecursively migE migT migL where
+migrate' = migrateRecursively migE migL where
   migE e = do
     let name = getEntityName e
     let constrs = constructors e
@@ -158,23 +158,6 @@ migrate' = migrateRecursively migE migT migL where
                 return $ mergeMigrations $ updateDiscriminators: (map snd res)
               else do
                 return $ Left ["Migration from one constructor to many will be implemented soon. Datatype: " ++ name]
-            
-  -- we don't need any escaping because tuple table name and fields are always valid
-  migT _ = return $ Right []
-  {-migT n ts =  do
-    let name = intercalate "$" $ ("Tuple" ++ show n ++ "$") : map getName ts
-    let fields = zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
-    (_, trigger) <- migTriggerOnDelete name $ mkDeletesOnDelete fields
-    x <- checkTable name
-    let fields' = concatMap (\(s, t) -> sqlColumn s (getType t)) fields
-    let query = "CREATE TABLE " ++ name ++ " (id$ INTEGER PRIMARY KEY" ++ fields' ++ ")"
-    return $ case x of
-      Nothing  -> mergeMigrations [Right [(False, defaultPriority, query)], trigger]
-      Just sql -> if sql == query
-        then Right []
-        else Left ["Tuple table " ++ name ++ " has unexpected structure: " ++ sql]
-  -}
-  -- we should consider storing tuples as is, not their id. For example for [(a, b)] this will prevent many unnecessary queries
   migL t = do
     let mainName = "List$" ++ "$" ++ getName t
     let valuesName = mainName ++ "$" ++ "values"
@@ -309,8 +292,8 @@ showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbBlob = "BLOB"
 showSqlType (DbMaybe t) = showSqlType (getType t)
 showSqlType (DbList _) = "INTEGER"
-showSqlType (DbTuple _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
+showSqlType t@(DbEmbedded _ _) = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
 {-
 DbMaybe prim -> name type
@@ -761,7 +744,7 @@ typeToSqlite DbDayTime = Nothing
 typeToSqlite DbBlob = Just S.BlobColumn
 typeToSqlite (DbMaybe _) = Nothing
 typeToSqlite (DbList _) = Just S.IntegerColumn
-typeToSqlite (DbTuple _) = Just S.IntegerColumn
+typeToSqlite t@(DbEmbedded _ _) = error $ "typeToSqlite: DbType does not have corresponding database type: " ++ show t
 typeToSqlite (DbEntity _) = Just S.IntegerColumn
 
 getConstructorTypes :: ConstructorDef -> [DbType]
@@ -769,8 +752,8 @@ getConstructorTypes = foldr getDbTypes [] . map snd . constrParams where
 
 getDbTypes :: NamedType -> [DbType] -> [DbType]
 getDbTypes typ acc = case getType typ of
-  DbTuple ts -> foldr getDbTypes acc ts
-  t          -> t:acc
+  DbEmbedded _ ts -> foldr (getDbTypes . snd) acc ts
+  t               -> t:acc
 
 firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
 firstRow pop = pop >>= return

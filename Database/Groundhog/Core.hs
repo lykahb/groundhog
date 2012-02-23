@@ -318,7 +318,8 @@ data DbType = DbString
 -- More complex types
             | DbMaybe NamedType
             | DbList NamedType
-            | DbTuple [NamedType]
+            -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True). False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
+            | DbEmbedded Bool [(String, NamedType)]
             | DbEntity EntityDef
   deriving (Eq, Show)
 
@@ -862,7 +863,10 @@ instance PersistField () where
   persistName _ = "Unit$"
   toPersistValues _ = return id
   fromPersistValues xs = return ((), xs)
-  dbType _ = DbTuple []
+  dbType _ = DbEmbedded False []
+
+tupleTypeHelper :: [NamedType] -> DbType
+tupleTypeHelper ts = DbEmbedded False $ zip (map (\i -> "val" ++ show i) [0 :: Int ..]) ts
 
 instance (PersistField a, PersistField b) => PersistField (a, b) where
   persistName (_ :: (a, b)) = "Tuple2$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b)
@@ -874,7 +878,7 @@ instance (PersistField a, PersistField b) => PersistField (a, b) where
     (a, rest0) <- fromPersistValues xs
     (b, rest1) <- fromPersistValues rest0
     return ((a, b), rest1)
-  dbType (_ :: (a, b)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b)]
+  dbType (_ :: (a, b)) = tupleTypeHelper [namedType (undefined :: a), namedType (undefined :: b)]
   
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
   persistName (_ :: (a, b, c)) = "Tuple3$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c)
@@ -888,7 +892,7 @@ instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b,
     (b, rest1) <- fromPersistValues rest0
     (c, rest2) <- fromPersistValues rest1
     return ((a, b, c), rest2)
-  dbType (_ :: (a, b, c)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c)]
+  dbType (_ :: (a, b, c)) = tupleTypeHelper [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c)]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
   persistName (_ :: (a, b, c, d)) = "Tuple4$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c) ++ "$" ++ persistName (undefined :: d)
@@ -904,7 +908,7 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d) => Per
     (c, rest2) <- fromPersistValues rest1
     (d, rest3) <- fromPersistValues rest2
     return ((a, b, c, d), rest3)
-  dbType (_ :: (a, b, c, d)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d)]
+  dbType (_ :: (a, b, c, d)) = tupleTypeHelper [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d)]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
   persistName (_ :: (a, b, c, d, e)) = "Tuple5$$" ++ persistName (undefined :: a) ++ "$" ++ persistName (undefined :: b) ++ "$" ++ persistName (undefined :: c) ++ "$" ++ persistName (undefined :: d) ++ "$" ++ persistName (undefined :: e)
@@ -922,4 +926,4 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d, Persis
     (d, rest3) <- fromPersistValues rest2
     (e, rest4) <- fromPersistValues rest3
     return ((a, b, c, d, e), rest4)
-  dbType (_ :: (a, b, c, d, e)) = DbTuple [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d), namedType (undefined :: e)]
+  dbType (_ :: (a, b, c, d, e)) = tupleTypeHelper [namedType (undefined :: a), namedType (undefined :: b), namedType (undefined :: c), namedType (undefined :: d), namedType (undefined :: e)]

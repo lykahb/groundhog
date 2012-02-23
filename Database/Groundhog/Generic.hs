@@ -35,17 +35,16 @@ import qualified Data.Map as Map
 -- occurs several times in a datatype
 migrateRecursively :: (Monad m, PersistEntity e) => 
      (EntityDef   -> m SingleMigration) -- ^ migrate entity
-  -> ([NamedType] -> m SingleMigration) -- ^ migrate tuple
   -> (NamedType   -> m SingleMigration) -- ^ migrate list
   -> e                                  -- ^ initial entity
   -> StateT NamedMigrations m ()
-migrateRecursively migE migT migL = go . namedType where
+migrateRecursively migE migL = go . namedType where
   go w = case getType w of
-    (DbList t)   -> f (getName w) (migL t) (go t)
-    (DbTuple ts) -> f (getName w) (migT ts) (mapM_ go ts)
-    (DbEntity e) -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
-    (DbMaybe t)  -> go t
-    _            -> return ()    -- ordinary types need not migration
+    DbList t        -> f (getName w) (migL t) (go t)
+    DbEntity e      -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
+    DbMaybe t       -> go t
+    DbEmbedded _ ts -> mapM_ (go . snd) ts
+    _               -> return ()    -- ordinary types need not migration
   f name mig cont = do
     v <- gets (Map.lookup name)
     case v of
@@ -141,7 +140,7 @@ defaultSelectAll = do
         Left e -> error $ show e
         Right x -> return x
 
--- Describes a database column. Field cType always contains DbType that maps to one column (no )
+-- Describes a database column. Field cType always contains DbType that maps to one column (no DbEmbedded)
 data Column = Column
     { cName :: String
     , cNull :: Bool
@@ -153,7 +152,8 @@ data Column = Column
 mkColumns :: String -> NamedType -> [Column]
 mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
   go prefix (fname, typ) acc = case getType typ of
-    DbTuple ts -> foldr (go $ prefix ++ fname ++ "$") acc $ zipWith (\i t -> ("val" ++ show i, t)) [0::Int ..] ts
+    DbEmbedded False ts -> foldr (go $ prefix ++ fname ++ "$") acc ts
+    DbEmbedded True  ts -> foldr (go "") acc ts
     _          -> column:acc where
       column = Column (prefix ++ fname) isNullable simpleType Nothing ref
       (isNullable, simpleType, ref) = analyze typ
@@ -161,5 +161,5 @@ mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
         DbMaybe a      -> let (_, t', ref') = analyze a in (True, t', ref')
         t@(DbEntity _) -> (False, t, Just $ getName x)
         t@(DbList _)   -> (False, t, Just $ getName x)
-        DbTuple _      -> error "mkColumn: unexpected DbTuple"
+        DbEmbedded _ _ -> error "mkColumn: unexpected DbEmbedded"
         a              -> (False, a, Nothing)

@@ -117,8 +117,8 @@ testCount = do
 
 testEncoding :: (PersistBackend m, MonadControlIO m) => m ()
 testEncoding = do
-  migr (undefined :: Single String)
   let val = Single "\x0001\x0081\x0801\x10001"
+  migr val
   k <- insert val
   val' <- get k
   Just val @=? val'
@@ -133,7 +133,7 @@ testTuple = do
 
 testTupleList :: (PersistBackend m, MonadControlIO m) => m ()
 testTupleList = do
-  let val = Single [("abc", 4), ("def", 5)] :: Single [(String, Int)]
+  let val = Single [("abc", 4 :: Int), ("def", 5)]
   migr val
   k <- insert val
   val' <- get k
