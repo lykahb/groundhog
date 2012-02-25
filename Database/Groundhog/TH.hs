@@ -51,11 +51,11 @@ data FieldDef = FieldDef {
 } deriving Show
 
 -- | Defines how the names are created. The mk* functions correspond to the set* functions.
--- Functions mkNormal* define names of non-record constructor fields
+-- Functions mkNormal* define names of non-record constructor Field
 data NamingStyle = NamingStyle {
   -- | Create name of the table for the datatype. Parameters: data name.
     mkDbEntityName :: String -> String
-  -- | Create name for phantom constructor used to parametrise 'Fields'. Parameters: data name, constructor name, constructor position.
+  -- | Create name for phantom constructor used to parametrise 'Field'. Parameters: data name, constructor name, constructor position.
   , mkPhantomName :: String -> String -> Int -> String
   -- | Create name of the constructor specific table. Parameters: data name, constructor name, constructor position.
   , mkDbConstrName :: String -> String -> Int -> String
@@ -80,10 +80,10 @@ data NamingStyle = NamingStyle {
 -- > data NormalConstructor
 -- > data RecordConstructor
 -- > instance PersistEntity where
--- >   data Fields (SomeData a) where
--- >     Normal0Field :: Fields NormalConstructor Int
--- >     BarField :: Fields RecordConstructor (Maybe String)
--- >     AscField :: Fields RecordConstructor a
+-- >   data Field (SomeData a) where
+-- >     Normal0Field :: Field NormalConstructor Int
+-- >     BarField :: Field RecordConstructor (Maybe String)
+-- >     AscField :: Field RecordConstructor a
 -- > ...
 fieldNamingStyle :: NamingStyle
 fieldNamingStyle = NamingStyle {
@@ -106,10 +106,10 @@ fieldNamingStyle = NamingStyle {
 -- > data NormalConstructor
 -- > data RecordConstructor
 -- > instance PersistEntity where
--- >   data Fields (SomeData a) where
--- >     Normal0 :: Fields NormalConstructor Int
--- >     RecordBar :: Fields RecordConstructor (Maybe String)
--- >     RecordAsc :: Fields RecordConstructor a
+-- >   data Field (SomeData a) where
+-- >     Normal0 :: Field NormalConstructor Int
+-- >     RecordBar :: Field RecordConstructor (Maybe String)
+-- >     RecordAsc :: Field RecordConstructor a
 -- > ...
 persistentNamingStyle :: NamingStyle
 persistentNamingStyle = fieldNamingStyle {
@@ -125,10 +125,10 @@ persistentNamingStyle = fieldNamingStyle {
 -- > data NormalConstructor
 -- > data RecordConstructor
 -- > instance PersistEntity where
--- >   data Fields (SomeData a) where
--- >     Normal0 :: Fields NormalConstructor Int
--- >     Bar :: Fields RecordConstructor (Maybe String)
--- >     Asc :: Fields RecordConstructor a
+-- >   data Field (SomeData a) where
+-- >     Normal0 :: Field NormalConstructor Int
+-- >     Bar :: Field RecordConstructor (Maybe String)
+-- >     Asc :: Field RecordConstructor a
 -- > ...
 conciseNamingStyle :: NamingStyle
 conciseNamingStyle = fieldNamingStyle {
@@ -144,7 +144,7 @@ setConstructor :: Name -> State THConstructorDef () -> State THEntityDef ()
 setConstructor name f = modify $ \d ->
   d {thConstructors = replaceOne thConstrName name f $ thConstructors d}
 
--- | Set name for phantom constructor used to parametrise 'Fields'
+-- | Set name for phantom constructor used to parametrise 'Field'
 setPhantomName :: String -> State THConstructorDef ()
 setPhantomName name = modify $ \c -> c {thPhantomConstrName = name}
 
@@ -193,7 +193,7 @@ deriveEntityWith style name f = do
     _        -> error "Only datatypes can be processed"
 
 -- | Create the auxiliary structures using the default naming style.
--- Particularly, it creates GADT 'Fields' data instance for referring to the fields in
+-- Particularly, it creates GADT 'Field' data instance for referring to the fields in
 -- expressions and phantom types for data constructors. 
 -- The generation can be adjusted using the optional modifier function. Example:
 --
@@ -208,10 +208,10 @@ deriveEntityWith style name f = do
 -- > data NormalConstructor
 -- > data RecordConstructor
 -- > instance PersistEntity where
--- >   data Fields (SomeData a) where
--- >     Normal0  :: Fields NormalConstructor Int
--- >     BarField :: Fields RecordConstructor (Maybe String)
--- >     AscField :: Fields RecordConstructor a
+-- >   data Field (SomeData a) where
+-- >     Normal0  :: Field NormalConstructor Int
+-- >     BarField :: Field RecordConstructor (Maybe String)
+-- >     AscField :: Field RecordConstructor a
 -- > ...
 deriveEntity :: Name -> Maybe (State THEntityDef ()) -> Q [Dec]
 deriveEntity = deriveEntityWith fieldNamingStyle
@@ -300,7 +300,7 @@ mkPersistEntityInstance def = do
     let mkField name field = ForallC [] ([EqualP (VarT cParam) (ConT name), EqualP (VarT fParam) (fieldType field)]) $ NormalC (mkName $ exprName field) []
     let f cdef = map (mkField $ mkName $ thPhantomConstrName cdef) $ thConstrParams cdef
     let constrs = concatMap f $ thConstructors def
-    return $ DataInstD [] ''Fields [entity, VarT cParam, VarT fParam] constrs []
+    return $ DataInstD [] ''Field [entity, VarT cParam, VarT fParam] constrs []
     
   entityDef' <- do
     v <- newName "v"

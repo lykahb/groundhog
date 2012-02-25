@@ -69,9 +69,9 @@ import Unsafe.Coerce(unsafeCoerce)
 -- | Only instances of this class can be persisted in a database
 class PersistField v => PersistEntity v where
   -- | This type is used for typesafe manipulation of separate fields of datatype v.
-  -- Each constructor in 'Fields' corresponds to its field in a datatype v.
+  -- Each constructor in 'Field' corresponds to its field in a datatype v.
   -- It is parametrised by constructor phantom type and field value type.
-  data Fields v :: * -> * -> *
+  data Field v :: * -> * -> *
   -- | Returns a complete description of the type
   entityDef :: v -> EntityDef
   -- | Marshalls value to a list of 'PersistValue' ready for insert to a database
@@ -80,12 +80,12 @@ class PersistField v => PersistEntity v where
   fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m v
   -- | Returns constructor number and a list of constraint names and corresponding field names with their values
   getConstraints    :: v -> (Int, [(String, [(String, PersistValue)])])
-  -- Show (Fields v c a) constraint would be nicer, but free c & a params don't allow this
-  showField :: Fields v c a -> String
-  eqField :: Fields v c a -> Fields v c a -> Bool
+  -- Show (Field v c a) constraint would be nicer, but free c & a params don't allow this
+  showField :: Field v c a -> String
+  eqField :: Field v c a -> Field v c a -> Bool
 
-instance PersistEntity v => Show (Fields v c a) where show = showField
-instance PersistEntity v => Eq (Fields v c a) where (==) = eqField
+instance PersistEntity v => Show (Field v c a) where show = showField
+instance PersistEntity v => Eq (Field v c a) where (==) = eqField
 
 -- | A unique identifier of a value stored in a database
 data PersistEntity v => Key v = Key Int64 deriving Show
@@ -142,12 +142,12 @@ data Cond v c =
   -- | Lookup will be performed only in table for the specified constructor c. To fetch value by key without constructor limitation use 'get'
   | KeyIs (Key v)
 
-data Update v c = forall a.Update (Fields v c a) (Expr v c a)
---deriving instance (Show (Fields c a)) => Show (Update c)
+data Update v c = forall a.Update (Field v c a) (Expr v c a)
+--deriving instance (Show (Field c a)) => Show (Update c)
 
 -- | Defines sort order of a result-set
-data Order v c = forall a.HasOrder a => Asc  (Fields v c a)
-               | forall a.HasOrder a => Desc (Fields v c a)
+data Order v c = forall a.HasOrder a => Asc  (Field v c a)
+               | forall a.HasOrder a => Desc (Field v c a)
 
 -- TODO: UGLY: we use unsafeCoerce to cast phantom types Any and Any to more specific type if possible. The safety is assured by TypeEqual and TypeEqualC classes. I hope it will work w/o woes of segfaults
 
@@ -157,7 +157,7 @@ infixr 3 =.
   ( Expression a
   , TypesCastV v (FuncV a) v
   , TypesCastC c (FuncC a) c)
-  => Fields v c (FuncA a) -> a -> Update v c
+  => Field v c (FuncA a) -> a -> Update v c
 f =. a = Update f (unsafeCoerceExpr $ wrap a)
 
 -- | Boolean \"and\" operator.
@@ -362,12 +362,12 @@ data Arith v c a =
   | Minus (Arith v c a) (Arith v c a)
   | Mult  (Arith v c a) (Arith v c a)
   | Abs   (Arith v c a)
-  | ArithField (Fields v c a)
+  | ArithField (Field v c a)
   | Lit   Int64
-deriving instance Eq (Fields v c a) => Eq (Arith v c a)
-deriving instance Show (Fields v c a) => Show (Arith v c a)
+deriving instance Eq (Field v c a) => Eq (Arith v c a)
+deriving instance Show (Field v c a) => Show (Arith v c a)
 
-instance (Eq (Fields v c a), Show (Fields v c a), Numeric a) => Num (Arith v c a) where
+instance (Eq (Field v c a), Show (Field v c a), Numeric a) => Num (Arith v c a) where
   a + b = Plus  a b
   a - b = Minus a b
   a * b = Mult  a b
@@ -376,7 +376,7 @@ instance (Eq (Fields v c a), Show (Fields v c a), Numeric a) => Num (Arith v c a
   fromInteger = Lit . fromInteger
   
 -- | Convert field to an arithmetic value
-toArith :: Fields v c a -> Arith v c a
+toArith :: Field v c a -> Arith v c a
 toArith = ArithField
 
 -- | Constraint for use in arithmetic expressions. 'Num' is not used to explicitly include only types supported by the library .
@@ -400,7 +400,7 @@ class (SinglePersistField a, PurePersistField a) => Primitive a where
 -- A value should be convertec to 'Expr' for usage in expressions
 data Expr v c a where
   ExprPrim  :: Primitive a => a -> Expr v c a
-  ExprField :: PersistEntity v => Fields v c a -> Expr v c a
+  ExprField :: PersistEntity v => Field v c a -> Expr v c a
   ExprArith :: PersistEntity v => Arith v c a -> Expr v c a
   -- we need this field for Key and Maybe mostly
   ExprPlain :: Primitive a => a -> Expr v c (FuncA a)
@@ -420,8 +420,8 @@ class Expression a where
 --Entity1Field ==. Just k &&. Entity2Field ==. wrapPrim k
 -- @
 wrapPrim :: Primitive a => a -> Expr Any Any a
--- We cannot create different Expression instances for (Fields v c a) and (Fields v c (Key a))
--- so that Func (Fields v c a) = a and Func (Fields v c (Key a)) = a
+-- We cannot create different Expression instances for (Field v c a) and (Field v c (Key a))
+-- so that Func (Field v c a) = a and Func (Field v c (Key a)) = a
 -- because of the type families overlap restrictions. Neither we can create different instances for Key a
 wrapPrim = ExprPrim
 
@@ -644,10 +644,10 @@ instance Expression (Expr v c a) where
   type FuncA (Expr v c a) = a
   wrap = id
 
-instance PersistEntity v => Expression (Fields v c a) where
-  type FuncV (Fields v c a) = v
-  type FuncC (Fields v c a) = c
-  type FuncA (Fields v c a) = a
+instance PersistEntity v => Expression (Field v c a) where
+  type FuncV (Field v c a) = v
+  type FuncC (Field v c a) = c
+  type FuncA (Field v c a) = a
   wrap = ExprField
 
 instance PersistEntity v => Expression (Arith v c a) where
