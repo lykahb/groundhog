@@ -14,13 +14,13 @@ module Database.Groundhog.Core
   -- * Constructing expressions
   -- $exprDoc
   , Cond(..)
+  , ExprRelation(..)
   , Update(..)
   , (=.), (&&.), (||.), (==.), (/=.), (<.), (<=.), (>.), (>=.)
   , wrapPrim
   , toArith
   , Expression(..)
   , Primitive(..)
-  , HasOrder
   , Numeric
   , Arith(..)
   , Expr(..)
@@ -88,7 +88,7 @@ instance PersistEntity v => Show (Field v c a) where show = showField
 instance PersistEntity v => Eq (Field v c a) where (==) = eqField
 
 -- | A unique identifier of a value stored in a database
-data PersistEntity v => Key v = Key Int64 deriving Show
+data PersistEntity v => Key v = Key Int64 deriving (Show, Eq)
 
 data Any
 
@@ -135,19 +135,18 @@ data Cond v c =
     And (Cond v c) (Cond v c)
   | Or  (Cond v c) (Cond v c)
   | Not (Cond v c)
-  | forall a.(HasOrder a, PersistField a) => Lesser  (Expr v c a) (Expr v c a)
-  | forall a.(HasOrder a, PersistField a) => Greater (Expr v c a) (Expr v c a)
-  | forall a.(PersistField a) => Equals    (Expr v c a) (Expr v c a)
-  | forall a.(PersistField a) => NotEquals (Expr v c a) (Expr v c a)
+  | forall a.(PersistField a) => Compare ExprRelation (Expr v c a) (Expr v c a)
   -- | Lookup will be performed only in table for the specified constructor c. To fetch value by key without constructor limitation use 'get'
   | KeyIs (Key v)
+
+data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
 data Update v c = forall a.Update (Field v c a) (Expr v c a)
 --deriving instance (Show (Field c a)) => Show (Update c)
 
 -- | Defines sort order of a result-set
-data Order v c = forall a.HasOrder a => Asc  (Field v c a)
-               | forall a.HasOrder a => Desc (Field v c a)
+data Order v c = forall a.Asc  (Field v c a)
+               | forall a.Desc (Field v c a)
 
 -- TODO: UGLY: we use unsafeCoerce to cast phantom types Any and Any to more specific type if possible. The safety is assured by TypeEqual and TypeEqualC classes. I hope it will work w/o woes of segfaults
 
@@ -186,17 +185,16 @@ unsafeCoerceExpr = unsafeCoerce
 (<.), (<=.), (>.), (>=.) ::
   ( TypeCast a b v c
   , FuncA a ~ FuncA b
-  , PersistField (FuncA a)
-  , HasOrder (FuncA a))
+  , PersistField (FuncA a))
   => a -> b -> Cond v c
 
 infix 4 ==., <., <=., >., >=.
-a ==. b = Equals (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a /=. b = NotEquals (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a <.  b = Lesser (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a <=. b = Not $ a >. b
-a >.  b = Greater (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a >=. b = Not $ a <. b
+a ==. b = Compare Eq (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
+a /=. b = Compare Ne (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
+a <.  b = Compare Lt (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
+a <=. b = Compare Le (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
+a >.  b = Compare Gt (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
+a >=. b = Compare Ge (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
 
 newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
   deriving (Monad, MonadIO, Functor, Applicative, MonadControlIO, MonadTrans)
@@ -382,8 +380,6 @@ toArith = ArithField
 -- | Constraint for use in arithmetic expressions. 'Num' is not used to explicitly include only types supported by the library .
 -- TODO: consider replacement with 'Num'
 class Numeric a
--- | The same goals as for 'Numeric'. Certain types like String which have order in Haskell may not have it in DB
-class HasOrder a
 
 -- | Types which when converted to 'PersistValue' are never NULL.
 -- Consider the type @Maybe (Maybe a)@. Now Nothing is stored as NULL, so we cannot distinguish between Just Nothing and Nothing which is a problem.
@@ -506,21 +502,6 @@ instance Numeric Word16
 instance Numeric Word32
 instance Numeric Word64
 instance Numeric Double
-
-instance HasOrder Int
-instance HasOrder Int8
-instance HasOrder Int16
-instance HasOrder Int32
-instance HasOrder Int64
-instance HasOrder Word8
-instance HasOrder Word16
-instance HasOrder Word32
-instance HasOrder Word64
-instance HasOrder Double
-instance HasOrder Bool
-instance HasOrder Day
-instance HasOrder TimeOfDay
-instance HasOrder UTCTime
 
 instance Primitive String where
   toPrim = PersistString

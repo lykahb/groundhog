@@ -51,6 +51,7 @@ mkTestSuite label run = testGroup label $
   [ testCase "testNumber" $ run testNumber
   , testCase "testInsert" $ run testInsert
   , testCase "testCount" $ run testCount
+  , testCase "testComparison" $ run testComparison
   , testCase "testEncoding" $ run testEncoding
   , testCase "testDelete" $ run testDelete
   , testCase "testDeleteByKey" $ run testDeleteByKey
@@ -114,6 +115,26 @@ testCount = do
   insert $ Single "abc"
   num3 <- count (SingleField ==. "abc")
   1 @=? num3
+
+testComparison :: (PersistBackend m, MonadControlIO m) => m ()
+testComparison = do
+  let val1 = Single (1 :: Int)
+  let val2 = Single (2 :: Int)
+  migr val1
+  k1 <- insert val1
+  k2 <- insert val2
+  result1 <- select (SingleField ==. (1 :: Int)) [] 0 0
+  [(k1, val1)] @=? result1
+  result2 <- select (SingleField /=. (1 :: Int)) [] 0 0
+  [(k2, val2)] @=? result2
+  result3 <- select (SingleField <.  (2 :: Int)) [] 0 0
+  [(k1, val1)] @=? result3
+  result4 <- select (SingleField >. (1 :: Int)) [] 0 0
+  [(k2, val2)] @=? result4
+  result5 <- select (SingleField >=. (2 :: Int)) [] 0 0
+  [(k2, val2)] @=? result5
+  result6 <- select (SingleField <=. (1 :: Int)) [] 0 0
+  [(k1, val1)] @=? result6
 
 testEncoding :: (PersistBackend m, MonadControlIO m) => m ()
 testEncoding = do

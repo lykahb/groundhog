@@ -72,10 +72,13 @@ renderCond esc idName rendEq rendNotEq (cond :: Cond v c) = go cond 0 where
   go (Or a b)        p = parens 2 p $ go a 2 <> string " OR " <> go b 2
   go (Not a)         p = parens 1 p $ string "NOT " <> go a 1
   -- the comparisons have the highest priority, so they never need parentheses
-  go (Lesser a b)    _ = renderExpr esc a <> char '<' <> renderExpr esc b
-  go (Greater a b)   _ = renderExpr esc a <> char '>' <> renderExpr esc b
-  go (Equals a b)    _ = rendEq esc a b
-  go (NotEquals a b) _ = rendNotEq esc a b
+  go (Compare op a b) _ = case op of
+    Eq -> rendEq esc a b
+    Ne -> rendNotEq esc a b
+    Gt -> renderExpr esc a <> char '>' <> renderExpr esc b
+    Lt -> renderExpr esc a <> char '<' <> renderExpr esc b
+    Ge -> renderExpr esc a <> string ">=" <> renderExpr esc b
+    Le -> renderExpr esc a <> string "<=" <> renderExpr esc b
   go (KeyIs k) _ = RenderS (fromString idName <> "=?") (toPrim k:)
 
 -- TODO: they don't support all cases
