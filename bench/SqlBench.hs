@@ -34,7 +34,7 @@ updates :: [Update SomeData SomeDataConstructor]
 updates = replicate 100 (IntFieldField =. (0 :: Int))
 
 bigdata :: NamedType
-bigdata = namedType ((("",""),((("",""),("",""),("",""),("","")),("","")),("",""),("",""),("","")),("",""))
+bigdata = namedType ((((("", ""), ("", "")), (("", ""), ("", ""))), ((("", ""), ("", "")), (("", ""), ("", "")))), (((("", ""), ("", "")), (("", ""), ("", ""))), ((("", ""), ("", "")), (("", ""), ("", "")))))
 
 columns :: [(String, NamedType)]
 columns = zip (repeat "abc") $ replicate 100 bigdata
