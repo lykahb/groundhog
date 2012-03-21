@@ -22,7 +22,6 @@ library
                    , groundhog               >= 0.1.0     && < 0.2.0
                    , monad-control           >= 0.2       && < 0.3
                    , containers              >= 0.2       && < 0.5
-                   , enumerator              >= 0.4.9     && < 0.5
                    , utf8-string             >= 0.3.4     && < 0.4
                    , pool                    >= 0.1       && < 0.2
     exposed-modules: Database.Sqlite

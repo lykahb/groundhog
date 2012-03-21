@@ -1,5 +1,5 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, RankNTypes #-}
-
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, RankNTypes, ScopedTypeVariables #-}
+module Main where
 import qualified Data.Map as M
 import Control.Exception.Base(SomeException)
 import Control.Exception.Control (catch)
@@ -7,6 +7,7 @@ import Control.Monad(replicateM_, liftM, forM_, (>=>), unless)
 import Control.Monad.IO.Class(liftIO)
 import Control.Monad.IO.Control (MonadControlIO)
 import Database.Groundhog.Core
+import Database.Groundhog.Generic.Sql.String
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
@@ -36,7 +37,6 @@ main :: IO ()
 main = do
   let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ m
   let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
---  runPSQL $ setup >> executeRaw False create_truncate_tables []
   -- we need clean db before each migration test
   defaultMain [ sqliteMigrationTestSuite $ withSqliteConn ":memory:" . runSqliteConn
               , mkTestSuite "Database.Groundhog.Sqlite" $ runSqlite
@@ -50,7 +50,10 @@ mkTestSuite :: (PersistBackend m, MonadControlIO m) => String -> (m () -> IO ())
 mkTestSuite label run = testGroup label $
   [ testCase "testNumber" $ run testNumber
   , testCase "testInsert" $ run testInsert
+  , testCase "testSelect" $ run testSelect
+  , testCase "testCond" $ run testCond
   , testCase "testCount" $ run testCount
+  , testCase "testUpdate" $ run testUpdate
   , testCase "testComparison" $ run testComparison
   , testCase "testEncoding" $ run testEncoding
   , testCase "testDelete" $ run testDelete
@@ -102,6 +105,59 @@ testInsert = do
   val' <- get k
   val' @=? Just val
 
+testSelect :: (PersistBackend m, MonadControlIO m) => m ()
+testSelect = do
+  migr (undefined :: Single (Int, String))
+  let val1 = Single (5 :: Int, "abc")
+  let val2 = Single (7 :: Int, "def")
+  let val3 = Single (11 :: Int, "ghc")
+  k1 <- insert val1
+  k2 <- insert val2
+  k3 <- insert val3
+  vals1 <- select (SingleField ~> Tuple2_0Selector >. (5 :: Int)) [Asc (SingleField ~> Tuple2_1Selector)] 0 1
+  [(k3, val3)] @=? vals1
+  vals2 <- select (SingleField ~> Tuple2_0Selector >. (5 :: Int)) [Asc (SingleField ~> Tuple2_1Selector)] 1 0
+  [(k2, val2)] @=? vals2
+  vals3 <- select (SingleField >=. (6 :: Int, "something") &&. SingleField ~> Tuple2_1Selector <. "ghc") [] 1 0
+  [(k2, val2)] @=? vals3
+  vals4 <- select (toArith (SingleField ~> Tuple2_0Selector) + 1 >. (10 :: Int)) [] 0 0
+  [(k3, val3)] @=? vals4
+
+testCond :: forall m . (PersistBackend m, MonadControlIO m) => m ()
+testCond = do
+  let rend :: forall v c s . (StringLike s, PersistEntity v) => Cond v c -> Maybe (RenderS s)
+      rend = renderCond id (fromString "id") (\a b -> a <> fromString "=" <> b) (\a b -> a <> fromString "<>" <> b)
+  let (===) :: forall v c . PersistEntity v => (String, [PersistValue]) -> Cond v c -> m ()
+      (query, vals) === cond = let Just (RenderS q v) = rend cond in (query, vals) @=? (fromStringS q "", v [])
+      
+  -- should cover all cases of renderCond comparison rendering
+  ("int=?", [toPrim (4 :: Int)]) === (IntField ==. (4 :: Int))
+  ("int=int", []) === (IntField ==. IntField)
+  ("int=(int+?)*?", [toPrim (1 :: Int), toPrim (2 :: Int)]) === (IntField ==. (toArith IntField + 1) * 2)
+
+  ("single$val0=? AND single$val1=?", [toPrim "abc", toPrim "def"]) === (SingleField ==. ("abc", "def"))
+  ("single$val0=single$val1", []) === (SingleField ~> Tuple2_0Selector ==. SingleField ~> Tuple2_1Selector :: Cond (Single (Int, Int)) SingleConstructor)
+  ("single$val1=single$val0*(?+single$val0)", [toPrim (5 :: Int)]) === (SingleField ~> Tuple2_1Selector ==. toArith (SingleField ~> Tuple2_0Selector) * (5 + toArith (SingleField ~> Tuple2_0Selector)) :: Cond (Single (Int, Int)) SingleConstructor)
+
+  ("?=? AND ?=?", map toPrim [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int) &&. SingleField ==. ()) -- SingleField ==. () is required to replace Any with a PersistEntity instance
+  ("?<? OR ?<?", map toPrim [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int) &&. SingleField ==. ())
+  ("?=single$val0 AND ?=single$val1", map toPrim [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
+  ("?=single+?*?", map toPrim [1, 2, 3 :: Int]) === ((1 :: Int) ==. toArith SingleField + 2 * 3)
+
+  ("?-single=?", map toPrim [1, 2 :: Int]) === (1 - toArith SingleField ==. (2 :: Int))
+  ("?*single>=single", map toPrim [1 :: Int]) === (1 * toArith SingleField >=. SingleField :: Cond (Single Int) SingleConstructor)
+  ("?+single>=single-?", map toPrim [1, 2 :: Int]) === (1 + toArith SingleField >=. toArith SingleField - 2 :: Cond (Single Int) SingleConstructor)
+  
+  -- test parentheses
+  ("single=? OR ?=? AND ?=?", map toPrim [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
+  ("single=? AND (?<? OR ?<?)", map toPrim [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) &&. (1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int))
+  ("single=? AND (single=single OR single<>single)", map toPrim [0 :: Int]) === (SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField /=. SingleField))
+  
+  -- test empty conditions
+  ("single$val0=? AND single$val1=?", [toPrim "abc", toPrim "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
+  ("single$val0=? AND single$val1=?", [toPrim "abc", toPrim "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
+  
+
 testCount :: (PersistBackend m, MonadControlIO m) => m ()
 testCount = do
   migr (undefined :: Multi String)
@@ -115,6 +171,20 @@ testCount = do
   insert $ Single "abc"
   num3 <- count (SingleField ==. "abc")
   1 @=? num3
+
+testUpdate :: (PersistBackend m, MonadControlIO m) => m ()
+testUpdate = do
+  let val = Single ("abc", "def")
+  migr val
+  k <- insert val
+  -- update columns using embedded data structure
+  update [SingleField =. ("ghc", "qqq")] (SingleField ~> Tuple2_0Selector ==. "abc")
+  val1 <- get k
+  Just (Single ("ghc", "qqq")) @=? val1
+  -- update columns to the initial values using embedded data structure subfields
+  update [SingleField ~> Tuple2_0Selector =. "abc", SingleField ~> Tuple2_1Selector =. "def"] (KeyIs k)
+  val2 <- get k
+  Just val @=? val2
 
 testComparison :: (PersistBackend m, MonadControlIO m) => m ()
 testComparison = do

@@ -1,4 +1,3 @@
-{-# LANGUAGE Rank2Types #-}
 module Database.Groundhog.Generic.Sql.Utf8
     ( module Database.Groundhog.Generic.Sql
     , Utf8 (..)
@@ -30,22 +29,17 @@ instance StringLike Utf8 where
 
 {-# SPECIALIZE (<>) :: RenderS Utf8 -> RenderS Utf8 -> RenderS Utf8 #-}
 
-{-# SPECIALIZE renderArith :: PersistEntity v => (String -> String) -> Arith v c a -> RenderS Utf8 #-}
+{-# SPECIALIZE renderArith :: PersistEntity v => (Utf8 -> Utf8) -> Arith v c a -> RenderS Utf8 #-}
 
 {-# SPECIALIZE renderCond :: PersistEntity v
-  => (String -> String)
+  => (Utf8 -> Utf8)
   -> String -- name of id in constructor table
-  -> (forall a.PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS Utf8)
-  -> (forall a.PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS Utf8)
-  -> Cond v c -> RenderS Utf8 #-}
+  -> (Utf8 -> Utf8 -> Utf8)
+  -> (Utf8 -> Utf8 -> Utf8)
+  -> Cond v c -> Maybe (RenderS Utf8) #-}
 
-{-# SPECIALIZE defRenderEquals :: PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS Utf8 #-}
-{-# SPECIALIZE defRenderNotEquals :: PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS Utf8 #-}
+{-# SPECIALIZE renderOrders :: PersistEntity v => (Utf8 -> Utf8) -> [Order v c] -> Utf8 #-}
 
-{-# SPECIALIZE renderExpr :: (String -> String) -> Expr v c a -> RenderS Utf8 #-}
-
-{-# SPECIALIZE renderOrders :: PersistEntity v => (String -> String) -> [Order v c] -> Utf8 #-}
-
-{-# SPECIALIZE renderUpdates :: PersistEntity v => (String -> String) -> [Update v c] -> RenderS Utf8 #-}
+{-# SPECIALIZE renderUpdates :: PersistEntity v => (Utf8 -> Utf8) -> [Update v c] -> Maybe (RenderS Utf8) #-}
 
 {-# SPECIALIZE renderFields :: (Utf8 -> Utf8) -> [(String, NamedType)] -> Utf8 #-}

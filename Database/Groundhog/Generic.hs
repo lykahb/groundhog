@@ -11,8 +11,6 @@ module Database.Groundhog.Generic
   , mergeMigrations
   , silentMigrationLogger
   , defaultMigrationLogger
-  , defaultSelect
-  , defaultSelectAll
   , Column(..)
   , mkColumns
   ) where
@@ -23,8 +21,6 @@ import Control.Monad(liftM, forM_)
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Class(lift)
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.Enumerator(Iteratee(..), run, (==<<))
-import Data.Enumerator.List(consume)
 import Data.Either(partitionEithers)
 import Data.Function(on)
 import Data.List(intercalate, sortBy)
@@ -123,22 +119,6 @@ mergeMigrations ms =
 -- @ getEntityName (entityDef v) == persistName v @
 getEntityName :: EntityDef -> String
 getEntityName e = intercalate "$" $ entityName e:map getName (typeParams e)
-
--- | Call 'selectEnum' but return the result as a list
-defaultSelect :: (PersistBackend m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> m [(Key v, v)]
-defaultSelect cond ord off lim = do
-    res <- run $ selectEnum cond ord off lim ==<< consume
-    case res of
-        Left e -> error $ show e
-        Right x -> return x
-
--- | Call 'selectAllEnum' but return the result as a list
-defaultSelectAll :: (PersistBackend m, PersistEntity v) => m [(Key v, v)]
-defaultSelectAll = do
-    res <- run $ Iteratee (runIteratee consume >>= runIteratee . selectAllEnum)
-    case res of
-        Left e -> error $ show e
-        Right x -> return x
 
 -- Describes a database column. Field cType always contains DbType that maps to one column (no DbEmbedded)
 data Column = Column

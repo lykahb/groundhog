@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, MultiParamTypeClasses #-}
 module Main where
 
 import Database.Groundhog.Core
@@ -7,14 +7,19 @@ import qualified Database.Groundhog.Generic.Sql.String as S1
 import qualified Database.Groundhog.Generic.Sql.Utf8 as S2
 import Database.Groundhog.TH
 import Criterion.Main
+import Data.Maybe
 import Data.String
 
 data SomeData = SomeData {
     intField :: Int
   , stringField :: String
   }
-  
+
 deriveEntity ''SomeData Nothing
+
+data Bullshit a = Bullshit (a, Int) a Int
+
+deriveEntity ''Bullshit Nothing
 
 arithExpr :: Arith SomeData SomeDataConstructor Int
 arithExpr = go 10 where
@@ -42,13 +47,15 @@ columns = zip (repeat "abc") $ replicate 100 bigdata
 columns2 = [("abc", namedType ""), ("def", namedType ("", (0::Int), ("", (), "")))]
 
 main = print (S2.fromUtf8 $ S2.renderFields id columns2) >> defaultMain [
+       bgroup "renderUpdates" [ bench "String" $ nf (length . ($ "") . S1.fromStringS . getQuery . fromJust . S1.renderUpdates id) updates
+                            , bench "Utf8" $ whnf (S2.fromUtf8 . getQuery . fromJust . S2.renderUpdates id) updates
+                            ]
 {-       bgroup "renderField" [ bench "renderFieldString" $ nf (length . ($ "") . S1.fromStringS . inter . map (S1.renderField id)) columns
                             , bench "renderFieldUtf8" $ whnf (S2.fromUtf8 . inter . map (S2.renderField id)) columns
-                            ]-}
-      bgroup "renderFields" [ bench "renderFieldStrings" $ nf (length . ($ "") . S1.fromStringS . S1.renderFields id) columns
-                            , bench "renderFieldsUtf8" $ whnf (S2.fromUtf8 . S2.renderFields id) columns
                             ]
-{-
+      , bgroup "renderFields" [ bench "renderFieldStrings" $ nf (length . ($ "") . S1.fromStringS . S1.renderFields id) columns -- 2.42 ms
+                            , bench "renderFieldsUtf8" $ whnf (S2.fromUtf8 . S2.renderFields id) columns  -- 2.01 ms
+                            ]
       , bgroup "sqlarith"   [ bench "renderArithString" $ whnf (length . ($ "") . S1.fromStringS . S1.getQuery . S1.renderArith id) arithExpr
                             , bench "renderArithUtf8" $ whnf (S2.fromUtf8 . S2.getQuery . S2.renderArith id) arithExpr
                             ]

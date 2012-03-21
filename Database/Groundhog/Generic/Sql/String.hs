@@ -1,4 +1,3 @@
-{-# LANGUAGE Rank2Types #-}
 module Database.Groundhog.Generic.Sql.String
     ( module Database.Groundhog.Generic.Sql
     , StringS (..)
@@ -23,22 +22,17 @@ instance StringLike StringS where
 
 {-# SPECIALIZE (<>) :: RenderS StringS -> RenderS StringS -> RenderS StringS #-}
 
-{-# SPECIALIZE renderArith :: PersistEntity v => (String -> String) -> Arith v c a -> RenderS StringS #-}
+{-# SPECIALIZE renderArith :: PersistEntity v => (StringS -> StringS) -> Arith v c a -> RenderS StringS #-}
 
 {-# SPECIALIZE renderCond :: PersistEntity v
-  => (String -> String)
+  => (StringS -> StringS)
   -> String -- name of id in constructor table
-  -> (forall a.PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS)
-  -> (forall a.PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS)
-  -> Cond v c -> RenderS StringS #-}
+  -> (StringS -> StringS -> StringS)
+  -> (StringS -> StringS -> StringS)
+  -> Cond v c -> Maybe (RenderS StringS) #-}
 
-{-# SPECIALIZE defRenderEquals :: PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS #-}
-{-# SPECIALIZE defRenderNotEquals :: PersistField a => (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS #-}
+{-# SPECIALIZE renderOrders :: PersistEntity v => (StringS -> StringS) -> [Order v c] -> StringS #-}
 
-{-# SPECIALIZE renderExpr :: (String -> String) -> Expr v c a -> RenderS StringS #-}
-
-{-# SPECIALIZE renderOrders :: PersistEntity v => (String -> String) -> [Order v c] -> StringS #-}
-
-{-# SPECIALIZE renderUpdates :: PersistEntity v => (String -> String) -> [Update v c] -> RenderS StringS #-}
+{-# SPECIALIZE renderUpdates :: PersistEntity v => (StringS -> StringS) -> [Update v c] -> Maybe (RenderS StringS) #-}
 
 {-# SPECIALIZE renderFields :: (StringS -> StringS) -> [(String, NamedType)] -> StringS #-}

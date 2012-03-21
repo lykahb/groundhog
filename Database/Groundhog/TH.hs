@@ -18,9 +18,9 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), Primitive(..), PersistBackend(..), DbType(DbEntity), Constraint, Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), failMessage)
+import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(DbEntity), Constraint, Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), failMessage)
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax(StrictType, VarStrictType)
+import Language.Haskell.TH.Syntax(StrictType, VarStrictType, lift)
 import Control.Monad(liftM, forM, forM_, foldM)
 import Control.Monad.Trans.State(State, runState, modify)
 import Data.Char(toUpper, toLower, isSpace)
@@ -379,22 +379,19 @@ mkPersistEntityInstance def = do
       body = normalB $ [| (cNum, $(listE $ map (\(cname, fnames) -> [|(cname, $(listE $ map (\fname -> [| (fname, toPrim $(getFieldName fname)) |] ) fnames )) |] ) $ thConstrConstrs cdef)) |]
       names = map (mkName . fieldName) $ thConstrParams cdef
     in funD 'getConstraints clauses
-  
-  showField' <- do
-    let fields = thConstructors def >>= thConstrParams
-    funD 'showField $ map (\f -> clause [conP (mkName $ exprName f) []] (normalB $ stringE $ dbFieldName f) []) fields
-
-  eqField' <- let
-    fieldNames = thConstructors def >>= thConstrParams >>= return . mkName . exprName
-    clauses = map (\n -> clause [conP n [], conP n []] (normalB [| True |]) []) fieldNames
-    in funD 'eqField $ if length clauses > 1
-     then clauses ++ [clause [wildP, wildP] (normalB [| False |]) []]
-     else clauses
+     
+  entityFieldChain' <- let
+    fieldNames = thConstructors def >>= thConstrParams
+    clauses = map (\f -> newName "f" >>= \fArg -> clause [asP fArg $ conP (mkName $ exprName f) []] (normalB $ mkChain f fArg) []) fieldNames
+    mkChain f fArg = isPrim (fieldType f) >>= \isP -> if isP
+      then [| Left $(lift $ dbFieldName f) |]
+      else [| Right [ ($(lift $ dbFieldName f), namedType $ (undefined :: Field v c a -> a) $ $(varE fArg)) ] |] where
+    in funD 'entityFieldChain clauses
 
   let context = paramsContext def
-  let decs = [fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getConstraints', showField', eqField']
+  let decs = [fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getConstraints', entityFieldChain']
   return $ [InstanceD context (AppT (ConT ''PersistEntity) entity) decs]
-  
+
 mkPersistFieldInstance :: THEntityDef -> Q [Dec]
 mkPersistFieldInstance def = do
   let types = map getType $ thTypeParams def
@@ -464,12 +461,12 @@ isPrim t | hasFreeVars t = return False
 
 isPrim :: Type -> Q Bool
 -- we cannot use simply isClassInstance because it crashes on type vars and in this case
--- class Primitive a
--- instance Primitive Int
--- instance Primitive a => Maybe a
--- it will consider (Maybe anytype) instance of Primitive
+-- class PrimitivePersistField a
+-- instance PrimitivePersistField Int
+-- instance PrimitivePersistField a => Maybe a
+-- it will consider (Maybe anytype) instance of PrimitivePersistField
 isPrim t | hasFreeVars t = return False
-isPrim t@(ConT _) = isClassInstance ''Primitive [t]
+isPrim t@(ConT _) = isClassInstance ''PrimitivePersistField [t]
 isPrim (AppT (ConT key) _)  | key == ''Key = return True
 isPrim (AppT (ConT tcon) t) | tcon == ''Maybe = isPrim t
 isPrim _ = return False

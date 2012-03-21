@@ -22,24 +22,19 @@ import Control.Exception.Control (bracket, onException)
 import Control.Monad (liftM, forM, (>=>))
 import Control.Monad.IO.Control (MonadControlIO)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Class (MonadTrans(..))
 import Control.Monad.Trans.Reader (ask)
-import Data.Enumerator (Enumerator, Iteratee(..), Stream(..), checkContinue0, (>>==), joinE, runIteratee, continue, concatEnums)
-import qualified Data.Enumerator.List as EL
 import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.IORef
 import qualified Data.Map as Map
+import Data.Monoid
 import Data.Pool
-import Data.String (fromString)
 
 instance MonadControlIO m => PersistBackend (DbPersist Postgresql m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
   insert v = insert' v
   insertBy v = insertBy' v
   replace k v = replace' k v
-  selectEnum cond ords limit offset = selectEnum' cond ords limit offset
-  selectAllEnum = selectAllEnum'
   select cond ords limit offset = select' cond ords limit offset
   selectAll = selectAll'
   get k = get' k
@@ -205,46 +200,6 @@ mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (K
 mkEntity i (k:xs) = fromEntityPersistValues (toPrim i:xs) >>= \v -> return (fromPrim k, v)
 mkEntity _ [] = error "Unable to create entity. No values supplied"
 
-selectEnum' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> Enumerator (Key v, v) (DbPersist Postgresql m) a
-selectEnum' (cond :: Cond v c) ords limit offset = start where
-  start = if isSimple (constructors e)
-    then joinE (queryEnum (mkQuery name) binds) (EL.mapM (mkEntity 0))
-    else let
-      query = mkQuery $ name ++ [defDelim] ++ constrName constr
-      in joinE (queryEnum query binds) (EL.mapM (mkEntity $ constrNum constr))
-
-  e = entityDef (undefined :: v)
-  orders = renderOrders escape ords
-  name = getEntityName e
-  (lim, limps) = case (limit, offset) of
-        (0, 0) -> ("", [])
-        (0, o) -> (" LIMIT -1 OFFSET ?", [toPrim o])
-        (l, 0) -> (" LIMIT ?", [toPrim l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
-  conds' = renderCond' cond
-  fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
-  mkQuery tname = fromStringS ("SELECT " <> fields <> " FROM " <> fromString (escape tname) <> " WHERE " <> getQuery conds' <> orders <> lim) ""
-  binds = getValues conds' limps
-  constr = constructors e !! phantomConstrNum (undefined :: c)
-
-selectAllEnum' :: forall m v a.(MonadControlIO m, PersistEntity v) => Enumerator (Key v, v) (DbPersist Postgresql m) a
-selectAllEnum' = start where
-  start = if isSimple (constructors e)
-    then let
-      constr = head $ constructors e
-      fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
-      query = "SELECT " ++ fromStringS fields (" FROM " ++ escape name)
-      in joinE (queryEnum query []) (EL.mapM (mkEntity 0))
-    else concatEnums $ zipWith q [0..] (constructors e) where
-      q cNum constr = let
-        fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
-        cName = name ++ [defDelim] ++ constrName constr
-        query = "SELECT " ++ fromStringS fields (" FROM " ++ escape cName)
-        in joinE (queryEnum query []) (EL.mapM (mkEntity cNum))
-  e = entityDef (undefined :: v)
-  name = getEntityName e
-
--- unfortunately, running consume on Enumerator is ~50% slower. So, lets duplicate the code
 select' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> DbPersist Postgresql m [(Key v, v)]
 select' (cond :: Cond v c) ords limit offset = start where
   start = if isSimple (constructors e)
@@ -254,18 +209,19 @@ select' (cond :: Cond v c) ords limit offset = start where
       in doSelectQuery (mkQuery cName) $ constrNum constr
 
   e = entityDef (undefined :: v)
-  orders = renderOrders escape ords
+  orders = renderOrders escapeS ords
   name = getEntityName e
   (lim, limps) = case (limit, offset) of
         (0, 0) -> ("", [])
-        (0, o) -> (" LIMIT -1 OFFSET ?", [toPrim o])
+        (0, o) -> (" OFFSET ?", [toPrim o])
         (l, 0) -> (" LIMIT ?", [toPrim l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim l, toPrim o])
-  conds' = renderCond' cond
+  cond' = renderCond' cond
   fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
-  mkQuery tname = fromStringS ("SELECT " <> fields <> " FROM " <> fromString (escape tname) <> " WHERE " <> getQuery conds' <> orders <> lim) ""
+  mkQuery tname = fromStringS ("SELECT " <> fields <> " FROM " <> fromString (escape tname) <> whereClause <> orders <> lim) ""
+  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   doSelectQuery query cNum = queryRawCached' query binds $ mapAllRows (mkEntity cNum)
-  binds = getValues conds' limps
+  binds = maybe id getValues cond' $ limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
 
 selectAll' :: forall m v.(MonadControlIO m, PersistEntity v) => DbPersist Postgresql m [(Key v, v)]
@@ -322,26 +278,26 @@ update' :: (MonadControlIO m, PersistEntity v, Constructor c) => [Update v c] ->
 update' upds (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
-  let conds' = renderCond' cond
-  let upds' = renderUpdates escape upds
-  let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ fromStringS (getQuery upds' <> " WHERE " <> getQuery conds') ""
-  let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-  executeRawCached' (mkQuery qName) (getValues upds' <> getValues conds' $ [])
+  case renderUpdates escapeS upds of
+    Just upds' -> do
+      let conds' = renderCond' cond
+      let mkQuery tname = "UPDATE " ++ escape tname ++ " SET " ++ fromStringS whereClause "" where
+          whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) conds'
+      let qName = if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
+      executeRawCached' (mkQuery qName) (getValues upds' <> maybe mempty getValues conds' $ [])
+    Nothing -> return ()
 
 delete' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m ()
-delete' (cond :: Cond v c) = do
-  let e = entityDef (undefined :: v)
-  let cond' = renderCond' cond
-  let name = getEntityName e
-  if isSimple (constructors e)
-    then do
-      let query = "DELETE FROM " ++ escape name ++ " WHERE " ++ fromStringS (getQuery cond') ""
-      executeRawCached' query (getValues cond' [])
-    else do
-      let cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-      let query = "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ " WHERE " ++ fromStringS (getQuery cond') ")"
-      -- the entries in the constructor table are deleted because of the reference on delete cascade
-      executeRawCached' query (getValues cond' [])
+delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValues) cond') where
+  e = entityDef (undefined :: v)
+  cond' = renderCond' cond
+  name = getEntityName e
+  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
+  query = if isSimple (constructors e)
+    then "DELETE FROM " ++ escape name ++ fromStringS whereClause ""
+    -- the entries in the constructor table are deleted because of the reference on delete cascade
+    else "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ fromStringS whereClause ")" where
+      cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
 
 deleteByKey' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Postgresql m ()
 deleteByKey' (k :: Key v) = do
@@ -359,8 +315,9 @@ count' (cond :: Cond v c) = do
   let tname = if isSimple (constructors e)
        then name
        else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
-  let query = "SELECT COUNT(*) FROM " ++ escape tname ++ " WHERE " ++ fromStringS (getQuery cond') ""
-  x <- queryRawCached' query (getValues cond' []) firstRow
+  let query = "SELECT COUNT(*) FROM " ++ escape tname ++ fromStringS whereClause "" where
+      whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
+  x <- queryRawCached' query (maybe [] (($ []) . getValues) cond') firstRow
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -442,24 +399,10 @@ queryRawCached' query vals f = do
     x <- H.fetchRow stmt
     return $ fmap (map pFromSql) x
 
-queryEnum :: MonadControlIO m => String -> [PersistValue] -> Enumerator [PersistValue] (DbPersist Postgresql m) b
-queryEnum query vals = \step -> do
-  stmt <- lift $ getStatementCached query
-  liftIO $ H.execute stmt (map pToSql vals)
-  let iter = checkContinue0 $ \loop k -> do
-      x <- liftIO $ do
-        x <- H.fetchRow stmt
-        return $ fmap (map pFromSql) x
-      maybe (continue k) (\row -> k (Chunks [row]) >>== loop) x
-  Iteratee (runIteratee (iter step))
-
-renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> RenderS StringS
-renderCond' = renderCond escape constrId renderEquals renderNotEquals where
-  renderEquals :: (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS
-  renderEquals esc a b = renderExpr esc a <> RenderS " IS NOT DISTINCT FROM " id <> renderExpr esc b
-
-  renderNotEquals :: (String -> String) -> Expr v c a -> Expr v c a -> RenderS StringS
-  renderNotEquals esc a b = renderExpr esc a <> RenderS " IS DISTINCT FROM " id <> renderExpr esc b
+renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> Maybe (RenderS StringS)
+renderCond' = renderCond escapeS constrId renderEquals renderNotEquals where
+  renderEquals a b = a <> " IS NOT DISTINCT FROM " <> b
+  renderNotEquals a b = a <> " IS DISTINCT FROM " <> b
 
 escapeS :: StringS -> StringS
 escapeS a = let q = fromChar '"' in q <> a <> q

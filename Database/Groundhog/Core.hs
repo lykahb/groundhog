@@ -10,17 +10,20 @@ module Database.Groundhog.Core
   , PersistField(..)
   , SinglePersistField(..)
   , PurePersistField(..)
+  , PrimitivePersistField(..)
+  , Embedded(..)
+  , Selector(..)
   , Key(..)
   -- * Constructing expressions
   -- $exprDoc
   , Cond(..)
   , ExprRelation(..)
   , Update(..)
-  , (=.), (&&.), (||.), (==.), (/=.), (<.), (<=.), (>.), (>=.)
+  , (=.), (&&.), (||.), (==.), (/=.), (<.), (<=.), (>.), (>=.), (~>)
   , wrapPrim
   , toArith
+  , FieldLike(..)
   , Expression(..)
-  , Primitive(..)
   , Numeric
   , Arith(..)
   , Expr(..)
@@ -56,7 +59,6 @@ import Control.Monad.Trans.Reader(ReaderT, runReaderT)
 import Control.Monad.Trans.State(StateT)
 import Data.Bits(bitSize)
 import Data.ByteString.Char8 (ByteString, unpack)
-import Data.Enumerator(Enumerator)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
@@ -80,12 +82,9 @@ class PersistField v => PersistEntity v where
   fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m v
   -- | Returns constructor number and a list of constraint names and corresponding field names with their values
   getConstraints    :: v -> (Int, [(String, [(String, PersistValue)])])
-  -- Show (Field v c a) constraint would be nicer, but free c & a params don't allow this
-  showField :: Field v c a -> String
-  eqField :: Field v c a -> Field v c a -> Bool
-
-instance PersistEntity v => Show (Field v c a) where show = showField
-instance PersistEntity v => Eq (Field v c a) where (==) = eqField
+  -- | Is internally used by FieldLike Field instance
+  -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
+  entityFieldChain :: Field v c a -> Either String [(String, NamedType)]
 
 -- | A unique identifier of a value stored in a database
 data PersistEntity v => Key v = Key Int64 deriving (Show, Eq)
@@ -135,18 +134,44 @@ data Cond v c =
     And (Cond v c) (Cond v c)
   | Or  (Cond v c) (Cond v c)
   | Not (Cond v c)
-  | forall a.(PersistField a) => Compare ExprRelation (Expr v c a) (Expr v c a)
+  | forall a.PersistField a => Compare ExprRelation (Expr v c a) (Expr v c a)
   -- | Lookup will be performed only in table for the specified constructor c. To fetch value by key without constructor limitation use 'get'
   | KeyIs (Key v)
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
-data Update v c = forall a.Update (Field v c a) (Expr v c a)
+data Update v c = forall a f . FieldLike f => Update (f v c a) (Expr v c a)
 --deriving instance (Show (Field c a)) => Show (Update c)
 
 -- | Defines sort order of a result-set
-data Order v c = forall a.Asc  (Field v c a)
-               | forall a.Desc (Field v c a)
+data Order v c = forall a f . FieldLike f => Asc  (f v c a)
+               | forall a f . FieldLike f => Desc (f v c a)
+
+-- | Generalises data that can occur in expressions (so far there are regular Field and SubField).
+class FieldLike f where
+  -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [("val0", DbString), ("some", DbEmbedded False [namedType "", namedType True])].
+  -- Function fieldChain can be simplified to f v c a -> [(String, NamedType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
+  fieldChain :: PersistEntity v => f v c a -> Either String [(String, NamedType)]
+
+class Embedded v where
+  data Selector v :: * -> *
+  selectorNum :: Selector v a -> Int
+
+infixl 5 ~>
+(~>) :: (FieldLike f, PersistEntity v, Embedded a) => f v c a -> Selector a a' -> SubField v c a'
+field ~> sel = case fieldChain field of
+  Right (fs@((_, f):_)) -> case getType f of
+    DbEmbedded _ ts -> SubField (ts !! selectorNum sel : fs)
+    other -> error $ "(~>): cannot get subfield of non-embedded type " ++ show other
+  other -> error $ "(~>): cannot get subfield of " ++ show other
+
+newtype SubField v c a = SubField [(String, NamedType)]
+
+instance FieldLike SubField where
+  fieldChain (SubField fs) = Right fs
+
+instance FieldLike Field where
+  fieldChain = entityFieldChain
 
 -- TODO: UGLY: we use unsafeCoerce to cast phantom types Any and Any to more specific type if possible. The safety is assured by TypeEqual and TypeEqualC classes. I hope it will work w/o woes of segfaults
 
@@ -155,18 +180,19 @@ infixr 3 =.
 (=.) ::
   ( Expression a
   , TypesCastV v (FuncV a) v
-  , TypesCastC c (FuncC a) c)
-  => Field v c (FuncA a) -> a -> Update v c
+  , TypesCastC c (FuncC a) c
+  , FieldLike f)
+  => f v c (FuncA a) -> a -> Update v c
 f =. a = Update f (unsafeCoerceExpr $ wrap a)
 
 -- | Boolean \"and\" operator.
 (&&.) :: (TypesCastV v1 v2 v3, TypesCastC c1 c2 c3) =>
   Cond v1 c1 -> Cond v2 c2 -> Cond v3 c3
-  
+
 -- | Boolean \"or\" operator.  
 (||.) :: (TypesCastV v1 v2 v3, TypesCastC c1 c2 c3) =>
   Cond v1 c1 -> Cond v2 c2 -> Cond v3 c3
-  
+
 infixr 3 &&.
 a &&. b = And (unsafeCoerce a) (unsafeCoerce b)
 
@@ -210,15 +236,6 @@ class Monad m => PersistBackend m where
   insertBy      :: PersistEntity v => v -> m (Either (Key v) (Key v))
   -- | Replace a record with the given key. Result is undefined if the record does not exist.
   replace       :: PersistEntity v => Key v -> v -> m ()
-  -- | Return a list of all records
-  selectEnum    :: (PersistEntity v, Constructor c)
-                => Cond v c
-                -> [Order v c]
-                -> Int -- ^ limit
-                -> Int -- ^ offset
-                -> Enumerator (Key v, v) m a
-  -- | Get all records. Order is undefined
-  selectAllEnum :: PersistEntity v => Enumerator (Key v, v) m a
   -- | Return a list of the records satisfying the condition
   select        :: (PersistEntity v, Constructor c)
                 => Cond v c
@@ -298,7 +315,7 @@ class Constructor a where
   phantomConstrNum :: a -> Int
 
 -- | Constraint name and list of the field names that form a unique combination.
--- Only fields of 'Primitive' types can be used in a constraint
+-- Only fields of 'PrimitivePersistField' types can be used in a constraint
 type Constraint = (String, [String])
 
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
@@ -323,7 +340,7 @@ data DbType = DbString
 
 -- TODO: this type can be changed to avoid storing the value itself. For example, ([String, DbType). Restriction: can be used to get DbType and name
 -- | It is used to store type 'DbType' and persist name of a value
-data NamedType = forall v.PersistField v => NamedType v
+data NamedType = forall v . PersistField v => NamedType v
 
 namedType :: PersistField v => v -> NamedType
 namedType = NamedType
@@ -360,21 +377,36 @@ data Arith v c a =
   | Minus (Arith v c a) (Arith v c a)
   | Mult  (Arith v c a) (Arith v c a)
   | Abs   (Arith v c a)
-  | ArithField (Field v c a)
+  | forall f . FieldLike f => ArithField (f v c a)
   | Lit   Int64
-deriving instance Eq (Field v c a) => Eq (Arith v c a)
-deriving instance Show (Field v c a) => Show (Arith v c a)
 
-instance (Eq (Field v c a), Show (Field v c a), Numeric a) => Num (Arith v c a) where
-  a + b = Plus  a b
-  a - b = Minus a b
-  a * b = Mult  a b
-  abs   = Abs
-  signum = error "no signum"
+instance PersistEntity v => Eq (Arith v c a) where
+  (Plus a1 b1)   == (Plus a2 b2)   = a1 == a2 && b1 == b2
+  (Minus a1 b1)  == (Minus a2 b2)  = a1 == a2 && b1 == b2
+  (Mult a1 b1)   == (Mult a2 b2)   = a1 == a2 && b1 == b2
+  (Abs a)        == (Abs b)        = a == b
+  (ArithField a) == (ArithField b) = fieldChain a == fieldChain b
+  (Lit a)        == (Lit b)        = a == b
+  _              == _              = False
+
+instance PersistEntity v => Show (Arith v c a) where
+  show (Plus a b)     = "Plus (" ++ show a ++ ") (" ++ show b ++ ")"
+  show (Minus a b)    = "Minus (" ++ show a ++ ") (" ++ show b ++ ")"
+  show (Mult a b)     = "Mult (" ++ show a ++ ") (" ++ show b ++ ")"
+  show (Abs a)        = "Abs (" ++ show a ++ ")"
+  show (ArithField a) = "ArithField " ++ show (fieldChain a)
+  show (Lit a)        = "Lit " ++ show a
+
+instance (PersistEntity v, Numeric a) => Num (Arith v c a) where
+  a + b       = Plus  a b
+  a - b       = Minus a b
+  a * b       = Mult  a b
+  abs         = Abs
+  signum      = error "no signum"
   fromInteger = Lit . fromInteger
   
 -- | Convert field to an arithmetic value
-toArith :: Field v c a -> Arith v c a
+toArith :: (FieldLike f, PersistEntity v) => f v c a -> Arith v c a
 toArith = ArithField
 
 -- | Constraint for use in arithmetic expressions. 'Num' is not used to explicitly include only types supported by the library .
@@ -388,18 +420,16 @@ class Numeric a
 class NeverNull a
 
 -- | Datatypes which can be converted directly to 'PersistValue'
-class (SinglePersistField a, PurePersistField a) => Primitive a where
+class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a where
   toPrim :: a -> PersistValue
   fromPrim :: PersistValue -> a
 
 -- | Used to uniformly represent fields, literals and arithmetic expressions.
--- A value should be convertec to 'Expr' for usage in expressions
+-- A value should be converted to 'Expr' for usage in expressions
 data Expr v c a where
-  ExprPrim  :: Primitive a => a -> Expr v c a
-  ExprField :: PersistEntity v => Field v c a -> Expr v c a
+  ExprField :: (FieldLike f, PersistEntity v) => f v c a -> Expr v c a
   ExprArith :: PersistEntity v => Arith v c a -> Expr v c a
-  -- we need this field for Key and Maybe mostly
-  ExprPlain :: Primitive a => a -> Expr v c (FuncA a)
+  ExprPure :: forall a v c a' . PurePersistField a => a -> Expr v c a'
 
 -- I wish wrap could return Expr with both fixed and polymorphic v&c. Any is used to emulate polymorphic types.
 -- | Instances of this type can be converted to 'Expr'
@@ -415,11 +445,11 @@ class Expression a where
 --data Example = Example {entity1 :: Maybe Smth, entity2 :: Key Smth}
 --Entity1Field ==. Just k &&. Entity2Field ==. wrapPrim k
 -- @
-wrapPrim :: Primitive a => a -> Expr Any Any a
+wrapPrim :: PrimitivePersistField a => a -> Expr Any Any a
 -- We cannot create different Expression instances for (Field v c a) and (Field v c (Key a))
 -- so that Func (Field v c a) = a and Func (Field v c (Key a)) = a
 -- because of the type families overlap restrictions. Neither we can create different instances for Key a
-wrapPrim = ExprPrim
+wrapPrim = ExprPure
 
 -- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where
@@ -445,11 +475,51 @@ class PersistField a => PurePersistField a where
 
 ---- INSTANCES
 
-instance Primitive a => SinglePersistField a where
+instance Embedded (a, b) where
+  data Selector (a, b) constr where
+    Tuple2_0Selector :: Selector (a, b) a
+    Tuple2_1Selector :: Selector (a, b) b
+  selectorNum Tuple2_0Selector = 0
+  selectorNum Tuple2_1Selector = 1
+
+instance Embedded (a, b, c) where
+  data Selector (a, b, c) constr where
+    Tuple3_0Selector :: Selector (a, b, c) a
+    Tuple3_1Selector :: Selector (a, b, c) b
+    Tuple3_2Selector :: Selector (a, b, c) c
+  selectorNum Tuple3_0Selector = 0
+  selectorNum Tuple3_1Selector = 1
+  selectorNum Tuple3_2Selector = 2
+
+instance Embedded (a, b, c, d) where
+  data Selector (a, b, c, d) constr where
+    Tuple4_0Selector :: Selector (a, b, c, d) a
+    Tuple4_1Selector :: Selector (a, b, c, d) b
+    Tuple4_2Selector :: Selector (a, b, c, d) c
+    Tuple4_3Selector :: Selector (a, b, c, d) d
+  selectorNum Tuple4_0Selector = 0
+  selectorNum Tuple4_1Selector = 1
+  selectorNum Tuple4_2Selector = 2
+  selectorNum Tuple4_3Selector = 3
+
+instance Embedded (a, b, c, d, e) where
+  data Selector (a, b, c, d, e) constr where
+    Tuple5_0Selector :: Selector (a, b, c, d, e) a
+    Tuple5_1Selector :: Selector (a, b, c, d, e) b
+    Tuple5_2Selector :: Selector (a, b, c, d, e) c
+    Tuple5_3Selector :: Selector (a, b, c, d, e) d
+    Tuple5_4Selector :: Selector (a, b, c, d, e) e
+  selectorNum Tuple5_0Selector = 0
+  selectorNum Tuple5_1Selector = 1
+  selectorNum Tuple5_2Selector = 2
+  selectorNum Tuple5_3Selector = 3
+  selectorNum Tuple5_4Selector = 4
+
+instance PrimitivePersistField a => SinglePersistField a where
   toSinglePersistValue = return . toPrim
   fromSinglePersistValue = return . fromPrim
 
-instance Primitive a => PurePersistField a where
+instance PrimitivePersistField a => PurePersistField a where
   toPurePersistValues a = (toPrim a:)
   fromPurePersistValues (x:xs) = (fromPrim x, xs)
   fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
@@ -464,7 +534,7 @@ instance (PurePersistField a, PurePersistField b) => PurePersistField (a, b) whe
     (a, rest0) = fromPurePersistValues xs
     (b, rest1) = fromPurePersistValues rest0
     in ((a, b), rest1)
- 
+
 instance (PurePersistField a, PurePersistField b, PurePersistField c) => PurePersistField (a, b, c) where
   toPurePersistValues (a, b, c) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c
   fromPurePersistValues xs = let
@@ -503,7 +573,7 @@ instance Numeric Word32
 instance Numeric Word64
 instance Numeric Double
 
-instance Primitive String where
+instance PrimitivePersistField String where
   toPrim = PersistString
   fromPrim (PersistString s) = s
   fromPrim (PersistByteString bs) = T.unpack $ T.decodeUtf8With T.lenientDecode bs
@@ -515,93 +585,93 @@ instance Primitive String where
   fromPrim (PersistBool b) = show b
   fromPrim PersistNull = error "Unexpected null"
 
-instance Primitive T.Text where
+instance PrimitivePersistField T.Text where
   toPrim = PersistString . T.unpack
   fromPrim (PersistByteString bs) = T.decodeUtf8With T.lenientDecode bs
   fromPrim x = T.pack $ fromPrim x
 
-instance Primitive ByteString where
+instance PrimitivePersistField ByteString where
   toPrim = PersistByteString
   fromPrim (PersistByteString a) = a
   fromPrim x = T.encodeUtf8 . T.pack $ fromPrim x
 
-instance Primitive Int where
+instance PrimitivePersistField Int where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Int8 where
+instance PrimitivePersistField Int8 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Int16 where
+instance PrimitivePersistField Int16 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Int32 where
+instance PrimitivePersistField Int32 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Int64 where
+instance PrimitivePersistField Int64 where
   toPrim = PersistInt64
   fromPrim (PersistInt64 a) = a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Word8 where
+instance PrimitivePersistField Word8 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Word16 where
+instance PrimitivePersistField Word16 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Word32 where
+instance PrimitivePersistField Word32 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Word64 where
+instance PrimitivePersistField Word64 where
   toPrim = PersistInt64 . fromIntegral
   fromPrim (PersistInt64 a) = fromIntegral a
   fromPrim x = error $ "Expected Integer, received: " ++ show x
 
-instance Primitive Double where
+instance PrimitivePersistField Double where
   toPrim = PersistDouble
   fromPrim (PersistDouble a) = a
   fromPrim x = error $ "Expected Double, received: " ++ show x
 
-instance Primitive Bool where
+instance PrimitivePersistField Bool where
   toPrim = PersistBool
   fromPrim (PersistBool a) = a
   fromPrim (PersistInt64 i) = i /= 0
   fromPrim x = error $ "Expected Bool, received: " ++ show x
 
-instance Primitive Day where
+instance PrimitivePersistField Day where
   toPrim = PersistDay
   fromPrim (PersistDay a) = a
   fromPrim x = readHelper x ("Expected Day, received: " ++ show x)
 
-instance Primitive TimeOfDay where
+instance PrimitivePersistField TimeOfDay where
   toPrim = PersistTimeOfDay
   fromPrim (PersistTimeOfDay a) = a
   fromPrim x = readHelper x ("Expected TimeOfDay, received: " ++ show x)
 
-instance Primitive UTCTime where
+instance PrimitivePersistField UTCTime where
   toPrim = PersistUTCTime
   fromPrim (PersistUTCTime a) = a
   fromPrim x = readHelper x ("Expected UTCTime, received: " ++ show x)
 
-instance PersistEntity a => Primitive (Key a) where
+instance PersistEntity a => PrimitivePersistField (Key a) where
   toPrim (Key a) = PersistInt64 a
   fromPrim (PersistInt64 a) = Key a
   fromPrim x = error $ "Expected Integer(entity key), received: " ++ show x
 
-instance (Primitive a, NeverNull a) => Primitive (Maybe a) where
+instance (PrimitivePersistField a, NeverNull a) => PrimitivePersistField (Maybe a) where
   toPrim = maybe PersistNull toPrim
   fromPrim PersistNull = Nothing
   fromPrim x = Just $ fromPrim x
@@ -631,73 +701,109 @@ instance PersistEntity v => Expression (Field v c a) where
   type FuncA (Field v c a) = a
   wrap = ExprField
 
+instance PersistEntity v => Expression (SubField v c a) where
+  type FuncV (SubField v c a) = v
+  type FuncC (SubField v c a) = c
+  type FuncA (SubField v c a) = a
+  wrap = ExprField
+
 instance PersistEntity v => Expression (Arith v c a) where
   type FuncV (Arith v c a) = v
   type FuncC (Arith v c a) = c
   type FuncA (Arith v c a) = a
   wrap = ExprArith
 
-instance (Expression a, Primitive a, NeverNull a) => Expression (Maybe a) where
+instance (Expression a, PrimitivePersistField a, NeverNull a) => Expression (Maybe a) where
   type FuncV (Maybe a) = Any
   type FuncC (Maybe a) = Any
   type FuncA (Maybe a) = (Maybe (FuncA a))
-  wrap = ExprPlain
+  wrap = ExprPure
 
 instance PersistEntity a => Expression (Key a) where
   type FuncV (Key a) = Any; type FuncC (Key a) = Any; type FuncA (Key a) = a
-  wrap = ExprPlain
+  wrap = ExprPure
+
+instance Expression () where
+  type FuncV () = Any
+  type FuncC () = Any
+  type FuncA () = ()
+  wrap = ExprPure
+
+instance PurePersistField (a, b) => Expression (a, b) where
+  type FuncV (a, b) = Any
+  type FuncC (a, b) = Any
+  type FuncA (a, b) = (a, b)
+  wrap = ExprPure
+
+instance PurePersistField (a, b, c) => Expression (a, b, c) where
+  type FuncV (a, b, c) = Any
+  type FuncC (a, b, c) = Any
+  type FuncA (a, b, c) = (a, b, c)
+  wrap = ExprPure
+
+instance PurePersistField (a, b, c, d) => Expression (a, b, c, d) where
+  type FuncV (a, b, c, d) = Any
+  type FuncC (a, b, c, d) = Any
+  type FuncA (a, b, c, d) = (a, b, c, d)
+  wrap = ExprPure
+
+instance PurePersistField (a, b, c, d, e) => Expression (a, b, c, d, e) where
+  type FuncV (a, b, c, d, e) = Any
+  type FuncC (a, b, c, d, e) = Any
+  type FuncA (a, b, c, d, e) = (a, b, c, d, e)
+  wrap = ExprPure
 
 instance Expression Int where
   type FuncV Int = Any; type FuncC Int = Any; type FuncA Int = Int
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Int8 where
   type FuncV Int8 = Any; type FuncC Int8 = Any; type FuncA Int8 = Int8
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Int16 where
   type FuncV Int16 = Any; type FuncC Int16 = Any; type FuncA Int16 = Int16
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Int32 where
   type FuncV Int32 = Any; type FuncC Int32 = Any; type FuncA Int32 = Int32
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Int64 where
   type FuncV Int64 = Any; type FuncC Int64 = Any; type FuncA Int64 = Int64
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Word8 where
   type FuncV Word8 = Any; type FuncC Word8 = Any; type FuncA Word8 = Word8
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Word16 where
   type FuncV Word16 = Any; type FuncC Word16 = Any; type FuncA Word16 = Word16
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Word32 where
   type FuncV Word32 = Any; type FuncC Word32 = Any; type FuncA Word32 = Word32
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Word64 where
   type FuncV Word64 = Any; type FuncC Word64 = Any; type FuncA Word64 = Word64
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression String where
   type FuncV String = Any; type FuncC String = Any; type FuncA String = String
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression ByteString where
   type FuncV ByteString = Any; type FuncC ByteString = Any; type FuncA ByteString = ByteString
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression T.Text where
   type FuncV T.Text = Any; type FuncC T.Text = Any; type FuncA T.Text = T.Text
-  wrap = ExprPrim
+  wrap = ExprPure
 
 instance Expression Bool where
   type FuncV Bool = Any; type FuncC Bool = Any; type FuncA Bool = Bool
-  wrap = ExprPrim
+  wrap = ExprPure
 
 readHelper :: Read a => PersistValue -> String -> a
 readHelper s errMessage = case s of
@@ -712,7 +818,7 @@ readHelper s errMessage = case s of
 failMessage :: PersistField a => a -> [PersistValue] -> String
 failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs
 
-primFromPersistValue :: (PersistBackend m, PersistField a, Primitive a) => [PersistValue] -> m (a, [PersistValue])
+primFromPersistValue :: (PersistBackend m, PrimitivePersistField a) => [PersistValue] -> m (a, [PersistValue])
 primFromPersistValue (x:xs) = return (fromPrim x, xs)
 primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
 
