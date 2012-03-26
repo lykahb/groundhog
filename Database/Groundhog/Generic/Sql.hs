@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts, ScopedTypeVariables, GADTs, OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 
 -- | This module defines the functions which are used only for backends creation.
 module Database.Groundhog.Generic.Sql
@@ -39,10 +40,12 @@ instance Monoid s => Monoid (RenderS s) where
 parens :: StringLike s => Int -> Int -> RenderS s -> RenderS s
 parens p1 p2 expr = if p1 < p2 then char '(' <> expr <> char ')' else expr
 
+#if MIN_VERSION_base(4, 5, 0)
+#else
 {-# INLINABLE (<>) #-}
---(<>) :: StringLike s => RenderS s -> RenderS s -> RenderS s
 (<>) :: Monoid m => m -> m -> m
 (<>) = mappend
+#endif
 
 string :: StringLike s => String -> RenderS s
 string s = RenderS (fromString s) id

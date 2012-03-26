@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Database.Groundhog.Postgresql.Base
     ( Postgresql (..)
     , escape
@@ -18,8 +20,8 @@ import qualified Database.HDBC as H
 import qualified Database.HDBC.PostgreSQL as H
 
 import Control.Monad(liftM, (>=>))
-import Control.Monad.IO.Control (MonadControlIO)
 import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Trans.Control(MonadBaseControl)
 import Control.Monad.Trans.Reader(ask)
 import Data.IORef
 import qualified Data.Map as Map
@@ -52,7 +54,7 @@ getStatement sql = do
   Postgresql conn _ <- DbPersist ask
   liftIO $ H.prepare conn sql
   
-queryRaw' :: MonadControlIO m => String -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRaw' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRaw' query vals f = do
   stmt <- getStatement query
   liftIO $ H.execute stmt (map pToSql vals)

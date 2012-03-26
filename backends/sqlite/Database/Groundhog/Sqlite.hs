@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings #-}
 module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
@@ -16,9 +16,8 @@ import Database.Groundhog.Generic.Sql.String
 import qualified Database.Sqlite as S
 
 import Control.Arrow ((&&&))
-import Control.Exception.Control (bracket, onException, finally)
 import Control.Monad(liftM, forM, (>=>))
-import Control.Monad.IO.Control (MonadControlIO)
+import Control.Monad.Trans.Control(MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Reader(ask)
 import Data.Int (Int64)
@@ -31,7 +30,7 @@ import Data.Pool
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 data Sqlite = Sqlite S.Database (IORef (Map.Map String S.Statement))
 
-instance MonadControlIO m => PersistBackend (DbPersist Sqlite m) where
+instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
   insert v = insert' v
   insertBy v = insertBy' v
@@ -55,7 +54,7 @@ instance MonadControlIO m => PersistBackend (DbPersist Sqlite m) where
   getList k = getList' k
 
 --{-# SPECIALIZE withSqlitePool :: String -> Int -> (Pool Sqlite -> IO a) -> IO a #-}
-withSqlitePool :: MonadControlIO m
+withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> Int -- ^ number of connections to open
                -> (Pool Sqlite -> m a)
@@ -64,19 +63,19 @@ withSqlitePool s = createPool (open' s) close'
 
 {-# SPECIALIZE withSqliteConn :: String -> (Sqlite -> IO a) -> IO a #-}
 {-# INLINE withSqliteConn #-}
-withSqliteConn :: MonadControlIO m
+withSqliteConn :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> (Sqlite -> m a)
                -> m a
 withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
 
 {-# SPECIALIZE runSqlitePool :: DbPersist Sqlite IO a -> Pool Sqlite -> IO a #-}
-runSqlitePool :: MonadControlIO m => DbPersist Sqlite m a -> Pool Sqlite -> m a
+runSqlitePool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m a -> Pool Sqlite -> m a
 runSqlitePool = flip withPool' . runSqliteConn
 
 {-# SPECIALIZE runSqliteConn :: DbPersist Sqlite IO a -> Sqlite -> IO a #-}
 {-# INLINE runSqliteConn #-}
-runSqliteConn :: MonadControlIO m => DbPersist Sqlite m a -> Sqlite -> m a
+runSqliteConn :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m a -> Sqlite -> m a
 runSqliteConn f conn@(Sqlite c _) = do
   let runStmt query = S.prepare c query >>= \stmt -> S.step stmt >> S.finalize stmt
   liftIO $ runStmt "BEGIN"
@@ -116,7 +115,7 @@ We can either follow this scheme or store same type lists from different types i
 TABLE List$Int(id, value)
 
 -- ********************************************* --}
-migrate' :: (PersistEntity v, MonadControlIO m) => v -> Migration (DbPersist Sqlite m)
+migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Sqlite m)
 migrate' = migrateRecursively migE migL where
   migE e = do
     let name = getEntityName e
@@ -172,7 +171,7 @@ migrate' = migrateRecursively migE migL where
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 
-migConstrAndTrigger :: MonadControlIO m => Bool -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
+migConstrAndTrigger :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
   (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
@@ -185,7 +184,7 @@ migConstrAndTrigger simple name constr = do
     -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
     else (constrExisted, Left ["Both trigger and constructor table must exist: " ++ cName])
 
-migConstr :: MonadControlIO m => Maybe String -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
+migConstr :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstr mainTableName cName constr = do
   let fields = concatMap (uncurry mkColumns) $ constrParams constr
   let uniques = constrConstrs constr
@@ -199,7 +198,7 @@ migConstr mainTableName cName constr = do
       else Left ["Constructor table must be altered: " ++ cName])
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
-migTriggerOnDelete :: MonadControlIO m => String -> [String] -> DbPersist Sqlite m (Bool, SingleMigration)
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [String] -> DbPersist Sqlite m (Bool, SingleMigration)
 migTriggerOnDelete name deletes = do
   let query = "CREATE TRIGGER " ++ escape name ++ " DELETE ON " ++ escape name ++ " BEGIN " ++ concat deletes ++ "END"
   x <- checkTrigger name
@@ -215,7 +214,7 @@ migTriggerOnDelete name deletes = do
         
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: MonadControlIO m => String -> String -> String -> DbPersist Sqlite m (Bool, SingleMigration)
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Sqlite m (Bool, SingleMigration)
 migTriggerOnUpdate name fieldName del = do
   let tname = name ++ "$" ++ fieldName
   let query = "CREATE TRIGGER " ++ escape tname ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape name ++ " BEGIN " ++ del ++ "END"
@@ -240,13 +239,13 @@ isEphemeral (DbMaybe x) = isEphemeral (getType x)
 isEphemeral (DbList _) = True
 isEphemeral _ = False
 
-checkTrigger :: MonadControlIO m => String -> DbPersist Sqlite m (Maybe String)
+checkTrigger :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
 checkTrigger = checkSqliteMaster "trigger"
 
-checkTable :: MonadControlIO m => String -> DbPersist Sqlite m (Maybe String)
+checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
 checkTable = checkSqliteMaster "table"
 
-checkSqliteMaster :: MonadControlIO m => String -> String -> DbPersist Sqlite m (Maybe String)
+checkSqliteMaster :: (MonadBaseControl IO m, MonadIO m) => String -> String -> DbPersist Sqlite m (Maybe String)
 checkSqliteMaster vtype name = do
   let query = "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?"
   x <- queryRawTyped query [DbString] [toPrim vtype, toPrim name] firstRow
@@ -258,7 +257,7 @@ checkSqliteMaster vtype name = do
       err               -> throwErr $ "column sql is not string: " ++ show err
     Just xs -> throwErr $ "requested 1 column, returned " ++ show xs
 
-getStatementCached :: MonadIO m => String -> DbPersist Sqlite m S.Statement
+getStatementCached :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m S.Statement
 getStatementCached sql = do
   Sqlite conn smap <- DbPersist ask
   liftIO $ do
@@ -270,7 +269,7 @@ getStatementCached sql = do
         return stmt
       Just stmt -> return stmt
 
-getStatement :: MonadIO m => String -> DbPersist Sqlite m S.Statement
+getStatement :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m S.Statement
 getStatement sql = do
   Sqlite conn _ <- DbPersist ask
   liftIO $ S.prepare conn sql
@@ -323,7 +322,7 @@ allColumns constr = go "" $ constrParams constr where
 -}
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Sqlite IO (Key v) #-}
 {-# INLINE insert' #-}
-insert' :: (PersistEntity v, MonadControlIO m) => v -> DbPersist Sqlite m (Key v)
+insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Sqlite m (Key v)
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues v
@@ -356,7 +355,7 @@ insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(
   placeholders = fromStringS (renderFields (const $ fromChar '?') fields) ""
 
 {-# SPECIALIZE insertBy' :: PersistEntity v => v -> DbPersist Sqlite IO (Either (Key v) (Key v)) #-}
-insertBy' :: (MonadControlIO m, PersistEntity v) => v -> DbPersist Sqlite m (Either (Key v) (Key v))
+insertBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Sqlite m (Either (Key v) (Key v))
 insertBy' v = do
   let e = entityDef v
   let name = getEntityName e
@@ -396,7 +395,7 @@ insertBy' v = do
         executeRawCached' cQuery $ PersistInt64 rowid :(tail vals)
         return rowid
 
-replace' :: (MonadControlIO m, PersistEntity v) => Key v -> v -> DbPersist Sqlite m ()
+replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> v -> DbPersist Sqlite m ()
 replace' k v = do
   vals <- toEntityPersistValues v
   let e = entityDef v
@@ -435,7 +434,7 @@ mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (K
 mkEntity i (k:xs) = fromEntityPersistValues (toPrim i:xs) >>= \v -> return (fromPrim k, v)
 mkEntity _ [] = error "Unable to create entity. No values supplied"
 
-select' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> DbPersist Sqlite m [(Key v, v)]
+select' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> DbPersist Sqlite m [(Key v, v)]
 select' (cond :: Cond v c) ords limit offset = start where
   start = if isSimple (constructors e)
     then doSelectQuery (mkQuery name) 0
@@ -459,7 +458,7 @@ select' (cond :: Cond v c) ords limit offset = start where
   constr = constructors e !! phantomConstrNum (undefined :: c)
   types = DbInt64:getConstructorTypes constr
 
-selectAll' :: forall m v.(MonadControlIO m, PersistEntity v) => DbPersist Sqlite m [(Key v, v)]
+selectAll' :: forall m v.(MonadBaseControl IO m, MonadIO m, PersistEntity v) => DbPersist Sqlite m [(Key v, v)]
 selectAll' = start where
   start = if isSimple (constructors e)
     then let
@@ -476,8 +475,7 @@ selectAll' = start where
   name = getEntityName e
 
 {-# SPECIALIZE get' :: PersistEntity v => Key v -> DbPersist Sqlite IO (Maybe v) #-}
-{-# INLINE get' #-}
-get' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Sqlite m (Maybe v)
+get' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> DbPersist Sqlite m (Maybe v)
 get' (k :: Key v) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
@@ -509,7 +507,7 @@ get' (k :: Key v) = do
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
 
-update' :: (MonadControlIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Sqlite m ()
+update' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Sqlite m ()
 update' upds (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
@@ -522,7 +520,7 @@ update' upds (cond :: Cond v c) = do
       executeRawCached' (mkQuery qName) (getValues upds' <> maybe mempty getValues cond' $ [])
     Nothing -> return ()
 
-delete' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m ()
+delete' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m ()
 delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValues) cond') where
   e = entityDef (undefined :: v)
   cond' = renderCond' cond
@@ -534,7 +532,7 @@ delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValu
     else "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ fromStringS whereClause ")" where
       cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
 
-deleteByKey' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Sqlite m ()
+deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> DbPersist Sqlite m ()
 deleteByKey' (k :: Key v) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
@@ -542,7 +540,7 @@ deleteByKey' (k :: Key v) = do
   executeRawCached' query [toPrim k]
 
 {-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite IO Int #-}
-count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m Int
+count' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m Int
 count' (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let cond' = renderCond' cond
@@ -559,7 +557,7 @@ count' (cond :: Cond v c) = do
     Nothing -> fail $ "COUNT returned no rows"
 
 {-# SPECIALIZE countAll' :: PersistEntity v => v -> DbPersist Sqlite IO Int #-}
-countAll' :: (MonadControlIO m, PersistEntity v) => v -> DbPersist Sqlite m Int
+countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Sqlite m Int
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
   let query = "SELECT COUNT(*) FROM " ++ name
@@ -569,7 +567,7 @@ countAll' (_ :: v) = do
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
-insertList' :: forall m a.(MonadControlIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
+insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
 insertList' l = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   executeRaw True ("INSERT INTO " ++ mainName ++ " DEFAULT VALUES") []
@@ -586,7 +584,7 @@ insertList' l = do
   go 0 l
   return k
   
-getList' :: forall m a.(MonadControlIO m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
+getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   let valuesName = mainName ++ "$values"
@@ -595,7 +593,7 @@ getList' k = do
   queryRawTyped query (getDbTypes (namedType (undefined :: a)) []) [toPrim k] $ mapAllRows (liftM fst . fromPersistValues)
     
 {-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO Int64 #-}
-getLastInsertRowId :: MonadIO m => DbPersist Sqlite m Int64
+getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m Int64
 getLastInsertRowId = do
   stmt <- getStatementCached "SELECT last_insert_rowid()"
   liftIO $ flip finally (liftIO $ S.reset stmt) $ do
@@ -624,7 +622,7 @@ bind stmt = go 1 where
       PersistUTCTime d       -> S.bindText stmt i $ show d
     go (i + 1) xs
 
-executeRaw' :: MonadIO m => String -> [PersistValue] -> DbPersist Sqlite m ()
+executeRaw' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> DbPersist Sqlite m ()
 executeRaw' query vals = do
   stmt <- getStatement query
   liftIO $ flip finally (S.finalize stmt) $ do
@@ -633,7 +631,7 @@ executeRaw' query vals = do
     return ()
 
 {-# SPECIALIZE executeRawCached' :: String -> [PersistValue] -> DbPersist Sqlite IO () #-}
-executeRawCached' :: MonadIO m => String -> [PersistValue] -> DbPersist Sqlite m ()
+executeRawCached' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> DbPersist Sqlite m ()
 executeRawCached' query vals = do
   stmt <- getStatementCached query
   liftIO $ flip finally (S.reset stmt) $ do
@@ -641,7 +639,7 @@ executeRawCached' query vals = do
     S.Done <- S.step stmt
     return ()
 
-queryRaw' :: MonadControlIO m => String -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
+queryRaw' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRaw' query vals f = do
   stmt <- getStatement query
   flip finally (liftIO $ S.finalize stmt) $ do
@@ -652,7 +650,7 @@ queryRaw' query vals f = do
         S.Done -> return Nothing
         S.Row  -> liftM (Just . map pFromSql) $ S.columns stmt
 
-queryRawCached' :: MonadControlIO m => String -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
+queryRawCached' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRawCached' query vals f = do
   stmt <- getStatementCached query
   flip finally (liftIO $ S.reset stmt) $ do
@@ -663,7 +661,7 @@ queryRawCached' query vals f = do
         S.Done -> return Nothing
         S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
 
-queryRawTyped :: MonadControlIO m => String -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
+queryRawTyped :: (MonadBaseControl IO m, MonadIO m) => String -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRawTyped query types vals f = do
   stmt <- getStatementCached query
   let types' = map typeToSqlite types

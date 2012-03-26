@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 -- | This helper module is intended for use by the backend creators
 module Database.Groundhog.Generic
   ( migrateRecursively
@@ -13,6 +15,9 @@ module Database.Groundhog.Generic
   , defaultMigrationLogger
   , Column(..)
   , mkColumns
+  , bracket
+  , finally
+  , onException
   ) where
 
 import Database.Groundhog.Core
@@ -20,6 +25,8 @@ import Database.Groundhog.Core
 import Control.Monad(liftM, forM_)
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Class(lift)
+import Control.Monad.Trans.Control(MonadBaseControl, control, restoreM)
+import qualified Control.Exception as E
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Either(partitionEithers)
 import Data.Function(on)
@@ -143,3 +150,25 @@ mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
         t@(DbList _)   -> (False, t, Just $ getName x)
         DbEmbedded _ _ -> error "mkColumn: unexpected DbEmbedded"
         a              -> (False, a, Nothing)
+
+finally :: MonadBaseControl IO m
+        => m a -- ^ computation to run first
+        -> m b -- ^ computation to run afterward (even if an exception was raised)
+        -> m a
+finally a sequel = control $ \runInIO ->
+                     E.finally (runInIO a)
+                               (runInIO sequel)
+
+bracket :: MonadBaseControl IO m
+        => m a        -- ^ computation to run first ("acquire resource")
+        -> (a -> m b) -- ^ computation to run last ("release resource")
+        -> (a -> m c) -- ^ computation to run in-between
+        -> m c
+bracket before after thing = control $ \runInIO ->
+                     E.bracket (runInIO before) (\st -> runInIO $ restoreM st >>= after) (\st -> runInIO $ restoreM st >>= thing)
+
+onException :: MonadBaseControl IO m
+        => m a
+        -> m b
+        -> m a
+onException io what = control $ \runInIO -> E.onException (runInIO io) (runInIO what)

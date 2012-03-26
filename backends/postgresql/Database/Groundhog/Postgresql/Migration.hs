@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, FlexibleContexts #-}
 module Database.Groundhog.Postgresql.Migration (migrate') where
 
 import Database.Groundhog.Core hiding (Update)
@@ -8,7 +8,8 @@ import Database.Groundhog.Postgresql.Base
 
 import Control.Arrow ((&&&))
 import Control.Monad(liftM)
-import Control.Monad.IO.Control (MonadControlIO)
+import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Trans.Control(MonadBaseControl)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int(Int32)
@@ -43,7 +44,7 @@ The triggers are used to delete:
 4. Rows in the list values table when the entry in the main list is deleted.
 
 -- ********************************************* --}
-migrate' :: (PersistEntity v, MonadControlIO m) => v -> Migration (DbPersist Postgresql m)
+migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Postgresql m)
 migrate' = migrateRecursively migE migL where
   migE e = do
     let name = getEntityName e
@@ -129,7 +130,7 @@ showColumn (Column n nu t def _) = concat
         Just s  -> " DEFAULT " ++ s
     ]
 
-migConstrAndTrigger :: MonadControlIO m => Bool -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
+migConstrAndTrigger :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
   (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
@@ -146,7 +147,7 @@ migConstrAndTrigger simple name constr = do
 -}
   return (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
 
-migConstr :: MonadControlIO m => Maybe String -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
+migConstr :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstr mainTableName cName constr = do
   let newColumns = concatMap (uncurry mkColumns) $ constrParams constr
   let uniques = constrConstrs constr
@@ -166,7 +167,7 @@ migConstr mainTableName cName constr = do
     Just (Left errs) -> (True, Left errs)
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
-migTriggerOnDelete :: MonadControlIO m => String -> [String] -> DbPersist Postgresql m (Bool, SingleMigration)
+migTriggerOnDelete :: MonadBaseControl IO m => String -> [String] -> DbPersist Postgresql m (Bool, SingleMigration)
 migTriggerOnDelete name deletes = return (False, Right [])
 {-
 migTriggerOnDelete name deletes = do
@@ -185,7 +186,7 @@ migTriggerOnDelete name deletes = do
       
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: MonadControlIO m => String -> String -> String -> DbPersist Postgresql m (Bool, SingleMigration)
+migTriggerOnUpdate :: MonadBaseControl IO m => String -> String -> String -> DbPersist Postgresql m (Bool, SingleMigration)
 migTriggerOnUpdate name fieldName del = return (False, Right [])
 {-
 migTriggerOnUpdate name fieldName del = do
@@ -228,7 +229,7 @@ isEphemeral a = case getType a of
   DbList _  -> True
   _         -> False
 
-checkTable :: MonadControlIO m => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
+checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
 checkTable name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrim name] firstRow
   case table of
@@ -247,7 +248,7 @@ checkTable name = do
         errs -> Left errs
     Nothing -> return Nothing
 
-getColumn :: MonadControlIO m => String -> [PersistValue] -> DbPersist Postgresql m (Either String Column)
+getColumn :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> DbPersist Postgresql m (Either String Column)
 getColumn tname [column_name, PersistByteString is_nullable, udt_name, d] =
     case d' of
         Left s -> return $ Left s

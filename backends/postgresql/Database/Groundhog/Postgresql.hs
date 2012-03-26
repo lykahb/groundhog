@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings #-}
 module Database.Groundhog.Postgresql
     ( withPostgresqlPool
     , withPostgresqlConn
@@ -18,10 +18,9 @@ import Database.Groundhog.Postgresql.Migration
 import qualified Database.HDBC as H
 import qualified Database.HDBC.PostgreSQL as H
 
-import Control.Exception.Control (bracket, onException)
 import Control.Monad (liftM, forM, (>=>))
-import Control.Monad.IO.Control (MonadControlIO)
 import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Trans.Control(MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.Int (Int64)
 import Data.List (intercalate)
@@ -30,7 +29,7 @@ import qualified Data.Map as Map
 import Data.Monoid
 import Data.Pool
 
-instance MonadControlIO m => PersistBackend (DbPersist Postgresql m) where
+instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgresql m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
   insert v = insert' v
   insertBy v = insertBy' v
@@ -54,7 +53,7 @@ instance MonadControlIO m => PersistBackend (DbPersist Postgresql m) where
   getList k = getList' k
 
 --{-# SPECIALIZE withPostgresqlPool :: String -> Int -> (Pool Postgresql -> IO a) -> IO a #-}
-withPostgresqlPool :: MonadControlIO m
+withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> Int -- ^ number of connections to open
                -> (Pool Postgresql -> m a)
@@ -63,19 +62,19 @@ withPostgresqlPool s = createPool (open' s) close'
 
 {-# SPECIALIZE withPostgresqlConn :: String -> (Postgresql -> IO a) -> IO a #-}
 {-# INLINE withPostgresqlConn #-}
-withPostgresqlConn :: MonadControlIO m
+withPostgresqlConn :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> (Postgresql -> m a)
                -> m a
 withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO.close')
 
 {-# SPECIALIZE runPostgresqlPool :: DbPersist Postgresql IO a -> Pool Postgresql -> IO a #-}
-runPostgresqlPool :: MonadControlIO m => DbPersist Postgresql m a -> Pool Postgresql -> m a
+runPostgresqlPool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Pool Postgresql -> m a
 runPostgresqlPool = flip withPool' . runPostgresqlConn
 
 {-# SPECIALIZE runPostgresqlConn :: DbPersist Postgresql IO a -> Postgresql -> IO a #-}
 {-# INLINE runPostgresqlConn #-}
-runPostgresqlConn :: MonadControlIO m => DbPersist Postgresql m a -> Postgresql -> m a
+runPostgresqlConn :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Postgresql -> m a
 runPostgresqlConn f conn@(Postgresql c _) = do
   x <- onException (runDbPersist f conn) (liftIO $ H.rollback c)
   liftIO $ H.commit c
@@ -94,7 +93,7 @@ close' (Postgresql conn _) = H.disconnect conn
 
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Postgresql IO (Key v) #-}
 {-# INLINE insert' #-}
-insert' :: (PersistEntity v, MonadControlIO m) => v -> DbPersist Postgresql m (Key v)
+insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Postgresql m (Key v)
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues v
@@ -123,7 +122,7 @@ insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(
   placeholders = fromStringS (renderFields (const $ fromChar '?') fields) ""
 
 {-# SPECIALIZE insertBy' :: PersistEntity v => v -> DbPersist Postgresql IO (Either (Key v) (Key v)) #-}
-insertBy' :: (MonadControlIO m, PersistEntity v) => v -> DbPersist Postgresql m (Either (Key v) (Key v))
+insertBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m (Either (Key v) (Key v))
 insertBy' v = do
   let e = entityDef v
   let name = getEntityName e
@@ -161,7 +160,7 @@ insertBy' v = do
         executeRaw True cQuery $ PersistInt64 rowid :(tail vals)
         return rowid
 
-replace' :: (MonadControlIO m, PersistEntity v) => Key v -> v -> DbPersist Postgresql m ()
+replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> v -> DbPersist Postgresql m ()
 replace' k v = do
   vals <- toEntityPersistValues v
   let e = entityDef v
@@ -200,7 +199,7 @@ mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (K
 mkEntity i (k:xs) = fromEntityPersistValues (toPrim i:xs) >>= \v -> return (fromPrim k, v)
 mkEntity _ [] = error "Unable to create entity. No values supplied"
 
-select' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> DbPersist Postgresql m [(Key v, v)]
+select' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> DbPersist Postgresql m [(Key v, v)]
 select' (cond :: Cond v c) ords limit offset = start where
   start = if isSimple (constructors e)
     then doSelectQuery (mkQuery name) 0
@@ -224,7 +223,7 @@ select' (cond :: Cond v c) ords limit offset = start where
   binds = maybe id getValues cond' $ limps
   constr = constructors e !! phantomConstrNum (undefined :: c)
 
-selectAll' :: forall m v.(MonadControlIO m, PersistEntity v) => DbPersist Postgresql m [(Key v, v)]
+selectAll' :: forall m v.(MonadBaseControl IO m, MonadIO m, PersistEntity v) => DbPersist Postgresql m [(Key v, v)]
 selectAll' = start where
   start = if isSimple (constructors e)
     then let
@@ -242,7 +241,7 @@ selectAll' = start where
 
 {-# SPECIALIZE get' :: PersistEntity v => Key v -> DbPersist Postgresql IO (Maybe v) #-}
 {-# INLINE get' #-}
-get' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Postgresql m (Maybe v)
+get' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> DbPersist Postgresql m (Maybe v)
 get' (k :: Key v) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
@@ -274,7 +273,7 @@ get' (k :: Key v) = do
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
 
-update' :: (MonadControlIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Postgresql m ()
+update' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Postgresql m ()
 update' upds (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
@@ -287,7 +286,7 @@ update' upds (cond :: Cond v c) = do
       executeRawCached' (mkQuery qName) (getValues upds' <> maybe mempty getValues conds' $ [])
     Nothing -> return ()
 
-delete' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m ()
+delete' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m ()
 delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValues) cond') where
   e = entityDef (undefined :: v)
   cond' = renderCond' cond
@@ -299,7 +298,7 @@ delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValu
     else "DELETE FROM " ++ escape name ++ " WHERE id$ IN(SELECT id$ FROM " ++ escape cName ++ fromStringS whereClause ")" where
       cName = name ++ [defDelim] ++ phantomConstrName (undefined :: c)
 
-deleteByKey' :: (MonadControlIO m, PersistEntity v) => Key v -> DbPersist Postgresql m ()
+deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> DbPersist Postgresql m ()
 deleteByKey' (k :: Key v) = do
   let e = entityDef (undefined :: v)
   let name = getEntityName e
@@ -307,7 +306,7 @@ deleteByKey' (k :: Key v) = do
   executeRawCached' query [toPrim k]
 
 {-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql IO Int #-}
-count' :: (MonadControlIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m Int
+count' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m Int
 count' (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let cond' = renderCond' cond
@@ -324,7 +323,7 @@ count' (cond :: Cond v c) = do
     Nothing -> fail $ "COUNT returned no rows"
 
 {-# SPECIALIZE countAll' :: PersistEntity v => v -> DbPersist Postgresql IO Int #-}
-countAll' :: (MonadControlIO m, PersistEntity v) => v -> DbPersist Postgresql m Int
+countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m Int
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
   let query = "SELECT COUNT(*) FROM " ++ escape name
@@ -334,7 +333,7 @@ countAll' (_ :: v) = do
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
     
-insertList' :: forall m a.(MonadControlIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
+insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' (l :: [a]) = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   k <- queryRawCached' ("INSERT INTO " ++ escape mainName ++ " DEFAULT VALUES RETURNING(id$)") [] getKey
@@ -350,7 +349,7 @@ insertList' (l :: [a]) = do
   go 0 l
   return k
   
-getList' :: forall m a.(MonadControlIO m, PersistField a) => Int64 -> DbPersist Postgresql m [a]
+getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Postgresql m [a]
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   let valuesName = mainName ++ "$values"
@@ -391,7 +390,7 @@ executeRawCached' query vals = do
     H.execute stmt (map pToSql vals)
     return ()
 
-queryRawCached' :: MonadControlIO m => String -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRawCached' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRawCached' query vals f = do
   stmt <- getStatementCached query
   liftIO $ H.execute stmt (map pToSql vals)

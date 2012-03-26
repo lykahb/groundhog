@@ -1,11 +1,12 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, RankNTypes, ScopedTypeVariables, FlexibleContexts #-}
 module Main where
 import qualified Data.Map as M
+import qualified Control.Exception as E
 import Control.Exception.Base(SomeException)
-import Control.Exception.Control (catch)
 import Control.Monad(replicateM_, liftM, forM_, (>=>), unless)
 import Control.Monad.IO.Class(liftIO)
-import Control.Monad.IO.Control (MonadControlIO)
+import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Trans.Control(MonadBaseControl, control)
 import Database.Groundhog.Core
 import Database.Groundhog.Generic.Sql.String
 import Database.Groundhog.TH
@@ -43,10 +44,10 @@ main = do
               , mkTestSuite "Database.Groundhog.Postgresql" $ runPSQL
               ]
 
-migr :: (PersistEntity v, PersistBackend m, MonadControlIO m) => v -> m ()
+migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
 migr v = runMigration silentMigrationLogger (migrate v)
 
-mkTestSuite :: (PersistBackend m, MonadControlIO m) => String -> (m () -> IO ()) -> Test
+mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> (m () -> IO ()) -> Test
 mkTestSuite label run = testGroup label $
   [ testCase "testNumber" $ run testNumber
   , testCase "testInsert" $ run testInsert
@@ -72,22 +73,22 @@ mkTestSuite label run = testGroup label $
   , testCase "testDoubleMigration" $ run testDoubleMigration
   ]
   
-sqliteMigrationTestSuite :: (PersistBackend m, MonadControlIO m) => (m () -> IO ()) -> Test
+sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
 sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration" $
   [ testCase "testOrphanConstructors" $ run testOrphanConstructors
   ]
 
-(@=?) :: (Eq a, Show a, MonadControlIO m) => a -> a -> m ()
+(@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
 
-testOrphanConstructors :: (PersistBackend m, MonadControlIO m) => m ()
+testOrphanConstructors :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testOrphanConstructors = do
   migr (undefined :: Multi String)
   executeRaw False "drop table Multi$String" []
   mig <- createMigration (migrate (undefined :: Multi String))
   [("Multi$String", Left ["Orphan constructor table found: Multi$String$First","Orphan constructor table found: Multi$String$Second"])] @=? M.toList mig
 
-testNumber :: (PersistBackend m, MonadControlIO m) => m ()
+testNumber :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testNumber = do
   migr (undefined :: Number)
   let minNumber = Number minBound minBound minBound minBound minBound minBound minBound minBound minBound
@@ -97,7 +98,7 @@ testNumber = do
   Just minNumber @=? minNumber'
   Just maxNumber @=? maxNumber'
 
-testInsert :: (PersistBackend m, MonadControlIO m) => m ()
+testInsert :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testInsert = do
   migr (undefined :: Single String)
   let val = Single "abc"
@@ -105,7 +106,7 @@ testInsert = do
   val' <- get k
   val' @=? Just val
 
-testSelect :: (PersistBackend m, MonadControlIO m) => m ()
+testSelect :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testSelect = do
   migr (undefined :: Single (Int, String))
   let val1 = Single (5 :: Int, "abc")
@@ -123,7 +124,7 @@ testSelect = do
   vals4 <- select (toArith (SingleField ~> Tuple2_0Selector) + 1 >. (10 :: Int)) [] 0 0
   [(k3, val3)] @=? vals4
 
-testCond :: forall m . (PersistBackend m, MonadControlIO m) => m ()
+testCond :: forall m . (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testCond = do
   let rend :: forall v c s . (StringLike s, PersistEntity v) => Cond v c -> Maybe (RenderS s)
       rend = renderCond id (fromString "id") (\a b -> a <> fromString "=" <> b) (\a b -> a <> fromString "<>" <> b)
@@ -158,7 +159,7 @@ testCond = do
   ("single$val0=? AND single$val1=?", [toPrim "abc", toPrim "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
   
 
-testCount :: (PersistBackend m, MonadControlIO m) => m ()
+testCount :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testCount = do
   migr (undefined :: Multi String)
   insert $ (First 0 :: Multi String)
@@ -172,7 +173,7 @@ testCount = do
   num3 <- count (SingleField ==. "abc")
   1 @=? num3
 
-testUpdate :: (PersistBackend m, MonadControlIO m) => m ()
+testUpdate :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testUpdate = do
   let val = Single ("abc", "def")
   migr val
@@ -186,7 +187,7 @@ testUpdate = do
   val2 <- get k
   Just val @=? val2
 
-testComparison :: (PersistBackend m, MonadControlIO m) => m ()
+testComparison :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testComparison = do
   let val1 = Single (1 :: Int)
   let val2 = Single (2 :: Int)
@@ -206,7 +207,7 @@ testComparison = do
   result6 <- select (SingleField <=. (1 :: Int)) [] 0 0
   [(k1, val1)] @=? result6
 
-testEncoding :: (PersistBackend m, MonadControlIO m) => m ()
+testEncoding :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testEncoding = do
   let val = Single "\x0001\x0081\x0801\x10001"
   migr val
@@ -214,7 +215,7 @@ testEncoding = do
   val' <- get k
   Just val @=? val'
 
-testTuple :: (PersistBackend m, MonadControlIO m) => m ()
+testTuple :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testTuple = do
   let val = Single ("abc", ("def", 5 :: Int))
   migr val
@@ -222,7 +223,7 @@ testTuple = do
   val' <- get k
   Just val @=? val'
 
-testTupleList :: (PersistBackend m, MonadControlIO m) => m ()
+testTupleList :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testTupleList = do
   let val = Single [("abc", 4 :: Int), ("def", 5)]
   migr val
@@ -230,7 +231,7 @@ testTupleList = do
   val' <- get k
   Just val @=? val'
   
-testListTriggersOnDelete :: (PersistBackend m, MonadControlIO m) => m ()
+testListTriggersOnDelete :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
   k <- insert $ (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
@@ -247,7 +248,7 @@ testListTriggersOnDelete = do
     sublist <- queryRaw False "select * from \"List$$String\" where id$=?" listsInsideListKey firstRow
     Nothing @=? sublist
 
-testListTriggersOnUpdate :: (PersistBackend m, MonadControlIO m) => m ()
+testListTriggersOnUpdate :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testListTriggersOnUpdate = do
   migr (undefined :: Single (String, [[String]]))
   k <- insert $ (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
@@ -264,7 +265,7 @@ testListTriggersOnUpdate = do
     sublist <- queryRaw False "select * from \"List$$String\" where id$=?" listsInsideListKey firstRow
     Nothing @=? sublist
 
-testDelete :: (PersistBackend m, MonadControlIO m) => m ()
+testDelete :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testDelete = do
   migr (undefined :: Multi String)
   k <- insert $ Second "abc"
@@ -274,7 +275,7 @@ testDelete = do
   constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim k] firstRow
   Nothing @=? constr
 
-testDeleteByKey :: (PersistBackend m, MonadControlIO m) => m ()
+testDeleteByKey :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testDeleteByKey = do
   migr (undefined :: Multi String)
   k <- insert $ Second "abc"
@@ -284,7 +285,7 @@ testDeleteByKey = do
   constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim k] firstRow
   Nothing @=? constr
 
-testReplaceMulti :: (PersistBackend m, MonadControlIO m) => m ()
+testReplaceMulti :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testReplaceMulti = do
   migr (undefined :: Single (Multi String))
   -- we need Single to test that referenced value cam be replaced
@@ -302,7 +303,7 @@ testReplaceMulti = do
   oldConstructor <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id$=?" [toPrim valueKey] firstRow
   Nothing @=? oldConstructor
 
-testReplaceSingle :: (PersistBackend m, MonadControlIO m) => m ()
+testReplaceSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testReplaceSingle = do
   migr (undefined :: Single (Single String))
   -- we need Single to test that referenced value cam be replaced
@@ -314,7 +315,7 @@ testReplaceSingle = do
   replaced <- get valueKey
   Just (Single "def") @=? replaced
 
-testMigrateAddColumnSingle :: (PersistBackend m, MonadControlIO m) => m ()
+testMigrateAddColumnSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddColumnSingle = do
   migr (undefined :: Old.AddColumn)
   migr (undefined :: New.AddColumn)
@@ -325,7 +326,7 @@ testMigrateAddColumnSingle = do
   val' <- get k
   Just val @=? val'
 
-testMigrateAddConstructorToMany :: (PersistBackend m, MonadControlIO m) => m ()
+testMigrateAddConstructorToMany :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddConstructorToMany = do
   migr (undefined :: Old.AddConstructorToMany)
   Key k1 <- insert $ Old.AddConstructorToMany1 1
@@ -339,7 +340,7 @@ testMigrateAddConstructorToMany = do
   val0 <- get k0
   Just (New.AddConstructorToMany0 5) @=? val0
 
-testDoubleMigration :: (PersistBackend m, MonadControlIO m) => m ()
+testDoubleMigration :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testDoubleMigration = do
   let val1 = Single ([""], 0 :: Int)
   migr val1
@@ -358,7 +359,7 @@ testDoubleMigration = do
   [] @=? filter (/= Right []) (Map.elems m3)
   return ()
 
-testLongNames :: (PersistBackend m, MonadControlIO m) => m ()
+testLongNames :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testLongNames = do
   let val = Single [(Single [Single ""], 0 :: Int, [""], (), [""])]
   migr val
@@ -374,14 +375,14 @@ testLongNames = do
   [] @=? filter (/= Right []) (Map.elems m2)
 
 
-testReference :: (PersistBackend m, MonadControlIO m) => m ()
+testReference :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testReference = do
   migr (undefined :: Single (Single String))
   k <- insert $ Single (Single "abc")
   Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Single$String\" WHERE id$=?" [toPrim k] firstRow
   assertExc "Foreign key must prevent deletion" $ deleteByKey (fromPrim valueKey' :: Key (Single String))
 
-testMaybeReference :: (PersistBackend m, MonadControlIO m) => m ()
+testMaybeReference :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMaybeReference = do
   migr (undefined :: Single (Maybe (Single String)))
   k <- insert $ Single (Just (Single "abc"))
@@ -391,7 +392,7 @@ testMaybeReference = do
   Just (Single Nothing) @=? val'
 
 -- This test must just compile
-testKeys :: (PersistBackend m, MonadControlIO m) => m ()
+testKeys :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testKeys = do
   migr (undefined :: Keys)
   k <- insert $ Single ""
@@ -418,12 +419,13 @@ create_truncate_tables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN
 \END;\
 \$$ LANGUAGE plpgsql"
 
-clean :: (PersistBackend m, MonadControlIO m) => m ()
+clean :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 clean = do
   executeRaw True "drop schema public cascade" []
   executeRaw True "create schema public" []
 
-assertExc :: (PersistBackend m, MonadControlIO m) => String -> m a -> m ()
+assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()
 assertExc err m = do
-  happened <- catch (m >> return False) $ \e -> const (return True) (e :: SomeException)
+  happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\e -> const (runInIO $ return True) (e :: SomeException))
   unless happened $ liftIO (H.assertFailure err)
+  

@@ -52,11 +52,13 @@ module Database.Groundhog.Core
   ) where
 
 import Control.Applicative(Applicative)
+import Control.Monad.Base(MonadBase (liftBase))
 import Control.Monad.Trans.Class(MonadTrans(..))
 import Control.Monad.IO.Class(MonadIO(..))
-import Control.Monad.IO.Control (MonadControlIO)
-import Control.Monad.Trans.Reader(ReaderT, runReaderT)
+import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
+import Control.Monad.Trans.Reader(ReaderT(..), runReaderT)
 import Control.Monad.Trans.State(StateT)
+import Control.Monad(liftM)
 import Data.Bits(bitSize)
 import Data.ByteString.Char8 (ByteString, unpack)
 import qualified Data.Text as T
@@ -223,10 +225,23 @@ a >.  b = Compare Gt (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
 a >=. b = Compare Ge (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
 
 newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
-  deriving (Monad, MonadIO, Functor, Applicative, MonadControlIO, MonadTrans)
+  deriving (Monad, MonadIO, Functor, Applicative, MonadTrans)
+
+instance MonadBase IO m => MonadBase IO (DbPersist conn m) where
+  liftBase = lift . liftBase
+
+instance MonadTransControl (DbPersist conn) where
+  newtype StT (DbPersist conn) a = StReader {unStReader :: a}
+  liftWith f = DbPersist $ ReaderT $ \r -> f $ \t -> liftM StReader $ runReaderT (unDbPersist t) r
+  restoreT = DbPersist . ReaderT . const . liftM unStReader
+
+instance MonadBaseControl IO m => MonadBaseControl IO (DbPersist conn m) where
+  newtype StM (DbPersist conn m) a = StMSP {unStMSP :: ComposeSt (DbPersist conn) m a}
+  liftBaseWith = defaultLiftBaseWith StMSP
+  restoreM     = defaultRestoreM   unStMSP
 
 runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
-runDbPersist = runReaderT.unDbPersist
+runDbPersist = runReaderT . unDbPersist
 
 class Monad m => PersistBackend m where
   -- | Insert a new record to a database and return its 'Key'
@@ -475,15 +490,15 @@ class PersistField a => PurePersistField a where
 
 ---- INSTANCES
 
-instance Embedded (a, b) where
-  data Selector (a, b) constr where
+instance Embedded (a', b') where
+  data Selector (a', b') constr where
     Tuple2_0Selector :: Selector (a, b) a
     Tuple2_1Selector :: Selector (a, b) b
   selectorNum Tuple2_0Selector = 0
   selectorNum Tuple2_1Selector = 1
 
-instance Embedded (a, b, c) where
-  data Selector (a, b, c) constr where
+instance Embedded (a', b', c') where
+  data Selector (a', b', c') constr where
     Tuple3_0Selector :: Selector (a, b, c) a
     Tuple3_1Selector :: Selector (a, b, c) b
     Tuple3_2Selector :: Selector (a, b, c) c
@@ -491,8 +506,8 @@ instance Embedded (a, b, c) where
   selectorNum Tuple3_1Selector = 1
   selectorNum Tuple3_2Selector = 2
 
-instance Embedded (a, b, c, d) where
-  data Selector (a, b, c, d) constr where
+instance Embedded (a', b', c', d') where
+  data Selector (a', b', c', d') constr where
     Tuple4_0Selector :: Selector (a, b, c, d) a
     Tuple4_1Selector :: Selector (a, b, c, d) b
     Tuple4_2Selector :: Selector (a, b, c, d) c
@@ -502,8 +517,8 @@ instance Embedded (a, b, c, d) where
   selectorNum Tuple4_2Selector = 2
   selectorNum Tuple4_3Selector = 3
 
-instance Embedded (a, b, c, d, e) where
-  data Selector (a, b, c, d, e) constr where
+instance Embedded (a', b', c', d', e') where
+  data Selector (a', b', c', d', e') constr where
     Tuple5_0Selector :: Selector (a, b, c, d, e) a
     Tuple5_1Selector :: Selector (a, b, c, d, e) b
     Tuple5_2Selector :: Selector (a, b, c, d, e) c
