@@ -6,7 +6,7 @@ import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Postgresql.Base
 
-import Control.Arrow ((&&&))
+import Control.Arrow ((&&&), first)
 import Control.Monad(liftM)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control(MonadBaseControl)
@@ -157,7 +157,7 @@ migConstr mainTableName cName constr = do
   x <- checkTable cName
   return $ case x of
     Nothing  -> let
-      rest = map (AlterTable cName . uncurry AddUniqueConstraint) uniques
+      rest = map (\(Constraint name fields) -> AlterTable cName $ AddUniqueConstraint name fields) uniques
       in (False, mergeMigrations $ (Right $ (map showAlterDb $ (AddTable addTable):rest)) : addReferences)
     Just (Right old) -> let
       (acs, ats) = getAlters (newColumns, uniques) old
@@ -241,7 +241,7 @@ checkTable name = do
           helperU x = Left $ "Invalid result from information_schema.constraint_column_usage: " ++ show x
       rawUniqs <- queryRaw' "SELECT constraint_name, column_name FROM information_schema.constraint_column_usage WHERE table_name=? AND column_name <> 'id$' ORDER BY constraint_name, column_name" [toPrim name] (mapAllRows $ return . helperU)
       let (uniq_errs, uniqRows) = partitionEithers rawUniqs
-      let uniqs' = map (fst . head &&& map snd) $ groupBy ((==) `on` fst) uniqRows
+      let uniqs' = map (uncurry Constraint . first head . unzip) $ groupBy ((==) `on` fst) uniqRows
 
       return $ Just $ case col_errs ++ uniq_errs of
         []   -> Right (cols', uniqs')
@@ -293,17 +293,18 @@ getAlters (c1, u1) (c2, u2) =
     getAltersC (new:news) old =
         let (alters, old') = findAlters new old
          in alters ++ getAltersC news old'
-    getAltersU [] old = map (DropConstraint . fst) old
-    getAltersU ((name, cols):news) old =
-        case lookup name old of
-            Nothing -> AddUniqueConstraint name cols : getAltersU news old
-            Just ocols ->
-                let old' = filter (\(x, _) -> x /= name) old
-                 in if sort cols == ocols
+    getAltersU [] old = map (\(Constraint name _) -> DropConstraint name) old
+    getAltersU (Constraint name cols:news) old =
+        case filter (\(Constraint x _) -> x == name) old of
+            [] -> AddUniqueConstraint name cols : getAltersU news old
+            [Constraint _ ocols] ->
+                let old' = filter (\(Constraint x _) -> x /= name) old
+                in if sort cols == ocols
                         then getAltersU news old'
                         else  DropConstraint name
                             : AddUniqueConstraint name cols
                             : getAltersU news old'
+            constraints -> error $ "There cannot be multiple constraints with the same name: " ++ show constraints
 
 findAlters :: Column -> [Column] -> ([AlterColumn'], [Column])
 findAlters col@(Column name isNull type_ def ref) cols =

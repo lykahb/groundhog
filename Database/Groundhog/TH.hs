@@ -3,29 +3,26 @@
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
-  ( deriveEntity
-  , deriveEntityWith
-  , setDbEntityName
-  , setConstructor
-  , setPhantomName
-  , setDbConstrName
-  , setConstraints
-  , setField
-  , setDbFieldName
-  , setExprFieldName
+  ( mkPersist
+  , groundhog
+  , groundhogFile
   , NamingStyle(..)
   , fieldNamingStyle
   , persistentNamingStyle
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(DbEntity), Constraint, Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), failMessage)
+import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(DbEntity), Constraint(..), Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), failMessage)
+import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax(StrictType, VarStrictType, lift)
-import Control.Monad(liftM, forM, forM_, foldM)
-import Control.Monad.Trans.State(State, runState, modify)
+import Language.Haskell.TH.Syntax(StrictType, VarStrictType, Lift(..))
+import Language.Haskell.TH.Quote
+import Control.Monad(liftM, forM, forM_, foldM, when)
+import Data.ByteString.Char8(pack)
 import Data.Char(toUpper, toLower, isSpace)
+import Data.Either(partitionEithers)
 import Data.List(nub, (\\))
+import Data.Yaml(decodeEither)
 
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
@@ -36,19 +33,27 @@ data THEntityDef = THEntityDef {
   , thConstructors :: [THConstructorDef]
 } deriving Show
 
+data THEmbeddedDef = THEmbeddedDef {
+    embeddedName :: Name
+  , dbEmbeddedName :: String -- used only to set polymorphic part of name of its container
+  , thEmbeddedTypeParams :: [TyVarBndr]
+  , embeddedFields :: [THFieldDef]
+} deriving Show
+
 data THConstructorDef = THConstructorDef {
     thConstrName    :: Name -- U2
   , thPhantomConstrName :: String -- U2Constructor
   , dbConstrName    :: String -- SQLU2
-  , thConstrParams  :: [FieldDef]
+  , thConstrParams  :: [THFieldDef]
   , thConstrConstrs :: [Constraint]
 } deriving Show
 
-data FieldDef = FieldDef {
+data THFieldDef = THFieldDef {
     fieldName :: String -- bar
   , dbFieldName :: String -- SQLbar
   , exprName :: String -- BarField
   , fieldType :: Type
+  , embeddedDef :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
 -- | Defines how the names are created. The mk* functions correspond to the set* functions.
@@ -136,90 +141,61 @@ conciseNamingStyle = fieldNamingStyle {
   mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName
 }
 
--- | Set name of the table for the datatype
-setDbEntityName :: String -> State THEntityDef ()
-setDbEntityName name = modify $ \d -> d {dbEntityName = name}
+replaceOne :: (Eq c, Show c) => (a -> c) -> (b -> c) -> (a -> b -> b) -> a -> [b] -> [b]
+replaceOne getter1 getter2 apply a bs = case length (filter ((getter1 a ==) . getter2) bs) of
+  1 -> map (\b -> if getter1 a == getter2 b then apply a b else b) bs
+  0 -> error $ "Element with name " ++ show (getter1 a) ++ " not found"
+  _ -> error $ "Found more than one element with name " ++ show (getter1 a)
 
--- | Modify constructor
-setConstructor :: Name -> State THConstructorDef () -> State THEntityDef ()
-setConstructor name f = modify $ \d ->
-  d {thConstructors = replaceOne thConstrName name f $ thConstructors d}
+-- | Create the auxiliary structures. 
+-- Particularly, it creates GADT 'Field' data instance for referring to the fields in expressions and phantom types for data constructors.
+-- The default names of auxiliary datatypes and names used in database are generated using the naming style and can be changed via configuration.
+-- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'. 
+mkPersist :: NamingStyle -> PersistSettings -> Q [Dec]
+mkPersist style (PersistSettings defs) = do
+  let duplicates = notUniqueBy id $ map (either psDataName psEmbeddedName) defs
+  when (not $ null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
+  let (entities, embeddeds) = partitionEithers defs
+  entitiesDecs <- forM entities $ \ent -> do
+    let name = mkName $ psDataName ent
+    info <- reify name
+    case info of
+      TyConI x -> do
+        case x of
+          def@(DataD _ _ _ _ _)  -> mkDecs $ either error id $ validate $ applyEntitySettings ent $ mkTHEntityDefWith style def
+          NewtypeD _ _ _ _ _ -> error "Newtypes are not supported"
+          _ -> error $ "Unknown declaration type: " ++ show name
+      _        -> error $ "Only datatypes can be processed: " ++ show name
+  return $ concat entitiesDecs
 
--- | Set name for phantom constructor used to parametrise 'Field'
-setPhantomName :: String -> State THConstructorDef ()
-setPhantomName name = modify $ \c -> c {thPhantomConstrName = name}
+applyEntitySettings :: PSEntityDef -> THEntityDef -> THEntityDef
+applyEntitySettings settings def@(THEntityDef{..}) =
+  def { dbEntityName = maybe dbEntityName id $ psDbEntityName settings
+      , thConstructors = maybe thConstructors (f thConstructors) $ psConstructors settings
+      } where
+  f = foldr $ replaceOne psConstrName (nameBase . thConstrName) applyConstructorSettings
 
--- | Set name of the constructor specific table
-setDbConstrName :: String -> State THConstructorDef ()
-setDbConstrName name = modify $ \c -> c {dbConstrName = name}
+applyConstructorSettings :: PSConstructorDef -> THConstructorDef -> THConstructorDef
+applyConstructorSettings settings def@(THConstructorDef{..}) =
+  def { thPhantomConstrName = maybe thPhantomConstrName id $ psPhantomConstrName settings
+      , dbConstrName = maybe dbConstrName id $ psDbConstrName settings
+      , thConstrParams = maybe thConstrParams (f thConstrParams) $ psConstrParams settings
+      , thConstrConstrs = maybe thConstrConstrs id $ psConstrConstrs settings
+      } where
+  f = foldr $ replaceOne psFieldName fieldName applyFieldSettings
+  
+applyFieldSettings :: PSFieldDef -> THFieldDef -> THFieldDef
+applyFieldSettings settings def@(THFieldDef{..}) =
+  def { dbFieldName = maybe dbFieldName id $ psDbFieldName settings
+      , exprName = maybe exprName id $ psExprName settings
+      , embeddedDef = psEmbeddedDef settings
+      }
 
--- | Set constraints of the constructor. The names should be database names of the fields
-setConstraints :: [Constraint] -> State THConstructorDef ()
-setConstraints cs = modify $ \c -> c {thConstrConstrs = cs}
-
--- | Modify field. Field name is a regular field name in record constructor. Otherwise, it is lower-case constructor name with field number.
-setField :: String -> State FieldDef () -> State THConstructorDef ()
-setField name f = modify $ \c ->
-  c {thConstrParams = replaceOne fieldName name f $ thConstrParams c}
-
--- | Set name of the field column in a database
-setDbFieldName :: String -> State FieldDef ()
-setDbFieldName name = modify $ \f -> f {dbFieldName = name}
-
--- | Set name of field constructor used in expressions
-setExprFieldName :: String -> State FieldDef ()
-setExprFieldName name = modify $ \f -> f {exprName = name}
-
-replaceOne :: (Eq b, Show b) => (a -> b) -> b -> State a () -> [a] -> [a]
-replaceOne p a f xs = case length (filter ((==a).p) xs) of
-  1 -> map (\x -> if p x == a then runModify f x else x) xs
-  0 -> error $ "Element with name " ++ show a ++ " not found"
-  _ -> error $ "Found more than one element with name " ++ show a
-
-runModify :: State a () -> a -> a
-runModify m a = snd $ runState m a
-
--- | Creates the auxiliary structures for a custom datatype, which are required by Groundhog to manipulate it.
--- The names of auxiliary datatypes and names used in database are generated using the naming style
-deriveEntityWith :: NamingStyle -> Name -> Maybe (State THEntityDef ()) -> Q [Dec]
-deriveEntityWith style name f = do
-  info <- reify name
-  let f' = maybe id runModify f
-  case info of
-    TyConI x -> do
-      case x of
-        def@(DataD _ _ _ _ _)  -> mkDecs $ either error id $ validate $ f' $ mkTHEntityDefWith style def
-        NewtypeD _ _ _ _ _ -> error "Newtypes are not supported"
-        _ -> error $ "Unknown declaration type"
-    _        -> error "Only datatypes can be processed"
-
--- | Create the auxiliary structures using the default naming style.
--- Particularly, it creates GADT 'Field' data instance for referring to the fields in
--- expressions and phantom types for data constructors. 
--- The generation can be adjusted using the optional modifier function. Example:
---
--- > data SomeData a = Normal Int | Record { bar :: Maybe String, asc :: a}
--- > deriveEntity ''SomeData $ Just $ do
--- >   setDbEntityName "SomeTableName"
--- >   setConstructor 'Normal $ do
--- >     setPhantomName "NormalConstructor" -- the same as default
---
--- It will generate these new datatypes and required instances.
---
--- > data NormalConstructor
--- > data RecordConstructor
--- > instance PersistEntity where
--- >   data Field (SomeData a) where
--- >     Normal0  :: Field NormalConstructor Int
--- >     BarField :: Field RecordConstructor (Maybe String)
--- >     AscField :: Field RecordConstructor a
--- > ...
-deriveEntity :: Name -> Maybe (State THEntityDef ()) -> Q [Dec]
-deriveEntity = deriveEntityWith fieldNamingStyle
+notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]
+notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
 
 validate :: THEntityDef -> Either String THEntityDef
 validate def = do
-  let notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
   let assertUnique f xs what = case notUniqueBy f xs of
         [] -> return ()
         ys -> fail $ "All " ++ what ++ " must be unique: " ++ show ys
@@ -235,6 +211,9 @@ validate def = do
     assertUnique exprName fields "expr field name in a constructor"
     assertUnique dbFieldName fields "db field name in a constructor"
     forM_ fields $ \fdef -> assertSpaceFree (exprName fdef) "field expr name"
+    case filter (\(Constraint _ cfields) -> null cfields) $ thConstrConstrs cdef of
+      [] -> return ()
+      ys -> fail $ "Constraints cannot have no fields: " ++ show ys
   return def
 
 mkTHEntityDef :: Dec -> THEntityDef
@@ -254,11 +233,11 @@ mkTHEntityDefWith (NamingStyle{..}) (DataD _ dname typeVars cons _) =
    where
     mkConstr' name params = THConstructorDef name (mkPhantomName dname' (nameBase name) cNum) (mkDbConstrName dname' (nameBase name) cNum) params []
 
-    mkField :: String -> StrictType -> Int -> FieldDef
-    mkField cname (_, t) fNum = FieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (apply mkNormalExprFieldName) t where
+    mkField :: String -> StrictType -> Int -> THFieldDef
+    mkField cname (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (apply mkNormalExprFieldName) t Nothing where
       apply f = f dname' cname cNum fNum
-    mkVarField :: String -> VarStrictType -> Int -> FieldDef
-    mkVarField cname (fname, _, t) fNum = FieldDef fname' (apply mkDbFieldName) (apply mkExprFieldName) t where
+    mkVarField :: String -> VarStrictType -> Int -> THFieldDef
+    mkVarField cname (fname, _, t) fNum = THFieldDef fname' (apply mkDbFieldName) (apply mkExprFieldName) t Nothing where
       apply f = f dname' cname cNum fname' fNum
       fname' = nameBase fname
 mkTHEntityDefWith _ _ = error "Only datatypes can be processed"
@@ -268,7 +247,7 @@ firstLetter f s = f (head s):tail s
 
 mkDecs :: THEntityDef -> Q [Dec]
 mkDecs def = do
---  runIO (print def)
+  --runIO (print def)
   decs <- fmap concat $ sequence
     [ mkPhantomConstructors def
     , mkPhantomConstructorInstances def
@@ -366,7 +345,8 @@ mkPersistEntityInstance def = do
       let start = caseE (varE xs) $ matches ++ [failure]
       let failureFunc = funD failureName [clause [] failureBody []]
       funD 'fromEntityPersistValues [clause [varP xs] (normalB start) [failureFunc]]
-  
+
+  --TODO: support constraints with embedded datatypes fields
   getConstraints' <- let
     hasConstraints = not . null . thConstrConstrs
     clauses = zipWith mkClause [0::Int ..] (thConstructors def)
@@ -377,7 +357,7 @@ mkPersistEntityInstance def = do
         [f] -> varE $ mkName $ fieldName f
         []  -> error $ "Database field name " ++ show n ++ " declared in constraint not found"
         _   -> error $ "It can never happen. Found several fields with one database name " ++ show n
-      body = normalB $ [| (cNum, $(listE $ map (\(cname, fnames) -> [|(cname, $(listE $ map (\fname -> [| (fname, toPrim $(getFieldName fname)) |] ) fnames )) |] ) $ thConstrConstrs cdef)) |]
+      body = normalB $ [| (cNum, $(listE $ map (\(Constraint cname fnames) -> [|(cname, $(listE $ map (\fname -> [| (fname, toPrim $(getFieldName fname)) |] ) fnames )) |] ) $ thConstrConstrs cdef)) |]
       names = map (mkName . fieldName) $ thConstrParams cdef
     in funD 'getConstraints clauses
      
@@ -496,3 +476,60 @@ spanM p = go  where
         (ys, zs) <- go xs
         return (x:ys, zs)
       else return ([], x:xs)
+
+-- | Converts quasiquoted settings into the datatype used by mkPersist. The settings are represented in YAML.
+-- Unless the property is marked as mandatory, it can be omitted. In this case value created by the NamingStyle will be used.
+-- The settings below have all properties set explicitly.
+--
+-- @
+--data Settable = First {foo :: String, bar :: Int} deriving (Eq, Show)
+--
+--mkPersist fieldNamingStyle [groundhog|
+--definitions:                           # Optional header before the definitions list
+--                                       # The list elements start with -
+--  - entity: Settable                   # Mandatory. Entity datatype name
+--    dbName: Settable                   # Name of the main table
+--    constructors:                      # List of constructors. The constructors you don't change can be omitted
+--      - name: First                    # Mandatory. Constructor name
+--        phantomName: FooBarConstructor # Constructor phantom type name used to guarantee type safety
+--        dbName: First                  # Name of constructor table which is created only for datatypes with multiple constructors
+--        constrParams:                  # List of constructor parameters. The parameters you don't change can be omitted
+--          - name: foo
+--            dbName: foo                # Column name
+--            exprName: FooField         # Name of a field used in expressions
+--          - name: bar
+--            dbName: bar
+--            exprName: BarField
+--        constraints:
+--          - name: someconstraint
+--            fields: [foo, bar]         # List of column names
+-- |]
+-- @
+--
+-- which is equivalent to the declaration with defaulted names
+--
+-- @
+--mkPersist fieldNamingStyle [groundhog|
+--entity: Settable                       # If we did not want to add a constraint, this line would be enough
+--constructors:
+--  - name: First
+--    constraints:
+--      - name: someconstraint
+--        fields: [foo, bar]
+-- |]
+-- @
+groundhog :: QuasiQuoter
+groundhog = QuasiQuoter { quoteExp  = parseSettings
+                        , quotePat  = error "groundhog: pattern quasiquoter"
+                        , quoteType = error "groundhog: type quasiquoter"
+                        , quoteDec  = error "groundhog: declaration quasiquoter"
+                        }
+
+-- | Parses configuration stored in the file
+-- > mkPersist fieldNamingStyle [groundhogFile|../groundhog.yaml|]
+groundhogFile :: QuasiQuoter
+groundhogFile = quoteFile groundhog
+
+parseSettings :: String -> Q Exp
+parseSettings s = either fail lift result where
+  result = decodeEither $ pack s :: Either String PersistSettings

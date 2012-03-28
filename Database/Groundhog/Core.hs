@@ -37,7 +37,7 @@ module Database.Groundhog.Core
   , EntityDef(..)
   , ConstructorDef(..)
   , Constructor(..)
-  , Constraint
+  , Constraint(..)
   -- * Migration
   , SingleMigration
   , NamedMigrations
@@ -151,7 +151,7 @@ data Order v c = forall a f . FieldLike f => Asc  (f v c a)
 
 -- | Generalises data that can occur in expressions (so far there are regular Field and SubField).
 class FieldLike f where
-  -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [("val0", DbString), ("some", DbEmbedded False [namedType "", namedType True])].
+  -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [(\"val0\", DbString), (\"some\", DbEmbedded False [namedType \"\", namedType True])].
   -- Function fieldChain can be simplified to f v c a -> [(String, NamedType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
   fieldChain :: PersistEntity v => f v c a -> Either String [(String, NamedType)]
 
@@ -331,7 +331,7 @@ class Constructor a where
 
 -- | Constraint name and list of the field names that form a unique combination.
 -- Only fields of 'PrimitivePersistField' types can be used in a constraint
-type Constraint = (String, [String])
+data Constraint = Constraint String [String] deriving (Show, Eq)
 
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
 -- datatypes, eg DbString instead of DbVarchar. Different databases may

@@ -1,10 +1,9 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, RankNTypes, ScopedTypeVariables, FlexibleContexts #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, StandaloneDeriving #-}
 module Main where
 import qualified Data.Map as M
 import qualified Control.Exception as E
 import Control.Exception.Base(SomeException)
 import Control.Monad(replicateM_, liftM, forM_, (>=>), unless)
-import Control.Monad.IO.Class(liftIO)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control(MonadBaseControl, control)
 import Database.Groundhog.Core
@@ -26,13 +25,43 @@ data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, 
 data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
 data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
+data Settable = Settable {settable1 :: String, settable2 :: String, settableTuple :: (Int, (String, Int))} deriving (Eq, Show)
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String), refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String))}
+-- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
+deriving instance Eq Keys
+deriving instance Show Keys
 
-deriveEntity ''Number Nothing
-deriveEntity ''MaybeContext Nothing
-deriveEntity ''Single Nothing
-deriveEntity ''Multi Nothing
-deriveEntity ''Keys Nothing
+mkPersist fieldNamingStyle [groundhog|
+- entity: Number
+- entity: MaybeContext
+- entity: Single
+- entity: Multi
+- entity: Keys
+- entity: Settable
+  dbName: sqlsettable
+  constructors:
+    - name: Settable
+      phantomName: SettableFooBarConstructor
+      dbName: entity_db_name_is_used_instead
+      constrParams:
+        - name: settable1
+          dbName: sqlsettable1
+          exprName: Settable1Fld
+        - name: settableTuple
+          embeddedType:
+            - name: val0
+              dbName: firstTupleElement
+            - name: val1
+              embeddedType:
+                - name: val0
+                  dbName: secondTupleElement
+                - name: val1
+                  dbName: thirdTupleElement
+              dbName: name
+      constraints:
+        - name: someconstraint
+          fields: [sqlsettable1, settable2]
+|]
 
 main :: IO ()
 main = do
@@ -40,15 +69,15 @@ main = do
   let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
   -- we need clean db before each migration test
   defaultMain [ sqliteMigrationTestSuite $ withSqliteConn ":memory:" . runSqliteConn
-              , mkTestSuite "Database.Groundhog.Sqlite" $ runSqlite
-              , mkTestSuite "Database.Groundhog.Postgresql" $ runPSQL
+              , mkTestSuite "Database.Groundhog.Sqlite" runSqlite
+              , mkTestSuite "Database.Groundhog.Postgresql" runPSQL
               ]
 
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
 migr v = runMigration silentMigrationLogger (migrate v)
 
 mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> (m () -> IO ()) -> Test
-mkTestSuite label run = testGroup label $
+mkTestSuite label run = testGroup label
   [ testCase "testNumber" $ run testNumber
   , testCase "testInsert" $ run testInsert
   , testCase "testSelect" $ run testSelect
@@ -74,7 +103,7 @@ mkTestSuite label run = testGroup label $
   ]
   
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
-sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration" $
+sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
   [ testCase "testOrphanConstructors" $ run testOrphanConstructors
   ]
 
@@ -97,6 +126,18 @@ testNumber = do
   maxNumber' <- insert maxNumber >>= get
   Just minNumber @=? minNumber'
   Just maxNumber @=? maxNumber'
+
+testPersistSettings :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testPersistSettings = do
+  let settable = Settable "abc" "def" (1, ("qqq", 2))
+  migr settable
+  k <- insert settable
+  (settable' :: Maybe Settable) <- queryRaw False "select \"sqlsettable1\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
+  --(settable' :: Maybe Settable) <- queryRaw False "select \"sqlsettable1\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> fmap fromEntityPersistValues)
+  settable' @=? Just settable
+  assertExc "Uniqueness constraint not enforced" $ insert settable
+  vals <- select (Settable1Fld ==. "abc") [] 0 0
+  vals @=? [(k, settable)]
 
 testInsert :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testInsert = do
@@ -162,8 +203,8 @@ testCond = do
 testCount :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testCount = do
   migr (undefined :: Multi String)
-  insert $ (First 0 :: Multi String)
-  insert $ (Second "abc")
+  insert (First 0 :: Multi String)
+  insert (Second "abc")
   num <- countAll (undefined :: Multi String)
   2 @=? num
   num2 <- count $ SecondField ==. "abc"
@@ -234,7 +275,7 @@ testTupleList = do
 testListTriggersOnDelete :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
-  k <- insert $ (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
+  k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
   Just [listKey] <- queryRaw False "select \"single$val1\" from \"Single$Tuple2$$String$List$$List$$String\" where id$=?" [toPrim k] firstRow
   listsInsideListKeys <- queryRaw False "select value from \"List$$List$$String$values\" where id$=?" [listKey] $ mapAllRows return
   deleteByKey k
@@ -251,10 +292,10 @@ testListTriggersOnDelete = do
 testListTriggersOnUpdate :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testListTriggersOnUpdate = do
   migr (undefined :: Single (String, [[String]]))
-  k <- insert $ (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
+  k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
   Just [listKey] <- queryRaw False "select \"single$val1\" from \"Single$Tuple2$$String$List$$List$$String\" where id$=?" [toPrim k] firstRow
   listsInsideListKeys <- queryRaw False "select value from \"List$$List$$String$values\" where id$=?" [listKey] $ mapAllRows return
-  replace k $ (Single ("", []) :: Single (String, [[String]]))
+  replace k (Single ("", []) :: Single (String, [[String]]))
   -- test if the main list table and the associated values were deleted
   listMain <- queryRaw False "select * from \"List$$List$$String\" where id$=?" [listKey] firstRow
   Nothing @=? listMain
@@ -305,9 +346,10 @@ testReplaceMulti = do
 
 testReplaceSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testReplaceSingle = do
-  migr (undefined :: Single (Single String))
   -- we need Single to test that referenced value cam be replaced
-  k <- insert $ Single (Single "abc")
+  let val = Single (Single "abc")
+  migr val
+  k <- insert val
   Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Single$String\" WHERE id$=?" [toPrim k] firstRow
   let valueKey = fromPrim valueKey'
   
@@ -333,9 +375,9 @@ testMigrateAddConstructorToMany = do
   Key k2 <- insert $ Old.AddConstructorToMany2 "abc"
   migr (undefined :: New.AddConstructorToMany)
   k0 <- insert $ New.AddConstructorToMany0 5
-  val1 <- get (Key k1 :: Key (New.AddConstructorToMany))
+  val1 <- get (Key k1 :: Key New.AddConstructorToMany)
   Just (New.AddConstructorToMany1 1) @=? val1
-  val2 <- get (Key k2 :: Key (New.AddConstructorToMany))
+  val2 <- get (Key k2 :: Key New.AddConstructorToMany)
   Just (New.AddConstructorToMany2 "abc") @=? val2
   val0 <- get k0
   Just (New.AddConstructorToMany0 5) @=? val0
@@ -402,14 +444,15 @@ testKeys = do
   
 -- TODO: write test which inserts data before adding new columns
 
-firstRow pop = pop >>= return
+firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
+firstRow = id
 
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where
   go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
   
-create_truncate_tables :: String
-create_truncate_tables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN VARCHAR) RETURNS void AS $$\
+createTruncateTables :: String
+createTruncateTables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN VARCHAR) RETURNS void AS $$\
 \DECLARE\
 \    statements CURSOR FOR SELECT tablename FROM pg_tables WHERE tableowner = username AND schemaname = 'public';\
 \BEGIN\
@@ -426,6 +469,5 @@ clean = do
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()
 assertExc err m = do
-  happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\e -> const (runInIO $ return True) (e :: SomeException))
+  happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\(e :: SomeException) -> runInIO $ return True)
   unless happened $ liftIO (H.assertFailure err)
-  

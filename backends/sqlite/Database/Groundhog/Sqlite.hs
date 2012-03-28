@@ -304,7 +304,7 @@ sqlColumn (Column name isNull typ _ ref) = ", " ++ escape name ++ " " ++ showSql
     (True, Just ref') -> " REFERENCES " ++ escape ref' ++ " ON DELETE SET NULL"
 
 sqlUnique :: Constraint -> String
-sqlUnique (cname, cols) = concat
+sqlUnique (Constraint cname cols) = concat
     [ ", CONSTRAINT "
     , escape cname
     , " UNIQUE ("

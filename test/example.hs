@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes #-}
 import Control.Monad.IO.Class(liftIO)
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
@@ -8,10 +8,15 @@ data Item = Product {productName :: String, quantity :: Int, customer :: Custome
           | Service {serviceName :: String, deliveryAddress :: String, servicePrice :: Int}
      deriving Show
 
-deriveEntity ''Customer $ Just $ do
-  setConstructor 'Customer $ do
-    setConstraints [("NameConstraint", ["customerName"])]
-deriveEntity ''Item Nothing
+mkPersist fieldNamingStyle [groundhog|
+- entity: Customer
+  constructors:
+    - name: Customer
+      constraints:
+        - name: NameConstraint
+          fields: [customerName]
+- entity: Item
+|]
 
 main = withSqliteConn ":memory:" $ runSqliteConn $ do
   -- Customer is also migrated because Item contains it
