@@ -7,9 +7,9 @@ module Database.Groundhog.TH.Settings
   , PSConstructorDef(..)
   , PSFieldDef(..)
   , PSEmbeddedFieldDef(..)
+  , PSConstraintDef(..)
   ) where
 
-import Database.Groundhog.Core(Constraint(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 import Control.Applicative
 import Control.Monad(mzero)
@@ -34,7 +34,7 @@ data PSConstructorDef = PSConstructorDef {
   , psPhantomConstrName :: Maybe String -- U2Constructor
   , psDbConstrName    :: Maybe String -- SQLU2
   , psConstrParams  :: Maybe [PSFieldDef]
-  , psConstrConstrs :: Maybe [Constraint]
+  , psConstrConstrs :: Maybe [PSConstraintDef]
 } deriving Show
 
 data PSFieldDef = PSFieldDef {
@@ -50,6 +50,11 @@ data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
   , psSubEmbedded :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
+data PSConstraintDef = PSConstraintDef {
+    psConstraintName :: String
+  , psConstraintFields :: [String]
+} deriving Show
+
 instance Lift PersistSettings where
   lift (PersistSettings {..}) = [| PersistSettings $(lift definitions) |]
 
@@ -62,8 +67,8 @@ instance Lift PSEmbeddedDef where
 instance Lift PSConstructorDef where
   lift (PSConstructorDef {..}) = [| PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psConstrParams) $(lift psConstrConstrs) |]
 
-instance Lift Constraint where
-  lift (Constraint name fields) = [| Constraint $(lift name) $(lift fields) |]
+instance Lift PSConstraintDef where
+  lift (PSConstraintDef name fields) = [| PSConstraintDef $(lift name) $(lift fields) |]
 
 instance Lift PSFieldDef where
   lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psExprName) $(lift psEmbeddedDef) |]
@@ -105,8 +110,8 @@ instance FromJSON PSConstructorDef where
   parseJSON (Object v) = PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "constrParams" <*> v .:? "constraints"
   parseJSON _          = mzero
 
-instance FromJSON Constraint where
-  parseJSON (Object v) = Constraint <$> v .: "name" <*> v .: "fields"
+instance FromJSON PSConstraintDef where
+  parseJSON (Object v) = PSConstraintDef <$> v .: "name" <*> v .: "fields"
   parseJSON _          = mzero
 
 instance FromJSON PSFieldDef where

@@ -44,6 +44,7 @@
 module Database.Groundhog
   ( module Database.Groundhog.Core
   , module Database.Groundhog.Generic
+  , module Database.Groundhog.TH
   ) where
 
 import Database.Groundhog.Core
@@ -66,3 +67,5 @@ import Database.Groundhog.Generic
   , defaultMigrationLogger)
 
 import Database.Groundhog.TH
+  ( mkPersist
+  )

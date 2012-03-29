@@ -127,16 +127,15 @@ insertBy' v = do
   let e = entityDef v
   let name = getEntityName e
 
-  let constraints = getConstraints v
-  let constructorNum = fst constraints
-  let constraintFields = map snd $ snd constraints
-  let constrCond = intercalate " OR " $ map (intercalate " AND " . map (\(fname, _) -> escape fname ++ "=?")) constraintFields
+  let (constructorNum, constraints) = getConstraints v
+  let constrDefs = constrConstrs $ constructors e !! constructorNum
+  let constrCond = intercalate " OR " $ map (intercalate " AND " . map (\fname -> escape fname ++ "=?")) $ map (\(Constraint _ fields) -> fields) constrDefs
 
-  let ifAbsent tname ins = if null constraintFields
+  let ifAbsent tname ins = if null constraints
        then liftM (Right . Key) ins
        else do
          let query = "SELECT " ++ constrId ++ " FROM " ++ escape tname ++ " WHERE " ++ constrCond
-         x <- queryRawCached' query (concatMap (map snd) constraintFields) firstRow
+         x <- queryRawCached' query (concatMap snd constraints) firstRow
          case x of
            Nothing  -> liftM (Right . Key) ins
            Just [k] -> return $ Left $ fromPrim k

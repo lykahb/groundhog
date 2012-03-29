@@ -12,7 +12,7 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(DbEntity), Constraint(..), Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), failMessage)
+import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(DbEntity), Constraint(..), Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull, failMessage)
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax(StrictType, VarStrictType, Lift(..))
@@ -45,7 +45,7 @@ data THConstructorDef = THConstructorDef {
   , thPhantomConstrName :: String -- U2Constructor
   , dbConstrName    :: String -- SQLU2
   , thConstrParams  :: [THFieldDef]
-  , thConstrConstrs :: [Constraint]
+  , thConstrConstrs :: [PSConstraintDef]
 } deriving Show
 
 data THFieldDef = THFieldDef {
@@ -211,7 +211,7 @@ validate def = do
     assertUnique exprName fields "expr field name in a constructor"
     assertUnique dbFieldName fields "db field name in a constructor"
     forM_ fields $ \fdef -> assertSpaceFree (exprName fdef) "field expr name"
-    case filter (\(Constraint _ cfields) -> null cfields) $ thConstrConstrs cdef of
+    case filter (\(PSConstraintDef _ cfields) -> null cfields) $ thConstrConstrs cdef of
       [] -> return ()
       ys -> fail $ "Constraints cannot have no fields: " ++ show ys
   return def
@@ -296,7 +296,13 @@ mkPersistEntityInstance def = do
              else [| undefined :: $(return $ fieldType f) |]
         [| (fname, namedType $nvar) |]
          
-    let constrs = listE $ zipWith (\cNum c@(THConstructorDef _ _ name params conss) -> [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) conss |]) [0..] $ thConstructors def
+    let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
+        mkConstructorDef cNum c@(THConstructorDef _ _ name params conss) = [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) $(listE $ map (mkConstraint params) conss) |]
+        mkConstraint params (PSConstraintDef name fields) = [| Constraint name $(listE $ map (lift . getFieldName params) fields) |]
+        getFieldName params name = case filter ((== name) . fieldName) params of
+          [f] -> dbFieldName f
+          []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"
+          _   -> error $ "It can never happen. Found several fields with one database name " ++ show name
     let body = normalB [| EntityDef $(stringE $ dbEntityName def) $typeParams' $constrs |]
     funD 'entityDef $ [ clause [varP v] body [] ]
 
@@ -352,13 +358,16 @@ mkPersistEntityInstance def = do
     clauses = zipWith mkClause [0::Int ..] (thConstructors def)
     mkClause cNum cdef | not (hasConstraints cdef) = clause [conP (thConstrName cdef) pats] (normalB [| (cNum, []) |]) [] where
       pats = map (const wildP) $ thConstrParams cdef
-    mkClause cNum cdef = clause [conP (thConstrName cdef) (map varP names)] body [] where
-      getFieldName n = case filter ((== n) . dbFieldName) $ thConstrParams cdef of
-        [f] -> varE $ mkName $ fieldName f
-        []  -> error $ "Database field name " ++ show n ++ " declared in constraint not found"
-        _   -> error $ "It can never happen. Found several fields with one database name " ++ show n
-      body = normalB $ [| (cNum, $(listE $ map (\(Constraint cname fnames) -> [|(cname, $(listE $ map (\fname -> [| (fname, toPrim $(getFieldName fname)) |] ) fnames )) |] ) $ thConstrConstrs cdef)) |]
-      names = map (mkName . fieldName) $ thConstrParams cdef
+    mkClause cNum cdef = do
+      let allConstrainedFields = concatMap psConstraintFields $ thConstrConstrs cdef
+      names <- mapM (\name -> newName name >>= \name' -> return (name, name `elem` allConstrainedFields, name')) $ map fieldName $ thConstrParams cdef
+      let body = normalB $ [| (cNum, $(listE $ map (\(PSConstraintDef cname fnames) -> [|(cname, $(listE $ map (\fname -> [| toPrim $(varE $ getFieldName fname) |] ) fnames )) |] ) $ thConstrConstrs cdef)) |]
+          getFieldName name = case filter (\(a, _, _) -> a == name) names of
+            [(_, _, name')] -> name'
+            []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"
+            _   -> error $ "It can never happen. Found several fields with one database name " ++ show name
+          pattern = map (\(_, isConstrained, name') -> if isConstrained then varP name' else wildP) names
+      clause [conP (thConstrName cdef) pattern] body []
     in funD 'getConstraints clauses
      
   entityFieldChain' <- let
@@ -421,7 +430,7 @@ mkSinglePersistFieldInstance def = do
   return $ [InstanceD context (AppT (ConT ''SinglePersistField) entity) decs]
 
 paramsContext :: THEntityDef -> Cxt
-paramsContext def = classPred ''PersistField params ++ classPred ''SinglePersistField maybys where
+paramsContext def = classPred ''PersistField params ++ classPred ''SinglePersistField maybys ++ classPred ''NeverNull maybys where
   classPred clazz = map (\t -> ClassP clazz [t])
   -- every type must be an instance of PersistField
   params = map getType $ thTypeParams def
@@ -502,7 +511,7 @@ spanM p = go  where
 --            exprName: BarField
 --        constraints:
 --          - name: someconstraint
---            fields: [foo, bar]         # List of column names
+--            fields: [foo, bar]         # List of constructor parameter names. Not DB names(!)
 -- |]
 -- @
 --

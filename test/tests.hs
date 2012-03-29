@@ -10,7 +10,7 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic.Sql.String
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
-import Database.Groundhog.Postgresql
+--import Database.Groundhog.Postgresql
 import Data.Int
 import qualified Data.Map as Map
 import Data.Word
@@ -60,17 +60,17 @@ mkPersist fieldNamingStyle [groundhog|
               dbName: name
       constraints:
         - name: someconstraint
-          fields: [sqlsettable1, settable2]
+          fields: [settable1, settable2]
 |]
 
 main :: IO ()
 main = do
   let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ m
-  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
+  --let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
   -- we need clean db before each migration test
   defaultMain [ sqliteMigrationTestSuite $ withSqliteConn ":memory:" . runSqliteConn
               , mkTestSuite "Database.Groundhog.Sqlite" runSqlite
-              , mkTestSuite "Database.Groundhog.Postgresql" runPSQL
+              --, mkTestSuite "Database.Groundhog.Postgresql" runPSQL
               ]
 
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
@@ -79,6 +79,7 @@ migr v = runMigration silentMigrationLogger (migrate v)
 mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> (m () -> IO ()) -> Test
 mkTestSuite label run = testGroup label
   [ testCase "testNumber" $ run testNumber
+  , testCase "testPersistSettings" $ run testPersistSettings
   , testCase "testInsert" $ run testInsert
   , testCase "testSelect" $ run testSelect
   , testCase "testCond" $ run testCond
@@ -132,8 +133,9 @@ testPersistSettings = do
   let settable = Settable "abc" "def" (1, ("qqq", 2))
   migr settable
   k <- insert settable
-  (settable' :: Maybe Settable) <- queryRaw False "select \"sqlsettable1\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
-  --(settable' :: Maybe Settable) <- queryRaw False "select \"sqlsettable1\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> fmap fromEntityPersistValues)
+  --(settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
+  (settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"settableTuple$val0\", \"settableTuple$val1$val0\", \"settableTuple$val1$val1\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
+
   settable' @=? Just settable
   assertExc "Uniqueness constraint not enforced" $ insert settable
   vals <- select (Settable1Fld ==. "abc") [] 0 0

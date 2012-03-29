@@ -24,16 +24,15 @@ module Database.Groundhog.Core
   , toArith
   , FieldLike(..)
   , Expression(..)
+  , NeverNull
   , Numeric
   , Arith(..)
   , Expr(..)
   , Order(..)
   -- * Type description
   , DbType(..)
-  , NamedType
+  , NamedType(..)
   , namedType
-  , getName
-  , getType
   , EntityDef(..)
   , ConstructorDef(..)
   , Constructor(..)
@@ -51,24 +50,24 @@ module Database.Groundhog.Core
   , failMessage
   ) where
 
-import Control.Applicative(Applicative)
-import Control.Monad.Base(MonadBase (liftBase))
-import Control.Monad.Trans.Class(MonadTrans(..))
-import Control.Monad.IO.Class(MonadIO(..))
+import Control.Applicative (Applicative)
+import Control.Monad.Base (MonadBase (liftBase))
+import Control.Monad.Trans.Class (MonadTrans(..))
+import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
-import Control.Monad.Trans.Reader(ReaderT(..), runReaderT)
-import Control.Monad.Trans.State(StateT)
-import Control.Monad(liftM)
-import Data.Bits(bitSize)
+import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
+import Control.Monad.Trans.State (StateT)
+import Control.Monad (liftM)
+import Data.Bits (bitSize)
 import Data.ByteString.Char8 (ByteString, unpack)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8, Word16, Word32, Word64)
-import Data.Map(Map)
-import Data.Time(Day, TimeOfDay, UTCTime)
-import Unsafe.Coerce(unsafeCoerce)
+import Data.Map (Map)
+import Data.Time (Day, TimeOfDay, UTCTime)
+import Unsafe.Coerce (unsafeCoerce)
 
 -- | Only instances of this class can be persisted in a database
 class PersistField v => PersistEntity v where
@@ -79,11 +78,11 @@ class PersistField v => PersistEntity v where
   -- | Returns a complete description of the type
   entityDef :: v -> EntityDef
   -- | Marshalls value to a list of 'PersistValue' ready for insert to a database
-  toEntityPersistValues   :: PersistBackend m => v -> m [PersistValue]
+  toEntityPersistValues :: PersistBackend m => v -> m [PersistValue]
   -- | Constructs the value from the list of 'PersistValue'
   fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m v
-  -- | Returns constructor number and a list of constraint names and corresponding field names with their values
-  getConstraints    :: v -> (Int, [(String, [(String, PersistValue)])])
+  -- | Returns constructor number and a list of constraint names and corresponding field values
+  getConstraints :: v -> (Int, [(String, [PersistValue])])
   -- | Is internally used by FieldLike Field instance
   -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
   entityFieldChain :: Field v c a -> Either String [(String, NamedType)]
@@ -155,7 +154,7 @@ class FieldLike f where
   -- Function fieldChain can be simplified to f v c a -> [(String, NamedType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
   fieldChain :: PersistEntity v => f v c a -> Either String [(String, NamedType)]
 
-class Embedded v where
+class PersistField v => Embedded v where
   data Selector v :: * -> *
   selectorNum :: Selector v a -> Int
 
@@ -355,23 +354,17 @@ data DbType = DbString
 
 -- TODO: this type can be changed to avoid storing the value itself. For example, ([String, DbType). Restriction: can be used to get DbType and name
 -- | It is used to store type 'DbType' and persist name of a value
-data NamedType = forall v . PersistField v => NamedType v
+data NamedType = NamedType { getName :: String, getType :: DbType }
 
 namedType :: PersistField v => v -> NamedType
-namedType = NamedType
-
-getName :: NamedType -> String
-getName (NamedType v) = persistName v
-
-getType :: NamedType -> DbType
-getType (NamedType v) = dbType v
+namedType v = NamedType (persistName v) (dbType v)
 
 instance Show NamedType where
-  show (NamedType v) = show (dbType v)
+  show t = show $ getType t
 
 -- rely on the invariant that no two types have the same name
 instance Eq NamedType where
-  (NamedType v1) == (NamedType v2) = persistName v1 == persistName v2
+  t1 == t2 = getName t1 == getName t2
 
 -- | A raw value which can be stored in any backend and can be marshalled to
 -- and from a 'PersistField'.
@@ -490,14 +483,14 @@ class PersistField a => PurePersistField a where
 
 ---- INSTANCES
 
-instance Embedded (a', b') where
+instance (PersistField a', PersistField b') => Embedded (a', b') where
   data Selector (a', b') constr where
     Tuple2_0Selector :: Selector (a, b) a
     Tuple2_1Selector :: Selector (a, b) b
   selectorNum Tuple2_0Selector = 0
   selectorNum Tuple2_1Selector = 1
 
-instance Embedded (a', b', c') where
+instance (PersistField a', PersistField b', PersistField c') => Embedded (a', b', c') where
   data Selector (a', b', c') constr where
     Tuple3_0Selector :: Selector (a, b, c) a
     Tuple3_1Selector :: Selector (a, b, c) b
@@ -506,7 +499,7 @@ instance Embedded (a', b', c') where
   selectorNum Tuple3_1Selector = 1
   selectorNum Tuple3_2Selector = 2
 
-instance Embedded (a', b', c', d') where
+instance (PersistField a', PersistField b', PersistField c', PersistField d') => Embedded (a', b', c', d') where
   data Selector (a', b', c', d') constr where
     Tuple4_0Selector :: Selector (a, b, c, d) a
     Tuple4_1Selector :: Selector (a, b, c, d) b
@@ -517,7 +510,7 @@ instance Embedded (a', b', c', d') where
   selectorNum Tuple4_2Selector = 2
   selectorNum Tuple4_3Selector = 3
 
-instance Embedded (a', b', c', d', e') where
+instance (PersistField a', PersistField b', PersistField c', PersistField d', PersistField e') => Embedded (a', b', c', d', e') where
   data Selector (a', b', c', d', e') constr where
     Tuple5_0Selector :: Selector (a, b, c, d, e) a
     Tuple5_1Selector :: Selector (a, b, c, d, e) b
@@ -533,6 +526,12 @@ instance Embedded (a', b', c', d', e') where
 instance PrimitivePersistField a => SinglePersistField a where
   toSinglePersistValue = return . toPrim
   fromSinglePersistValue = return . fromPrim
+
+instance (SinglePersistField a, NeverNull a) => SinglePersistField (Maybe a) where
+  toSinglePersistValue Nothing = return PersistNull
+  toSinglePersistValue (Just a) = toSinglePersistValue a
+  fromSinglePersistValue PersistNull = return Nothing
+  fromSinglePersistValue a = liftM Just $ fromSinglePersistValue a
 
 instance PrimitivePersistField a => PurePersistField a where
   toPurePersistValues a = (toPrim a:)
@@ -744,25 +743,25 @@ instance Expression () where
   type FuncA () = ()
   wrap = ExprPure
 
-instance PurePersistField (a, b) => Expression (a, b) where
+instance (PurePersistField a, PurePersistField b) => Expression (a, b) where
   type FuncV (a, b) = Any
   type FuncC (a, b) = Any
   type FuncA (a, b) = (a, b)
   wrap = ExprPure
 
-instance PurePersistField (a, b, c) => Expression (a, b, c) where
+instance (PurePersistField a, PurePersistField b, PurePersistField c) => Expression (a, b, c) where
   type FuncV (a, b, c) = Any
   type FuncC (a, b, c) = Any
   type FuncA (a, b, c) = (a, b, c)
   wrap = ExprPure
 
-instance PurePersistField (a, b, c, d) => Expression (a, b, c, d) where
+instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d) => Expression (a, b, c, d) where
   type FuncV (a, b, c, d) = Any
   type FuncC (a, b, c, d) = Any
   type FuncA (a, b, c, d) = (a, b, c, d)
   wrap = ExprPure
 
-instance PurePersistField (a, b, c, d, e) => Expression (a, b, c, d, e) where
+instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d, PurePersistField e) => Expression (a, b, c, d, e) where
   type FuncV (a, b, c, d, e) = Any
   type FuncC (a, b, c, d, e) = Any
   type FuncA (a, b, c, d, e) = (a, b, c, d, e)
@@ -939,7 +938,7 @@ instance PersistField UTCTime where
   fromPersistValues = primFromPersistValue
   dbType _ = DbDayTime
 
-instance SinglePersistField a => PersistField (Maybe a) where
+instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where
   persistName (_ :: Maybe a) = "Maybe$" ++ persistName (undefined :: a)
   toPersistValues Nothing = return (PersistNull:)
   toPersistValues (Just a) = toSinglePersistValue a >>= \x -> return (x:)
