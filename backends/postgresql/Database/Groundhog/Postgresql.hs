@@ -135,7 +135,7 @@ insertBy' v = do
        then liftM (Right . Key) ins
        else do
          let query = "SELECT " ++ constrId ++ " FROM " ++ escape tname ++ " WHERE " ++ constrCond
-         x <- queryRawCached' query (concatMap snd constraints) firstRow
+         x <- queryRawCached' query (concatMap snd constraints) id
          case x of
            Nothing  -> liftM (Right . Key) ins
            Just [k] -> return $ Left $ fromPrim k
@@ -174,7 +174,7 @@ replace' k v = do
     then executeRaw True (mkQuery name) (tail vals ++ [toPrim k])
     else do
       let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
-      x <- queryRawCached' query [toPrim k] (firstRow >=> return.fmap (fromPrim . head))
+      x <- queryRawCached' query [toPrim k] (id >=> return . fmap (fromPrim . head))
       case x of
         Just discr -> do
           let cName = name ++ [defDelim] ++ constrName constr
@@ -249,14 +249,14 @@ get' (k :: Key v) = do
       let constr = head $ constructors e
       let fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
       let query = fromStringS ("SELECT " <> fields) $ " FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
-      x <- queryRawCached' query [toPrim k] firstRow
+      x <- queryRawCached' query [toPrim k] id
       case x of
         Just (_:xs) -> liftM Just $ fromEntityPersistValues $ PersistInt64 0:xs
         Just x'    -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
     else do
       let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
-      x <- queryRawCached' query [toPrim k] firstRow
+      x <- queryRawCached' query [toPrim k] id
       case x of
         Just [discr] -> do
           let constructorNum = fromPrim discr
@@ -264,7 +264,7 @@ get' (k :: Key v) = do
           let cName = name ++ [defDelim] ++ constrName constr
           let fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
           let cQuery = fromStringS ("SELECT " <> fields) $ " FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
-          x2 <- queryRawCached' cQuery [toPrim k] firstRow
+          x2 <- queryRawCached' cQuery [toPrim k] id
           case x2 of
             Just (_:xs) -> liftM Just $ fromEntityPersistValues $ discr:xs
             Just x2'    -> fail $ "Unexpected number of columns returned: " ++ show x2'
@@ -315,7 +315,7 @@ count' (cond :: Cond v c) = do
        else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
   let query = "SELECT COUNT(*) FROM " ++ escape tname ++ fromStringS whereClause "" where
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  x <- queryRawCached' query (maybe [] (($ []) . getValues) cond') firstRow
+  x <- queryRawCached' query (maybe [] (($ []) . getValues) cond') id
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -326,7 +326,7 @@ countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersi
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
   let query = "SELECT COUNT(*) FROM " ++ escape name
-  x <- queryRawCached' query [] firstRow
+  x <- queryRawCached' query [] id
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)

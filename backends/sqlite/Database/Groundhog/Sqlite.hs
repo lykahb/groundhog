@@ -248,7 +248,7 @@ checkTable = checkSqliteMaster "table"
 checkSqliteMaster :: (MonadBaseControl IO m, MonadIO m) => String -> String -> DbPersist Sqlite m (Maybe String)
 checkSqliteMaster vtype name = do
   let query = "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?"
-  x <- queryRawTyped query [DbString] [toPrim vtype, toPrim name] firstRow
+  x <- queryRawTyped query [DbString] [toPrim vtype, toPrim name] id
   let throwErr = error . ("Unexpected result from sqlite_master: " ++)
   case x of
     Nothing -> return Nothing
@@ -368,7 +368,7 @@ insertBy' v = do
        then liftM (Right . Key) ins
        else do
          let query = "SELECT " ++ constrId ++ " FROM " ++ escape tname ++ " WHERE " ++ constrCond
-         x <- queryRawTyped query [DbInt64] (concatMap snd constraints) firstRow
+         x <- queryRawTyped query [DbInt64] (concatMap snd constraints) id
          case x of
            Nothing  -> liftM (Right . Key) ins
            Just [k] -> return $ Left $ fromPrim k
@@ -409,7 +409,7 @@ replace' k v = do
     then executeRawCached' (mkQuery name) (tail vals ++ [toPrim k])
     else do
       let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
-      x <- queryRawTyped query [DbInt32] [toPrim k] (firstRow >=> return . fmap (fromPrim . head))
+      x <- queryRawTyped query [DbInt32] [toPrim k] (id >=> return . fmap (fromPrim . head))
       case x of
         Just discr -> do
           let cName = name ++ [defDelim] ++ constrName constr
@@ -483,14 +483,14 @@ get' (k :: Key v) = do
       let constr = head $ constructors e
       let fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
       let query = fromStringS ("SELECT " <> fields) $ "FROM " ++ escape name ++ " WHERE " ++ constrId ++ "=?"
-      x <- queryRawTyped query (DbInt64:getConstructorTypes constr) [toPrim k] firstRow
+      x <- queryRawTyped query (DbInt64:getConstructorTypes constr) [toPrim k] id
       case x of
         Just (_:xs) -> liftM Just $ fromEntityPersistValues $ PersistInt64 0:xs
         Just x'    -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
     else do
       let query = "SELECT discr$ FROM " ++ escape name ++ " WHERE id$=?"
-      x <- queryRawTyped query [DbInt64] [toPrim k] firstRow
+      x <- queryRawTyped query [DbInt64] [toPrim k] id
       case x of
         Just [discr] -> do
           let constructorNum = fromPrim discr
@@ -498,7 +498,7 @@ get' (k :: Key v) = do
           let cName = name ++ [defDelim] ++ constrName constr
           let fields = fromString constrId <> fromChar ',' <> renderFields escapeS (constrParams constr)
           let cQuery = fromStringS ("SELECT " <> fields) $ "FROM " ++ escape cName ++ " WHERE " ++ constrId ++ "=?"
-          x2 <- queryRawTyped cQuery (DbInt64:getConstructorTypes constr) [toPrim k] firstRow
+          x2 <- queryRawTyped cQuery (DbInt64:getConstructorTypes constr) [toPrim k] id
           case x2 of
             Just (_:xs) -> liftM Just $ fromEntityPersistValues $ discr:xs
             Just x2'    -> fail $ "Unexpected number of columns returned: " ++ show x2'
@@ -549,7 +549,7 @@ count' (cond :: Cond v c) = do
        else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
   let query = "SELECT COUNT(*) FROM " ++ escape tname ++ fromStringS whereClause "" where
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  x <- queryRawCached' query (maybe [] (($ []) . getValues) cond') firstRow
+  x <- queryRawCached' query (maybe [] (($ []) . getValues) cond') id
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -560,7 +560,7 @@ countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersi
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
   let query = "SELECT COUNT(*) FROM " ++ name
-  x <- queryRawTyped query [DbInt64] [] firstRow
+  x <- queryRawTyped query [DbInt64] [] id
   case x of
     Just [num] -> return $ fromPrim num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -694,9 +694,6 @@ getDbTypes :: NamedType -> [DbType] -> [DbType]
 getDbTypes typ acc = case getType typ of
   DbEmbedded _ ts -> foldr (getDbTypes . snd) acc ts
   t               -> t:acc
-
-firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
-firstRow pop = pop >>= return
 
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where

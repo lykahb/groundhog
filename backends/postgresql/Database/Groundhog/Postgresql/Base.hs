@@ -5,7 +5,6 @@ module Database.Groundhog.Postgresql.Base
     , escape
     , isSimple
     , constrId
-    , firstRow
     , mapAllRows
     , getStatement
     , queryRaw'
@@ -41,9 +40,6 @@ isSimple _   = False
 
 constrId :: String
 constrId = defId
-
-firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
-firstRow pop = pop >>= return
 
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where

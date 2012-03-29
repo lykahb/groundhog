@@ -231,7 +231,7 @@ isEphemeral a = case getType a of
 
 checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
 checkTable name = do
-  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrim name] firstRow
+  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrim name] id
   case table of
     Just _ -> do
       cols <- queryRaw' "SELECT column_name,is_nullable,udt_name,column_default FROM information_schema.columns WHERE table_name=? AND column_name <> 'id$' ORDER BY ordinal_position" [toPrim name] (mapAllRows $ getColumn name)
@@ -263,7 +263,7 @@ getColumn tname [column_name, PersistByteString is_nullable, udt_name, d] =
     getRef cname = do
         let sql = "SELECT u.table_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.table_name=? AND tc.constraint_type='FOREIGN KEY' AND tc.constraint_name=?"
         let ref = refName tname cname
-        x <- queryRaw' sql [toPrim tname, toPrim ref] firstRow
+        x <- queryRaw' sql [toPrim tname, toPrim ref] id
         return $ fmap (fromPrim . head) x
     d' = case d of
             PersistNull -> Right Nothing
