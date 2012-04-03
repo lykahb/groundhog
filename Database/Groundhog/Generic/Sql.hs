@@ -19,6 +19,7 @@ module Database.Groundhog.Generic.Sql
     ) where
 
 import Database.Groundhog.Core
+import Database.Groundhog.Instances ()
 import Data.List (foldl')
 import Data.Maybe (mapMaybe)
 import Data.Monoid

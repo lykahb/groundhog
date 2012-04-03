@@ -10,11 +10,11 @@ module Database.Groundhog.TH.Settings
   , PSConstraintDef(..)
   ) where
 
-import Language.Haskell.TH.Syntax(Lift(..))
+import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
-import Control.Monad(mzero)
+import Control.Monad (mzero)
 import Data.Yaml
-  
+
 data PersistSettings = PersistSettings {definitions :: [Either PSEntityDef PSEmbeddedDef]} deriving Show
 
 data PSEntityDef = PSEntityDef {

@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes #-}
 module Migration.New where
+import Database.Groundhog
 import Database.Groundhog.TH
 
 data AddColumn = AddColumn {addColumnNew :: String, addColumnOld :: Int} deriving (Eq, Show)

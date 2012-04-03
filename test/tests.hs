@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, StandaloneDeriving #-}
-module Main where
+--module Main where
 import qualified Data.Map as M
 import qualified Control.Exception as E
 import Control.Exception.Base(SomeException)
@@ -8,9 +8,10 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control(MonadBaseControl, control)
 import Database.Groundhog.Core
 import Database.Groundhog.Generic.Sql.String
+import Database.Groundhog.Instances
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
---import Database.Groundhog.Postgresql
+import Database.Groundhog.Postgresql
 import Data.Int
 import qualified Data.Map as Map
 import Data.Word
@@ -66,11 +67,11 @@ mkPersist fieldNamingStyle [groundhog|
 main :: IO ()
 main = do
   let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ m
-  --let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
+  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
   -- we need clean db before each migration test
   defaultMain [ sqliteMigrationTestSuite $ withSqliteConn ":memory:" . runSqliteConn
               , mkTestSuite "Database.Groundhog.Sqlite" runSqlite
-              --, mkTestSuite "Database.Groundhog.Postgresql" runPSQL
+              , mkTestSuite "Database.Groundhog.Postgresql" runPSQL
               ]
 
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
@@ -135,11 +136,10 @@ testPersistSettings = do
   k <- insert settable
   --(settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
   (settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"settableTuple$val0\", \"settableTuple$val1$val0\", \"settableTuple$val1$val1\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
-
   settable' @=? Just settable
-  assertExc "Uniqueness constraint not enforced" $ insert settable
   vals <- select (Settable1Fld ==. "abc") [] 0 0
   vals @=? [(k, settable)]
+  assertExc "Uniqueness constraint not enforced" $ insert settable
 
 testInsert :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testInsert = do

@@ -254,6 +254,7 @@ mkDecs def = do
     , mkPersistFieldInstance def
     , mkSinglePersistFieldInstance def
     , mkPersistEntityInstance def
+    , mkNeverNullInstance def
     ]
 --  runIO $ putStrLn $ pprint decs
   return decs
@@ -272,7 +273,7 @@ mkPhantomConstructorInstances def = sequence $ zipWith f [0..] $ thConstructors 
 
 mkPersistEntityInstance :: THEntityDef -> Q [Dec]
 mkPersistEntityInstance def = do
-  let entity = foldl AppT (ConT (dataName def)) $ map getType $ thTypeParams def
+  let entity = foldl AppT (ConT (dataName def)) $ map extractType $ thTypeParams def
   
   fields' <- do
     cParam <- newName "c"
@@ -285,7 +286,7 @@ mkPersistEntityInstance def = do
   entityDef' <- do
     v <- newName "v"
     let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
-    let typeParams' = listE $ map (\t -> [| namedType ($(mkLambda $ getType t) $(varE v)) |]) $ thTypeParams def
+    let typeParams' = listE $ map (\t -> [| namedType ($(mkLambda $ extractType t) $(varE v)) |]) $ thTypeParams def
     let mkField c fNum f = do
         a <- newName "a"
         let fname = dbFieldName f
@@ -295,7 +296,6 @@ mkPersistEntityInstance def = do
                   in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
              else [| undefined :: $(return $ fieldType f) |]
         [| (fname, namedType $nvar) |]
-         
     let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
         mkConstructorDef cNum c@(THConstructorDef _ _ name params conss) = [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) $(listE $ map (mkConstraint params) conss) |]
         mkConstraint params (PSConstraintDef name fields) = [| Constraint name $(listE $ map (lift . getFieldName params) fields) |]
@@ -304,7 +304,8 @@ mkPersistEntityInstance def = do
           []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"
           _   -> error $ "It can never happen. Found several fields with one database name " ++ show name
     let body = normalB [| EntityDef $(stringE $ dbEntityName def) $typeParams' $constrs |]
-    funD 'entityDef $ [ clause [varP v] body [] ]
+    let pat = if null $ thTypeParams def then wildP else varP v
+    funD 'entityDef $ [ clause [pat] body [] ]
 
   toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0..] $ thConstructors def) $ \(cNum, c) -> do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ thConstrParams c
@@ -372,10 +373,13 @@ mkPersistEntityInstance def = do
      
   entityFieldChain' <- let
     fieldNames = thConstructors def >>= thConstrParams
-    clauses = map (\f -> newName "f" >>= \fArg -> clause [asP fArg $ conP (mkName $ exprName f) []] (normalB $ mkChain f fArg) []) fieldNames
-    mkChain f fArg = isPrim (fieldType f) >>= \isP -> if isP
-      then [| Left $(lift $ dbFieldName f) |]
-      else [| Right [ ($(lift $ dbFieldName f), namedType $ (undefined :: Field v c a -> a) $ $(varE fArg)) ] |] where
+    clauses = map (\f -> mkChain f >>= \(fArg, body) -> clause [maybe id asP fArg $ conP (mkName $ exprName f) []] (normalB body) []) fieldNames
+    mkChain f = isPrim (fieldType f) >>= \isP -> if isP
+      then return (Nothing, [| Left $(lift $ dbFieldName f) |])
+      else do
+        fArg <- newName "f"
+        let body = [| Right [ ($(lift $ dbFieldName f), namedType $ (undefined :: Field v c a -> a) $ $(varE fArg)) ] |]
+        return (Just fArg, body)
     in funD 'entityFieldChain clauses
 
   let context = paramsContext def
@@ -384,7 +388,7 @@ mkPersistEntityInstance def = do
 
 mkPersistFieldInstance :: THEntityDef -> Q [Dec]
 mkPersistFieldInstance def = do
-  let types = map getType $ thTypeParams def
+  let types = map extractType $ thTypeParams def
   let entity = foldl AppT (ConT (dataName def)) types
   
   persistName' <- do
@@ -396,7 +400,8 @@ mkPersistFieldInstance def = do
          True  -> [| $(stringE $ dbEntityName def) |]
          False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
     let body = normalB $ namesList
-    funD 'persistName $ [ clause [varP v] body [] ]
+    let pat = if null $ thTypeParams def then wildP else varP v
+    funD 'persistName $ [ clause [pat] body [] ]
   
   toPersistValues' <- do
     let body = normalB [| liftM (:) . toSinglePersistValue |]
@@ -414,7 +419,7 @@ mkPersistFieldInstance def = do
 
 mkSinglePersistFieldInstance :: THEntityDef -> Q [Dec]
 mkSinglePersistFieldInstance def = do
-  let types = map getType $ thTypeParams def
+  let types = map extractType $ thTypeParams def
   let entity = foldl AppT (ConT (dataName def)) types
 
   toSinglePersistValue' <- do
@@ -429,19 +434,26 @@ mkSinglePersistFieldInstance def = do
   let decs = [toSinglePersistValue', fromSinglePersistValue']
   return $ [InstanceD context (AppT (ConT ''SinglePersistField) entity) decs]
 
+mkNeverNullInstance :: THEntityDef -> Q [Dec]
+mkNeverNullInstance def = do
+  let types = map extractType $ thTypeParams def
+  let entity = foldl AppT (ConT (dataName def)) types
+  let context = paramsContext def
+  return $ [InstanceD context (AppT (ConT ''NeverNull) entity) []]
+
 paramsContext :: THEntityDef -> Cxt
 paramsContext def = classPred ''PersistField params ++ classPred ''SinglePersistField maybys ++ classPred ''NeverNull maybys where
   classPred clazz = map (\t -> ClassP clazz [t])
   -- every type must be an instance of PersistField
-  params = map getType $ thTypeParams def
+  params = map extractType $ thTypeParams def
   -- all datatype fields also must be instances of PersistField
   -- if Maybe is applied to a type param, the param must be also an instance of NeverNull
   -- so that (Maybe param) is an instance of PersistField
   maybys = nub $ thConstructors def >>= thConstrParams >>= insideMaybe . fieldType
 
-getType :: TyVarBndr -> Type
-getType (PlainTV name) = VarT name
-getType (KindedTV name _) = VarT name
+extractType :: TyVarBndr -> Type
+extractType (PlainTV name) = VarT name
+extractType (KindedTV name _) = VarT name
 
 #if MIN_VERSION_template_haskell(2, 7, 0)
 #define isClassInstance isInstance

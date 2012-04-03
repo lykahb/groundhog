@@ -30,6 +30,7 @@ library
                      Database.Groundhog.Generic.Sql
                      Database.Groundhog.Generic.Sql.String
                      Database.Groundhog.Generic.Sql.Utf8
+                     Database.Groundhog.Instances
                      Database.Groundhog.TH
     other-modules:   Database.Groundhog.TH.Settings
     ghc-options:     -Wall
