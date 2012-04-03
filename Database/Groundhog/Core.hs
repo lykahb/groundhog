@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, StandaloneDeriving, TypeSynonymInstances, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, FlexibleContexts, OverlappingInstances, GeneralizedNewtypeDeriving, UndecidableInstances, EmptyDataDecls #-}
+{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FlexibleContexts, GeneralizedNewtypeDeriving, ConstraintKinds #-}
 
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for internal use
@@ -27,7 +27,6 @@ module Database.Groundhog.Core
   , Numeric
   , Arith(..)
   , Expr(..)
-  , Any
   , SubField (..)
   , Order(..)
   -- * Type description
@@ -63,7 +62,7 @@ import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
 import Data.Time (Day, TimeOfDay, UTCTime)
-import Unsafe.Coerce (unsafeCoerce)
+import qualified GHC.Exts as E
 
 -- | Only instances of this class can be persisted in a database
 class PersistField v => PersistEntity v where
@@ -85,36 +84,6 @@ class PersistField v => PersistEntity v where
 
 -- | A unique identifier of a value stored in a database
 data PersistEntity v => Key v = Key Int64 deriving (Show, Eq)
-
-data Any
-
-type family MoreSpecific a b
-type instance MoreSpecific Any a = a
-type instance MoreSpecific a Any = a
-type instance MoreSpecific a a = a
-type instance MoreSpecific Any Any = Any
-
-class TypesCastV x y z | x y -> z
--- instance TypesCastV x x x would not work. For example, it does not match TypesCastV (Type a1) (Type a2) z
-instance (x ~ y, MoreSpecific x y ~ z) => TypesCastV x y z
-instance TypesCastV Any x x
-instance TypesCastV x Any x
-instance TypesCastV Any Any Any
-
-class TypesEqualC x y
-instance TypesEqualC x x
-instance TypesEqualC Any x
-instance TypesEqualC x Any
-instance TypesEqualC Any Any
-
-class TypesCastC x y z | x y -> z
-instance (TypesEqualC x y, MoreSpecific x y ~ z) => TypesCastC x y z
-
-class (Expression a, Expression b) => TypeCast a b v c | a b -> v, a b -> c
-instance (Expression a, Expression b, TypesCastV (FuncV a) (FuncV b) v, TypesCastC (FuncC a) (FuncC b) c) => TypeCast a b v c
---instance (Expression a, Expression b, FuncV a ~ Any, FuncC a ~ Any, FuncV b ~ v, FuncC b ~ c) => TypeCast a b v c
---instance (FuncV a ~ v, FuncC a ~ c) => TypeCast a Any v c
---instance TypeCast Any Any Any Any
 
 -- $exprDoc
 -- The expressions are used in conditions and right part of Update statement.
@@ -176,48 +145,48 @@ instance FieldLike Field where
 infixr 3 =.
 (=.) ::
   ( Expression a
-  , TypesCastV v (FuncV a) v
-  , TypesCastC c (FuncC a) c
+  , FuncE a v c
   , FieldLike f)
   => f v c (FuncA a) -> a -> Update v c
-f =. a = Update f (unsafeCoerceExpr $ wrap a)
+f =. a = Update f (wrap a)
 
 -- | Boolean \"and\" operator.
-(&&.) :: (TypesCastV v1 v2 v3, TypesCastC c1 c2 c3) =>
-  Cond v1 c1 -> Cond v2 c2 -> Cond v3 c3
+(&&.) :: Cond v c -> Cond v c -> Cond v c
 
 -- | Boolean \"or\" operator.  
-(||.) :: (TypesCastV v1 v2 v3, TypesCastC c1 c2 c3) =>
-  Cond v1 c1 -> Cond v2 c2 -> Cond v3 c3
+(||.) :: Cond v c -> Cond v c -> Cond v c
 
 infixr 3 &&.
-a &&. b = And (unsafeCoerce a) (unsafeCoerce b)
+a &&. b = And a b
 
 infixr 2 ||.
-a ||. b = Or (unsafeCoerce a) (unsafeCoerce b)
-
-unsafeCoerceExpr :: Expr v1 c1 a -> Expr v2 c2 a
-unsafeCoerceExpr = unsafeCoerce
+a ||. b = Or a b
 
 (==.), (/=.) ::
-  ( TypeCast a b v c
+  ( Expression a
+  , Expression b
+  , FuncE a v c
+  , FuncE b v c
   , FuncA a ~ FuncA b
   , PersistField (FuncA a))
   => a -> b -> Cond v c
 
 (<.), (<=.), (>.), (>=.) ::
-  ( TypeCast a b v c
+  ( Expression a
+  , Expression b
+  , FuncE a v c
+  , FuncE b v c
   , FuncA a ~ FuncA b
   , PersistField (FuncA a))
   => a -> b -> Cond v c
 
 infix 4 ==., <., <=., >., >=.
-a ==. b = Compare Eq (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a /=. b = Compare Ne (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a <.  b = Compare Lt (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a <=. b = Compare Le (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a >.  b = Compare Gt (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
-a >=. b = Compare Ge (unsafeCoerceExpr $ wrap a) (unsafeCoerceExpr $ wrap b)
+a ==. b = Compare Eq (wrap a) (wrap b)
+a /=. b = Compare Ne (wrap a) (wrap b)
+a <.  b = Compare Lt (wrap a) (wrap b)
+a <=. b = Compare Le (wrap a) (wrap b)
+a >.  b = Compare Gt (wrap a) (wrap b)
+a >=. b = Compare Ge (wrap a) (wrap b)
 
 newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
   deriving (Monad, MonadIO, Functor, Applicative, MonadTrans)
@@ -437,8 +406,9 @@ data Expr v c a where
 -- I wish wrap could return Expr with both fixed and polymorphic v&c. Any is used to emulate polymorphic types.
 -- | Instances of this type can be converted to 'Expr'
 class Expression a where
-  type FuncV a; type FuncC a; type FuncA a
-  wrap :: a -> Expr (FuncV a) (FuncC a) (FuncA a)
+  type FuncE a v c :: E.Constraint
+  type FuncA a
+  wrap :: FuncE a v c => a -> Expr v c (FuncA a)
 
 -- | By default during converting values of certain types to 'Expr', the types can be changed. For example, @'Key' a@ is transformed into @a@.
 -- It is convenient because the fields usually contain reference to a certain datatype, not its 'Key'.
@@ -448,7 +418,7 @@ class Expression a where
 --data Example = Example {entity1 :: Maybe Smth, entity2 :: Key Smth}
 --Entity1Field ==. Just k &&. Entity2Field ==. wrapPrim k
 -- @
-wrapPrim :: PrimitivePersistField a => a -> Expr Any Any a
+wrapPrim :: PrimitivePersistField a => a -> Expr v c a
 -- We cannot create different Expression instances for (Field v c a) and (Field v c (Key a))
 -- so that Func (Field v c a) = a and Func (Field v c (Key a)) = a
 -- because of the type families overlap restrictions. Neither we can create different instances for Key a

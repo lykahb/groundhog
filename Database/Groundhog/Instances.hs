@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances, ConstraintKinds #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 
@@ -394,119 +394,109 @@ instance NeverNull UTCTime
 instance NeverNull (Key a)
 
 instance Expression (Expr v c a) where
-  type FuncV (Expr v c a) = v
-  type FuncC (Expr v c a) = c
+  type FuncE (Expr v c a) v' c' = (v ~ v', c ~ c')
   type FuncA (Expr v c a) = a
   wrap = id
 
 instance PersistEntity v => Expression (Field v c a) where
-  type FuncV (Field v c a) = v
-  type FuncC (Field v c a) = c
+  type FuncE (Field v c a) v' c' = (v ~ v', c ~ c')
   type FuncA (Field v c a) = a
   wrap = ExprField
 
 instance PersistEntity v => Expression (SubField v c a) where
-  type FuncV (SubField v c a) = v
-  type FuncC (SubField v c a) = c
+  type FuncE (SubField v c a) v' c' = (v ~ v', c ~ c')
   type FuncA (SubField v c a) = a
   wrap = ExprField
 
 instance PersistEntity v => Expression (Arith v c a) where
-  type FuncV (Arith v c a) = v
-  type FuncC (Arith v c a) = c
+  type FuncE (Arith v c a) v' c' = (v ~ v', c ~ c')
   type FuncA (Arith v c a) = a
   wrap = ExprArith
 
 instance (Expression a, PrimitivePersistField a, NeverNull a) => Expression (Maybe a) where
-  type FuncV (Maybe a) = Any
-  type FuncC (Maybe a) = Any
+  type FuncE (Maybe a) v c = ()
   type FuncA (Maybe a) = (Maybe (FuncA a))
   wrap = ExprPure
 
 instance PersistEntity a => Expression (Key a) where
-  type FuncV (Key a) = Any; type FuncC (Key a) = Any; type FuncA (Key a) = a
+  type FuncE (Key a) v c = (); type FuncA (Key a) = a
   wrap = ExprPure
 
 instance Expression () where
-  type FuncV () = Any
-  type FuncC () = Any
+  type FuncE () v c = ()
   type FuncA () = ()
   wrap = ExprPure
 
 instance (PurePersistField a, PurePersistField b) => Expression (a, b) where
-  type FuncV (a, b) = Any
-  type FuncC (a, b) = Any
+  type FuncE (a, b) v c = ()
   type FuncA (a, b) = (a, b)
   wrap = ExprPure
 
 instance (PurePersistField a, PurePersistField b, PurePersistField c) => Expression (a, b, c) where
-  type FuncV (a, b, c) = Any
-  type FuncC (a, b, c) = Any
+  type FuncE (a, b, c) v c = ()
   type FuncA (a, b, c) = (a, b, c)
   wrap = ExprPure
 
 instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d) => Expression (a, b, c, d) where
-  type FuncV (a, b, c, d) = Any
-  type FuncC (a, b, c, d) = Any
+  type FuncE (a, b, c, d) v c = ()
   type FuncA (a, b, c, d) = (a, b, c, d)
   wrap = ExprPure
 
 instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d, PurePersistField e) => Expression (a, b, c, d, e) where
-  type FuncV (a, b, c, d, e) = Any
-  type FuncC (a, b, c, d, e) = Any
+  type FuncE (a, b, c, d, e) v c = ()
   type FuncA (a, b, c, d, e) = (a, b, c, d, e)
   wrap = ExprPure
 
 instance Expression Int where
-  type FuncV Int = Any; type FuncC Int = Any; type FuncA Int = Int
+  type FuncE Int v c = (); type FuncA Int = Int
   wrap = ExprPure
 
 instance Expression Int8 where
-  type FuncV Int8 = Any; type FuncC Int8 = Any; type FuncA Int8 = Int8
+  type FuncE Int8 v c = (); type FuncA Int8 = Int8
   wrap = ExprPure
 
 instance Expression Int16 where
-  type FuncV Int16 = Any; type FuncC Int16 = Any; type FuncA Int16 = Int16
+  type FuncE Int16 v c = (); type FuncA Int16 = Int16
   wrap = ExprPure
 
 instance Expression Int32 where
-  type FuncV Int32 = Any; type FuncC Int32 = Any; type FuncA Int32 = Int32
+  type FuncE Int32 v c = (); type FuncA Int32 = Int32
   wrap = ExprPure
 
 instance Expression Int64 where
-  type FuncV Int64 = Any; type FuncC Int64 = Any; type FuncA Int64 = Int64
+  type FuncE Int64 v c = (); type FuncA Int64 = Int64
   wrap = ExprPure
 
 instance Expression Word8 where
-  type FuncV Word8 = Any; type FuncC Word8 = Any; type FuncA Word8 = Word8
+  type FuncE Word8 v c = (); type FuncA Word8 = Word8
   wrap = ExprPure
 
 instance Expression Word16 where
-  type FuncV Word16 = Any; type FuncC Word16 = Any; type FuncA Word16 = Word16
+  type FuncE Word16 v c = (); type FuncA Word16 = Word16
   wrap = ExprPure
 
 instance Expression Word32 where
-  type FuncV Word32 = Any; type FuncC Word32 = Any; type FuncA Word32 = Word32
+  type FuncE Word32 v c = (); type FuncA Word32 = Word32
   wrap = ExprPure
 
 instance Expression Word64 where
-  type FuncV Word64 = Any; type FuncC Word64 = Any; type FuncA Word64 = Word64
+  type FuncE Word64 v c = (); type FuncA Word64 = Word64
   wrap = ExprPure
 
 instance Expression String where
-  type FuncV String = Any; type FuncC String = Any; type FuncA String = String
+  type FuncE String v c = (); type FuncA String = String
   wrap = ExprPure
 
 instance Expression ByteString where
-  type FuncV ByteString = Any; type FuncC ByteString = Any; type FuncA ByteString = ByteString
+  type FuncE ByteString v c = (); type FuncA ByteString = ByteString
   wrap = ExprPure
 
 instance Expression T.Text where
-  type FuncV T.Text = Any; type FuncC T.Text = Any; type FuncA T.Text = T.Text
+  type FuncE T.Text v c = (); type FuncA T.Text = T.Text
   wrap = ExprPure
 
 instance Expression Bool where
-  type FuncV Bool = Any; type FuncC Bool = Any; type FuncA Bool = Bool
+  type FuncE Bool v c = (); type FuncA Bool = Bool
   wrap = ExprPure
 
 readHelper :: Read a => PersistValue -> String -> a
