@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances #-}
+{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 

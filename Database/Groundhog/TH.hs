@@ -1,5 +1,4 @@
 {-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse #-}
-{-# LANGUAGE CPP #-}
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
@@ -455,10 +454,6 @@ extractType :: TyVarBndr -> Type
 extractType (PlainTV name) = VarT name
 extractType (KindedTV name _) = VarT name
 
-#if MIN_VERSION_template_haskell(2, 7, 0)
-#define isClassInstance isInstance
-#endif
-
 isPrim :: Type -> Q Bool
 -- we cannot use simply isClassInstance because it crashes on type vars and in this case
 -- class PrimitivePersistField a
@@ -466,7 +461,7 @@ isPrim :: Type -> Q Bool
 -- instance PrimitivePersistField a => Maybe a
 -- it will consider (Maybe anytype) instance of PrimitivePersistField
 isPrim t | hasFreeVars t = return False
-isPrim t@(ConT _) = isClassInstance ''PrimitivePersistField [t]
+isPrim t@(ConT _) = isInstance ''PrimitivePersistField [t]
 isPrim (AppT (ConT key) _)  | key == ''Key = return True
 isPrim (AppT (ConT tcon) t) | tcon == ''Maybe = isPrim t
 isPrim _ = return False
