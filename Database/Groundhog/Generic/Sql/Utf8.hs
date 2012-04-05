@@ -42,4 +42,4 @@ instance StringLike Utf8 where
 
 {-# SPECIALIZE renderUpdates :: PersistEntity v => (Utf8 -> Utf8) -> [Update v c] -> Maybe (RenderS Utf8) #-}
 
-{-# SPECIALIZE renderFields :: (Utf8 -> Utf8) -> [(String, NamedType)] -> Utf8 #-}
+{-# SPECIALIZE renderFields :: (Utf8 -> Utf8) -> [(String, DbType)] -> Utf8 #-}

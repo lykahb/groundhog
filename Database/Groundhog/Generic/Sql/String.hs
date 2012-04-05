@@ -35,4 +35,4 @@ instance StringLike StringS where
 
 {-# SPECIALIZE renderUpdates :: PersistEntity v => (StringS -> StringS) -> [Update v c] -> Maybe (RenderS StringS) #-}
 
-{-# SPECIALIZE renderFields :: (StringS -> StringS) -> [(String, NamedType)] -> StringS #-}
+{-# SPECIALIZE renderFields :: (StringS -> StringS) -> [(String, DbType)] -> StringS #-}

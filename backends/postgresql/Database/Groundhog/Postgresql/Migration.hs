@@ -47,7 +47,7 @@ The triggers are used to delete:
 migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Postgresql m)
 migrate' = migrateRecursively migE migL where
   migE e = do
-    let name = getEntityName e
+    let name = entityName e
     let constrs = constructors e
     let mainTableQuery = "CREATE TABLE " ++ escape name ++ " (id$ SERIAL PRIMARY KEY UNIQUE, discr$ INT4 NOT NULL)"
     let mainTableColumns = [Column "discr$" False DbInt32 Nothing Nothing]
@@ -87,16 +87,15 @@ migrate' = migrateRecursively migE migL where
           Just (Right (_, constraints)) -> do
             return $ Left ["Unexpected constraints on main table datatype. Datatype: " ++ name ++ ". Constraints: " ++ show constraints]
           Just (Left errs) -> return (Left errs)
-  migL t = do
-    let mainName = "List$" ++ "$" ++ getName t
+  migL (DbList mainName t) = do
     let valuesName = mainName ++ "$" ++ "values"
     let valueCols = mkColumns "value" t
     let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id$ SERIAL PRIMARY KEY UNIQUE)"
     let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (id$ INTEGER, ord$ INTEGER NOT NULL," ++ intercalate ", " (map showColumn valueCols) ++ ")"
     x <- checkTable mainName
     y <- checkTable valuesName
-    (_, triggerMain) <- migTriggerOnDelete mainName ["DELETE FROM " ++ valuesName ++ " WHERE id$=old.id$;"]
-    (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletesOnDelete [("value", t)]
+    let triggerMain = Right []
+    (_, triggerValues) <- migTriggerOnDelete valuesName $ map snd $ mkDeletes valueCols
     let addReferences = mapMaybe (createReference valuesName) valueCols
     return $ case (x, y) of
       (Nothing, Nothing) -> mergeMigrations $ [Right [(False, defaultPriority, mainQuery), (False, defaultPriority, valuesQuery)]] ++ addReferences ++ [triggerMain, triggerValues]
@@ -105,7 +104,7 @@ migrate' = migrateRecursively migE migL where
           then []
           else ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b]
         expectedMainStructure = ([], [])
-        expectedValuesStructure = (mkColumns "ord$" (namedType (0 :: Int32)) ++ valueCols, [])
+        expectedValuesStructure = (mkColumns "ord$" (dbType (0 :: Int32)) ++ valueCols, [])
         errors = f mainName expectedMainStructure mainStructure ++ f valuesName expectedValuesStructure valuesStructure
         in if null errors then Right [] else Left errors
       (Just (Left errs1), Just (Left errs2)) -> Left $ errs1 ++ errs2
@@ -134,18 +133,16 @@ migConstrAndTrigger :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> C
 migConstrAndTrigger simple name constr = do
   let cName = if simple then name else name ++ [defDelim] ++ constrName constr
   (constrExisted, mig) <- migConstr (if simple then Nothing else Just name) cName constr
-  let dels = mkDeletesOnDelete $ constrParams constr
-  let allDels = if simple then dels else ("DELETE FROM " ++ escape name ++ " WHERE id=old." ++ constrId ++ ";"):dels
-  (triggerExisted, delTrigger) <- migTriggerOnDelete cName allDels
-  let updDels = mkDeletesOnUpdate $ constrParams constr
-  updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) updDels
-{-
-  return $ if constrExisted == triggerExisted || (constrExisted && null allDels)
+  let columns = concatMap (uncurry mkColumns) $ constrParams constr
+  let dels = mkDeletes columns
+  (triggerExisted, delTrigger) <- migTriggerOnDelete cName (map snd dels)
+  updTriggers <- mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) dels
+  return (constrExisted, mig)
+{-  return $ if constrExisted == triggerExisted || (constrExisted && null dels)
     then (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
     -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
-    else (constrExisted, Left ["Trigger and constructor table must exist together: " ++ cName])
+    else (constrExisted, Left ["Both trigger and constructor table must exist: " ++ cName])
 -}
-  return (constrExisted, mergeMigrations ([mig, delTrigger] ++ updTriggers))
 
 migConstr :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstr mainTableName cName constr = do
@@ -201,33 +198,19 @@ migTriggerOnUpdate name fieldName del = do
 -}
 
 -- on delete removes all ephemeral data
--- TODO: merge several delete queries for a case when a constructor has several fields of the same ephemeral type
-mkDeletesOnDelete :: [(String, NamedType)] -> [String]
-mkDeletesOnDelete types = map (uncurry delField) ephemerals where
-  -- we have the same query structure for tuples and lists
-  delField field t = "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";" where
-    ephemeralTableName = go t
-    go a = case getType a of
-      DbMaybe x -> go x
-      _         -> getName a
-  ephemerals = filter (isEphemeral.snd) types
-  
--- on delete removes all ephemeral data
-mkDeletesOnUpdate :: [(String, NamedType)] -> [(String, String)]
-mkDeletesOnUpdate types = map (uncurry delField) ephemerals where
-  -- we have the same query structure for tuples and lists
-  delField field t = (field, "DELETE FROM " ++ ephemeralTableName ++ " WHERE id=old." ++ escape field ++ ";") where
-    ephemeralTableName = go t
-    go a = case getType a of
-      DbMaybe x -> go x
-      _         -> getName a
-  ephemerals = filter (isEphemeral.snd) types
+-- returns column name and delete statement for the referenced table
+mkDeletes :: [Column] -> [(String, String)]
+mkDeletes columns = map delField ephemerals where
+  delField (Column name _ t _ (Just ref)) = (name, maybe "" id delVal ++ delMain) where
+    delMain = "DELETE FROM " ++ ref ++ " WHERE id$=old." ++ escape name ++ ";"
+    delVal = case t of DbList _ _ -> Just ("DELETE FROM " ++ ref ++ "$values" ++ " WHERE id$=old." ++ escape name ++ ";"); _ -> Nothing
+  ephemerals = filter (isEphemeral . cType) columns
 
-isEphemeral :: NamedType -> Bool
-isEphemeral a = case getType a of
-  DbMaybe x -> isEphemeral x
-  DbList _  -> True
-  _         -> False
+isEphemeral :: DbType -> Bool
+isEphemeral a = case a of
+  DbMaybe x  -> isEphemeral x
+  DbList _ _ -> True
+  _          -> False
 
 checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] ([Column], [Constraint])))
 checkTable name = do
@@ -471,8 +454,8 @@ showSqlType DbDay = "DATE"
 showSqlType DbTime = "TIME"
 showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbBlob = "BYTEA"
-showSqlType (DbMaybe t) = showSqlType (getType t)
-showSqlType (DbList _) = "INTEGER"
+showSqlType (DbMaybe t) = showSqlType t
+showSqlType (DbList _ _) = "INTEGER"
 showSqlType (DbEntity _) = "INTEGER"
 showSqlType t@(DbEmbedded _ _) = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
@@ -483,7 +466,7 @@ compareColumns = (all . flip elem) `on` map f where
 -- | Converts complex datatypes that reference other data to id type DbInt32. Does not handle DbTuple
 simplifyType :: DbType -> DbType
 simplifyType (DbEntity _) = DbInt32
-simplifyType (DbList _) = DbInt32
+simplifyType (DbList _ _) = DbInt32
 simplifyType x = x
 
 defaultPriority :: Int

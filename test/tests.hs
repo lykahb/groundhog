@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, StandaloneDeriving #-}
---module Main where
+module Main where
 import qualified Data.Map as M
 import qualified Control.Exception as E
 import Control.Exception.Base(SomeException)

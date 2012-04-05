@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse #-}
+{-# LANGUAGE CPP #-}
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
@@ -11,17 +12,18 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core(PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(DbEntity), Constraint(..), Constructor(..), namedType, EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull, failMessage)
+import Database.Groundhog.Core (PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull)
+import Database.Groundhog.Generic (failMessage)
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax(StrictType, VarStrictType, Lift(..))
+import Language.Haskell.TH.Syntax (StrictType, VarStrictType, Lift(..))
 import Language.Haskell.TH.Quote
-import Control.Monad(liftM, forM, forM_, foldM, when)
-import Data.ByteString.Char8(pack)
-import Data.Char(toUpper, toLower, isSpace)
-import Data.Either(partitionEithers)
-import Data.List(nub, (\\))
-import Data.Yaml(decodeEither)
+import Control.Monad (liftM, forM, forM_, foldM, when)
+import Data.ByteString.Char8 (pack)
+import Data.Char (toUpper, toLower, isSpace)
+import Data.Either ( partitionEithers)
+import Data.List (nub, (\\))
+import Data.Yaml (decodeEither)
 
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
@@ -163,7 +165,7 @@ mkPersist style (PersistSettings defs) = do
         case x of
           def@(DataD _ _ _ _ _)  -> mkDecs $ either error id $ validate $ applyEntitySettings ent $ mkTHEntityDefWith style def
           NewtypeD _ _ _ _ _ -> error "Newtypes are not supported"
-          _ -> error $ "Unknown declaration type: " ++ show name
+          _ -> error $ "Unknown declaration type: " ++ show name ++ " " ++ show x
       _        -> error $ "Only datatypes can be processed: " ++ show name
   return $ concat entitiesDecs
 
@@ -189,6 +191,10 @@ applyFieldSettings settings def@(THFieldDef{..}) =
       , exprName = maybe exprName id $ psExprName settings
       , embeddedDef = psEmbeddedDef settings
       }
+
+applyEmbeddedFieldSettings :: Maybe PSEmbeddedFieldDef -> Q Exp -> Q Exp
+applyEmbeddedFieldSettings Nothing a = a
+applyEmbeddedFieldSettings (Just s) a = [| case $a of DbEmbedded _ xs -> undefined xs; _ -> error $ "expected DbEmbedded, got " ++ show $a |]
 
 notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]
 notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
@@ -285,7 +291,8 @@ mkPersistEntityInstance def = do
   entityDef' <- do
     v <- newName "v"
     let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
-    let typeParams' = listE $ map (\t -> [| namedType ($(mkLambda $ extractType t) $(varE v)) |]) $ thTypeParams def
+    let types = map extractType $ thTypeParams def
+    let typeParams' = listE $ map (\t -> [| dbType ($(mkLambda t) $(varE v)) |]) types
     let mkField c fNum f = do
         a <- newName "a"
         let fname = dbFieldName f
@@ -294,7 +301,7 @@ mkPersistEntityInstance def = do
                       wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
                   in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
              else [| undefined :: $(return $ fieldType f) |]
-        [| (fname, namedType $nvar) |]
+        [| (fname, dbType $nvar) |]
     let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
         mkConstructorDef cNum c@(THConstructorDef _ _ name params conss) = [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) $(listE $ map (mkConstraint params) conss) |]
         mkConstraint params (PSConstraintDef name fields) = [| Constraint name $(listE $ map (lift . getFieldName params) fields) |]
@@ -302,7 +309,13 @@ mkPersistEntityInstance def = do
           [f] -> dbFieldName f
           []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"
           _   -> error $ "It can never happen. Found several fields with one database name " ++ show name
-    let body = normalB [| EntityDef $(stringE $ dbEntityName def) $typeParams' $constrs |]
+    
+    let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
+    let fullEntityName = case null types of
+         True  -> [| $(stringE $ dbEntityName def) |]
+         False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
+
+    let body = normalB [| EntityDef $fullEntityName $typeParams' $constrs |]
     let pat = if null $ thTypeParams def then wildP else varP v
     funD 'entityDef $ [ clause [pat] body [] ]
 
@@ -377,7 +390,7 @@ mkPersistEntityInstance def = do
       then return (Nothing, [| Left $(lift $ dbFieldName f) |])
       else do
         fArg <- newName "f"
-        let body = [| Right [ ($(lift $ dbFieldName f), namedType $ (undefined :: Field v c a -> a) $ $(varE fArg)) ] |]
+        let body = [| Right [ ($(lift $ dbFieldName f), dbType $ (undefined :: Field v c a -> a) $ $(varE fArg)) ] |]
         return (Just fArg, body)
     in funD 'entityFieldChain clauses
 
@@ -395,10 +408,10 @@ mkPersistFieldInstance def = do
     let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
     
     let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
-    let namesList = case null types of
+    let fullEntityName = case null types of
          True  -> [| $(stringE $ dbEntityName def) |]
          False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
-    let body = normalB $ namesList
+    let body = normalB $ fullEntityName
     let pat = if null $ thTypeParams def then wildP else varP v
     funD 'persistName $ [ clause [pat] body [] ]
   
@@ -454,6 +467,10 @@ extractType :: TyVarBndr -> Type
 extractType (PlainTV name) = VarT name
 extractType (KindedTV name _) = VarT name
 
+#if MIN_VERSION_template_haskell(2, 7, 0)
+#define isClassInstance isInstance
+#endif
+
 isPrim :: Type -> Q Bool
 -- we cannot use simply isClassInstance because it crashes on type vars and in this case
 -- class PrimitivePersistField a
@@ -461,7 +478,7 @@ isPrim :: Type -> Q Bool
 -- instance PrimitivePersistField a => Maybe a
 -- it will consider (Maybe anytype) instance of PrimitivePersistField
 isPrim t | hasFreeVars t = return False
-isPrim t@(ConT _) = isInstance ''PrimitivePersistField [t]
+isPrim t@(ConT _) = isClassInstance ''PrimitivePersistField [t]
 isPrim (AppT (ConT key) _)  | key == ''Key = return True
 isPrim (AppT (ConT tcon) t) | tcon == ''Maybe = isPrim t
 isPrim _ = return False

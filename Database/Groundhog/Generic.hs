@@ -9,10 +9,10 @@ module Database.Groundhog.Generic
   , runMigration
   , runMigrationUnsafe
   , printMigration
-  , getEntityName
   , mergeMigrations
   , silentMigrationLogger
   , defaultMigrationLogger
+  , failMessage
   , Column(..)
   , mkColumns
   , bracket
@@ -22,15 +22,15 @@ module Database.Groundhog.Generic
 
 import Database.Groundhog.Core
 
-import Control.Monad(liftM, forM_)
+import Control.Monad (liftM, forM_)
 import Control.Monad.Trans.State
-import Control.Monad.Trans.Class(lift)
-import Control.Monad.Trans.Control(MonadBaseControl, control, restoreM)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
 import qualified Control.Exception as E
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.Either(partitionEithers)
-import Data.Function(on)
-import Data.List(intercalate, sortBy)
+import Data.Either (partitionEithers)
+import Data.Function (on)
+import Data.List (sortBy)
 import qualified Data.Map as Map
 
 -- | Create migration for a given entity and all entities it depends on.
@@ -38,16 +38,15 @@ import qualified Data.Map as Map
 -- occurs several times in a datatype
 migrateRecursively :: (Monad m, PersistEntity e) => 
      (EntityDef   -> m SingleMigration) -- ^ migrate entity
-  -> (NamedType   -> m SingleMigration) -- ^ migrate list
+  -> (DbType   -> m SingleMigration) -- ^ migrate list
   -> e                                  -- ^ initial entity
   -> StateT NamedMigrations m ()
-migrateRecursively migE migL = go . namedType where
-  go w = case getType w of
-    DbList t        -> f (getName w) (migL t) (go t)
-    DbEntity e      -> f (getName w) (migE e) (mapM_ go (allSubtypes e))
-    DbMaybe t       -> go t
-    DbEmbedded _ ts -> mapM_ (go . snd) ts
-    _               -> return ()    -- ordinary types need not migration
+migrateRecursively migE migL = go . dbType where
+  go l@(DbList lName t) = f lName (migL l) (go t)
+  go (DbEntity e)       = f (entityName e) (migE e) (mapM_ go (allSubtypes e))
+  go (DbMaybe t)        = go t
+  go (DbEmbedded _ ts)  = mapM_ (go . snd) ts
+  go _                  = return ()    -- ordinary types need not migration
   f name mig cont = do
     v <- gets (Map.lookup name)
     case v of
@@ -121,11 +120,8 @@ mergeMigrations ms =
        then Right (concat statements)
        else Left  (concat errors)
 
--- | Get full entity name with the names of its parameters.
---
--- @ getEntityName (entityDef v) == persistName v @
-getEntityName :: EntityDef -> String
-getEntityName e = intercalate "$" $ entityName e:map getName (typeParams e)
+failMessage :: PersistField a => a -> [PersistValue] -> String
+failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs
 
 -- Describes a database column. Field cType always contains DbType that maps to one column (no DbEmbedded)
 data Column = Column
@@ -136,18 +132,18 @@ data Column = Column
     , cReference :: Maybe String -- table name
     } deriving (Eq, Show)
 
-mkColumns :: String -> NamedType -> [Column]
+mkColumns :: String -> DbType -> [Column]
 mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
-  go prefix (fname, typ) acc = case getType typ of
+  go prefix (fname, typ) acc = case typ of
     DbEmbedded False ts -> foldr (go $ prefix ++ fname ++ "$") acc ts
     DbEmbedded True  ts -> foldr (go "") acc ts
     _          -> column:acc where
       column = Column (prefix ++ fname) isNullable simpleType Nothing ref
       (isNullable, simpleType, ref) = analyze typ
-      analyze x = case getType x of
+      analyze x = case x of
         DbMaybe a      -> let (_, t', ref') = analyze a in (True, t', ref')
-        t@(DbEntity _) -> (False, t, Just $ getName x)
-        t@(DbList _)   -> (False, t, Just $ getName x)
+        t@(DbEntity e) -> (False, t, Just $ entityName e)
+        t@(DbList lName _)   -> (False, t, Just lName)
         DbEmbedded _ _ -> error "mkColumn: unexpected DbEmbedded"
         a              -> (False, a, Nothing)
 

@@ -5,6 +5,7 @@ module Database.Groundhog.Instances (Selector(..)) where
 import Control.Monad (liftM)
 
 import Database.Groundhog.Core
+import Database.Groundhog.Generic (failMessage)
 
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -622,7 +623,7 @@ instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where
   fromPersistValues [] = fail "fromPersistValues Maybe: empty list"
   fromPersistValues (PersistNull:xs) = return (Nothing, xs)
   fromPersistValues (x:xs) = fromSinglePersistValue x >>= \x' -> return (Just x', xs)
-  dbType a = DbMaybe $ namedType ((undefined :: Maybe a -> a) a)
+  dbType a = DbMaybe $ dbType ((undefined :: Maybe a -> a) a)
   
 instance (PersistEntity a) => PersistField (Key a) where
   persistName a = "Key$" ++ persistName ((undefined :: Key a -> a) a)
@@ -635,7 +636,7 @@ instance (PersistField a) => PersistField [a] where
   toPersistValues l = insertList l >>= toPersistValues
   fromPersistValues [] = fail "fromPersistValues []: empty list"
   fromPersistValues (x:xs) = getList (fromPrim x) >>= \l -> return (l, xs)
-  dbType a = DbList $ namedType ((undefined :: [] a -> a) a)
+  dbType a = DbList (persistName a) $ dbType ((undefined :: [] a -> a) a)
 
 instance PersistField () where
   persistName _ = "Unit$"
@@ -653,7 +654,7 @@ instance (PersistField a, PersistField b) => PersistField (a, b) where
     (a, rest0) <- fromPersistValues xs
     (b, rest1) <- fromPersistValues rest0
     return ((a, b), rest1)
-  dbType a = DbEmbedded False [("val0", namedType ((undefined :: (a, b) -> a) a)), ("val1", namedType ((undefined :: (a, b) -> b) a))]
+  dbType a = DbEmbedded False [("val0", dbType ((undefined :: (a, b) -> a) a)), ("val1", dbType ((undefined :: (a, b) -> b) a))]
   
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
   persistName a = "Tuple3$$" ++ persistName ((undefined :: (a, b, c) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b, c) -> b) a) ++ "$" ++ persistName ((undefined :: (a, b, c) -> c) a)
@@ -667,7 +668,7 @@ instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b,
     (b, rest1) <- fromPersistValues rest0
     (c, rest2) <- fromPersistValues rest1
     return ((a, b, c), rest2)
-  dbType a = DbEmbedded False [("val0", namedType ((undefined :: (a, b, c) -> a) a)), ("val1", namedType ((undefined :: (a, b, c) -> b) a)), ("val2", namedType ((undefined :: (a, b, c) -> c) a))]
+  dbType a = DbEmbedded False [("val0", dbType ((undefined :: (a, b, c) -> a) a)), ("val1", dbType ((undefined :: (a, b, c) -> b) a)), ("val2", dbType ((undefined :: (a, b, c) -> c) a))]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
   persistName a = "Tuple4$$" ++ persistName ((undefined :: (a, b, c, d) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d) -> b) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d) -> c) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d) -> d) a)
@@ -683,7 +684,7 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d) => Per
     (c, rest2) <- fromPersistValues rest1
     (d, rest3) <- fromPersistValues rest2
     return ((a, b, c, d), rest3)
-  dbType a = DbEmbedded False [("val0", namedType ((undefined :: (a, b, c, d) -> a) a)), ("val1", namedType ((undefined :: (a, b, c, d) -> b) a)), ("val2", namedType ((undefined :: (a, b, c, d) -> c) a)), ("val3", namedType ((undefined :: (a, b, c, d) -> d) a))]
+  dbType a = DbEmbedded False [("val0", dbType ((undefined :: (a, b, c, d) -> a) a)), ("val1", dbType ((undefined :: (a, b, c, d) -> b) a)), ("val2", dbType ((undefined :: (a, b, c, d) -> c) a)), ("val3", dbType ((undefined :: (a, b, c, d) -> d) a))]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
   persistName a = "Tuple5$$" ++ persistName ((undefined :: (a, b, c, d, e) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> b) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> c) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> d) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> e) a)
@@ -701,4 +702,4 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d, Persis
     (d, rest3) <- fromPersistValues rest2
     (e, rest4) <- fromPersistValues rest3
     return ((a, b, c, d, e), rest4)
-  dbType a = DbEmbedded False [("val0", namedType ((undefined :: (a, b, c, d, e) -> a) a)), ("val1", namedType ((undefined :: (a, b, c, d, e) -> b) a)), ("val2", namedType ((undefined :: (a, b, c, d, e) -> c) a)), ("val3", namedType ((undefined :: (a, b, c, d, e) -> d) a)), ("val4", namedType ((undefined :: (a, b, c, d, e) -> e) a))]
+  dbType a = DbEmbedded False [("val0", dbType ((undefined :: (a, b, c, d, e) -> a) a)), ("val1", dbType ((undefined :: (a, b, c, d, e) -> b) a)), ("val2", dbType ((undefined :: (a, b, c, d, e) -> c) a)), ("val3", dbType ((undefined :: (a, b, c, d, e) -> d) a)), ("val4", dbType ((undefined :: (a, b, c, d, e) -> e) a))]

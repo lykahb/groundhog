@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts, ScopedTypeVariables, GADTs, OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 
 -- | This module defines the functions which are used only for backends creation.
 module Database.Groundhog.Generic.Sql
@@ -39,6 +40,12 @@ instance Monoid s => Monoid (RenderS s) where
 {-# INLINABLE parens #-}
 parens :: StringLike s => Int -> Int -> RenderS s -> RenderS s
 parens p1 p2 expr = if p1 < p2 then char '(' <> expr <> char ')' else expr
+
+#if !MIN_VERSION_base(4, 5, 0)
+{-# INLINABLE (<>) #-}
+(<>) :: Monoid m => m -> m -> m
+(<>) = mappend
+#endif
 
 string :: StringLike s => String -> RenderS s
 string s = RenderS (fromString s) id
@@ -181,15 +188,15 @@ renderField esc field acc = case fieldChain field of
 [("val1", DbEmbedded False _), ("val4", DbEmbedded True _), ("val5", DbEmbedded True _)] -> "val1"
 [("val1", DbEmbedded False _), ("val4", DbEmbedded False _), ("val5", DbEmbedded True _)] -> "val4$val1"
 -}
-mkPrefix :: StringLike s => [(String, NamedType)] -> Maybe s
+mkPrefix :: StringLike s => [(String, DbType)] -> Maybe s
 mkPrefix = go where
   go [] = Nothing
-  go ((name, typ):fs) = case getType typ of
+  go ((name, typ):fs) = case typ of
     DbEmbedded True  _ -> Nothing
     DbEmbedded False _ -> Just $ goP (fromString name) fs
     other -> error $ "mkPrefix: unexpected type " ++ show other
   goP acc [] = acc
-  goP acc ((name, typ):fs) = case getType typ of
+  goP acc ((name, typ):fs) = case typ of
     DbEmbedded True  _ -> acc
     DbEmbedded False _ -> goP (fromString name <> fromChar '$' <> acc) fs
     other -> error $ "mkPrefix: unexpected type " ++ show other
@@ -217,17 +224,17 @@ renderOrders esc xs = if null orders then mempty else " ORDER BY " <> commasJoin
 -- Returns string with comma separated escaped fields like "name,age"
 -- If there are other columns before renderFields result, do not put comma because the result might be an empty string. This happens when the fields have no columns like ().
 -- One of the solutions is to add one more field with datatype that is known to have columns, eg renderFields id (("id$", namedType (0 :: Int64)) : constrParams constr)
-renderFields :: StringLike s => (s -> s) -> [(String, NamedType)] -> s
+renderFields :: StringLike s => (s -> s) -> [(String, DbType)] -> s
 renderFields esc = commasJoin . foldr (flatten esc) []
 
-flatten :: StringLike s => (s -> s) -> (String, NamedType) -> ([s] -> [s])
-flatten esc (fname, typ) acc = case getType typ of
+flatten :: StringLike s => (s -> s) -> (String, DbType) -> ([s] -> [s])
+flatten esc (fname, typ) acc = case typ of
   DbEmbedded False ts -> foldr (flattenP esc (fromString fname)) acc ts
   DbEmbedded True  ts -> foldr (flatten esc) acc ts
   _            -> esc (fromString fname) : acc
 
-flattenP :: StringLike s => (s -> s) -> s -> (String, NamedType) -> ([s] -> [s])
-flattenP esc prefix (fname, typ) acc = (case getType typ of
+flattenP :: StringLike s => (s -> s) -> s -> (String, DbType) -> ([s] -> [s])
+flattenP esc prefix (fname, typ) acc = (case typ of
   DbEmbedded False ts -> foldr (flattenP esc fullName) acc ts
   DbEmbedded True  ts -> foldr (flatten esc) acc ts
   _            -> esc fullName : acc) where

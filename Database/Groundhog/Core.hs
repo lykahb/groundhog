@@ -31,8 +31,6 @@ module Database.Groundhog.Core
   , Order(..)
   -- * Type description
   , DbType(..)
-  , NamedType(..)
-  , namedType
   , EntityDef(..)
   , ConstructorDef(..)
   , Constructor(..)
@@ -46,8 +44,6 @@ module Database.Groundhog.Core
   , RowPopper
   , DbPersist(..)
   , runDbPersist
-  -- * Other
-  , failMessage
   ) where
 
 import Control.Applicative (Applicative)
@@ -80,7 +76,7 @@ class PersistField v => PersistEntity v where
   getConstraints :: v -> (Int, [(String, [PersistValue])])
   -- | Is internally used by FieldLike Field instance
   -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
-  entityFieldChain :: Field v c a -> Either String [(String, NamedType)]
+  entityFieldChain :: Field v c a -> Either String [(String, DbType)]
 
 -- | A unique identifier of a value stored in a database
 data PersistEntity v => Key v = Key Int64 deriving (Show, Eq)
@@ -115,9 +111,9 @@ data Order v c = forall a f . FieldLike f => Asc  (f v c a)
 
 -- | Generalises data that can occur in expressions (so far there are regular Field and SubField).
 class FieldLike f where
-  -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [(\"val0\", DbString), (\"some\", DbEmbedded False [namedType \"\", namedType True])].
-  -- Function fieldChain can be simplified to f v c a -> [(String, NamedType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
-  fieldChain :: PersistEntity v => f v c a -> Either String [(String, NamedType)]
+  -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
+  -- Function fieldChain can be simplified to f v c a -> [(String, DbType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
+  fieldChain :: PersistEntity v => f v c a -> Either String [(String, DbType)]
 
 class PersistField v => Embedded v where
   data Selector v :: * -> *
@@ -126,20 +122,18 @@ class PersistField v => Embedded v where
 infixl 5 ~>
 (~>) :: (FieldLike f, PersistEntity v, Embedded a) => f v c a -> Selector a a' -> SubField v c a'
 field ~> sel = case fieldChain field of
-  Right (fs@((_, f):_)) -> case getType f of
+  Right (fs@((_, f):_)) -> case f of
     DbEmbedded _ ts -> SubField (ts !! selectorNum sel : fs)
     other -> error $ "(~>): cannot get subfield of non-embedded type " ++ show other
   other -> error $ "(~>): cannot get subfield of " ++ show other
 
-newtype SubField v c a = SubField [(String, NamedType)]
+newtype SubField v c a = SubField [(String, DbType)]
 
 instance FieldLike SubField where
   fieldChain (SubField fs) = Right fs
 
 instance FieldLike Field where
   fieldChain = entityFieldChain
-
--- TODO: UGLY: we use unsafeCoerce to cast phantom types Any and Any to more specific type if possible. The safety is assured by TypeEqual and TypeEqualC classes. I hope it will work w/o woes of segfaults
 
 -- | Update field
 infixr 3 =.
@@ -264,10 +258,10 @@ type SingleMigration = Either [String] [(Bool, Int, String)]
 
 -- | Describes an ADT.
 data EntityDef = EntityDef {
-  -- | Emtity name
+  -- | Entity name. @entityName (entityDef v) == persistName v@
     entityName   :: String
   -- | Named types of the instantiated polymorphic type parameters
-  , typeParams   :: [NamedType]
+  , typeParams   :: [DbType]
   -- | List of entity constructors definitions
   , constructors :: [ConstructorDef]
 } deriving (Show, Eq)
@@ -279,7 +273,7 @@ data ConstructorDef = ConstructorDef {
   -- | Constructor name
   , constrName    :: String
   -- | Parameter names with their named type
-  , constrParams  :: [(String, NamedType)]
+  , constrParams  :: [(String, DbType)]
   -- | Uniqueness constraints on the constructor fiels
   , constrConstrs :: [Constraint]
 } deriving (Show, Eq)
@@ -310,25 +304,12 @@ data DbType = DbString
             | DbDayTime
             | DbBlob    -- ByteString
 -- More complex types
-            | DbMaybe NamedType
-            | DbList NamedType
+            | DbMaybe DbType
+            | DbList String DbType -- list name and type of its argument
             -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True). False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
-            | DbEmbedded Bool [(String, NamedType)]
+            | DbEmbedded Bool [(String, DbType)]
             | DbEntity EntityDef
   deriving (Eq, Show)
-
--- | It is used to store type 'DbType' and persist name of a value
-data NamedType = NamedType { getName :: String, getType :: DbType }
-
-namedType :: PersistField v => v -> NamedType
-namedType v = NamedType (persistName v) (dbType v)
-
-instance Show NamedType where
-  show t = show $ getType t
-
--- rely on the invariant that no two types have the same name
-instance Eq NamedType where
-  t1 == t2 = getName t1 == getName t2
 
 -- | A raw value which can be stored in any backend and can be marshalled to
 -- and from a 'PersistField'.
@@ -445,6 +426,3 @@ class PersistField a => SinglePersistField a where
 class PersistField a => PurePersistField a where
   toPurePersistValues :: a -> ([PersistValue] -> [PersistValue])
   fromPurePersistValues :: [PersistValue] -> (a, [PersistValue])
-
-failMessage :: PersistField a => a -> [PersistValue] -> String
-failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs

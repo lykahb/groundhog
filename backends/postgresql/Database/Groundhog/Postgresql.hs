@@ -98,7 +98,7 @@ insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues v
   let e = entityDef v
-  let name = getEntityName e
+  let name = persistName v
   let constructorNum = fromPrim (head vals)
 
   if isSimple (constructors e)
@@ -117,7 +117,7 @@ insert' v = do
 
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> String
 insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(" ++ fieldNames ++ ")VALUES(" ++ placeholders ++ ")RETURNING(id$)" where
-  fields = if withId then (constrId, namedType (0 :: Int64)):constrParams c else constrParams c
+  fields = if withId then (constrId, dbType (0 :: Int64)):constrParams c else constrParams c
   fieldNames   = fromStringS (renderFields escapeS fields) ""
   placeholders = fromStringS (renderFields (const $ fromChar '?') fields) ""
 
@@ -125,7 +125,7 @@ insertIntoConstructorTable withId tName c = "INSERT INTO " ++ escape tName ++ "(
 insertBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m (Either (Key v) (Key v))
 insertBy' v = do
   let e = entityDef v
-  let name = getEntityName e
+  let name = persistName v
 
   let (constructorNum, constraints) = getConstraints v
   let constrDefs = constrConstrs $ constructors e !! constructorNum
@@ -163,7 +163,7 @@ replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> v ->
 replace' k v = do
   vals <- toEntityPersistValues v
   let e = entityDef v
-  let name = getEntityName e
+  let name = persistName v
   let constructorNum = fromPrim (head vals)
   let constr = constructors e !! constructorNum
 
@@ -208,7 +208,7 @@ select' (cond :: Cond v c) ords limit offset = start where
 
   e = entityDef (undefined :: v)
   orders = renderOrders escapeS ords
-  name = getEntityName e
+  name = persistName (undefined :: v)
   (lim, limps) = case (limit, offset) of
         (0, 0) -> ("", [])
         (0, o) -> (" OFFSET ?", [toPrim o])
@@ -236,14 +236,14 @@ selectAll' = start where
         let query = "SELECT " ++ fromStringS fields (" FROM " ++ escape cName)
         queryRawCached' query [] $ mapAllRows (mkEntity i)
   e = entityDef (undefined :: v)
-  name = getEntityName e
+  name = persistName (undefined :: v)
 
 {-# SPECIALIZE get' :: PersistEntity v => Key v -> DbPersist Postgresql IO (Maybe v) #-}
 {-# INLINE get' #-}
 get' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> DbPersist Postgresql m (Maybe v)
 get' (k :: Key v) = do
   let e = entityDef (undefined :: v)
-  let name = getEntityName e
+  let name = persistName (undefined :: v)
   if isSimple (constructors e)
     then do
       let constr = head $ constructors e
@@ -275,7 +275,7 @@ get' (k :: Key v) = do
 update' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Postgresql m ()
 update' upds (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
-  let name = getEntityName e
+  let name = persistName (undefined :: v)
   case renderUpdates escapeS upds of
     Just upds' -> do
       let conds' = renderCond' cond
@@ -289,7 +289,7 @@ delete' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) =>
 delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValues) cond') where
   e = entityDef (undefined :: v)
   cond' = renderCond' cond
-  name = getEntityName e
+  name = persistName (undefined :: v)
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   query = if isSimple (constructors e)
     then "DELETE FROM " ++ escape name ++ fromStringS whereClause ""
@@ -299,8 +299,7 @@ delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValu
 
 deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => Key v -> DbPersist Postgresql m ()
 deleteByKey' (k :: Key v) = do
-  let e = entityDef (undefined :: v)
-  let name = getEntityName e
+  let name = persistName (undefined :: v)
   let query = "DELETE FROM " ++ escape name ++ " WHERE id$=?"
   executeRawCached' query [toPrim k]
 
@@ -309,7 +308,7 @@ count' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => 
 count' (cond :: Cond v c) = do
   let e = entityDef (undefined :: v)
   let cond' = renderCond' cond
-  let name = getEntityName e
+  let name = persistName (undefined :: v)
   let tname = if isSimple (constructors e)
        then name
        else name ++ [defDelim] ++ phantomConstrName (undefined :: c)
@@ -337,7 +336,7 @@ insertList' (l :: [a]) = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   k <- queryRawCached' ("INSERT INTO " ++ escape mainName ++ " DEFAULT VALUES RETURNING(id$)") [] getKey
   let valuesName = mainName ++ "$" ++ "values"
-  let fields = [("ord$", namedType (0 :: Int)), ("value", namedType (undefined :: a))]
+  let fields = [("ord$", dbType (0 :: Int)), ("value", dbType (undefined :: a))]
   let query = "INSERT INTO " ++ escape valuesName ++ "(id$," ++ fromStringS (renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields) ")"
   let go :: Int -> [a] -> DbPersist Postgresql m ()
       go n (x:xs) = do
@@ -352,7 +351,7 @@ getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int
 getList' k = do
   let mainName = "List$$" ++ persistName (undefined :: a)
   let valuesName = mainName ++ "$values"
-  let value = ("value", namedType (undefined :: a))
+  let value = ("value", dbType (undefined :: a))
   let query = fromStringS ("SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS (fromString valuesName)) " WHERE id$=? ORDER BY ord$"
   queryRawCached' query [toPrim k] $ mapAllRows (liftM fst . fromPersistValues)
 
