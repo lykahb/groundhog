@@ -134,8 +134,7 @@ testPersistSettings = do
   let settable = Settable "abc" "def" (1, ("qqq", 2))
   migr settable
   k <- insert settable
-  --(settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
-  (settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"settableTuple$val0\", \"settableTuple$val1$val0\", \"settableTuple$val1$val1\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
+  (settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
   settable' @=? Just settable
   vals <- select (Settable1Fld ==. "abc") [] 0 0
   vals @=? [(k, settable)]

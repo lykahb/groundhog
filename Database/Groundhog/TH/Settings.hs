@@ -10,6 +10,7 @@ module Database.Groundhog.TH.Settings
   , PSConstraintDef(..)
   ) where
 
+import Database.Groundhog.Generic (PSEmbeddedFieldDef(..))
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
 import Control.Monad (mzero)
@@ -42,12 +43,6 @@ data PSFieldDef = PSFieldDef {
   , psDbFieldName :: Maybe String -- SQLbar
   , psExprName :: Maybe String -- BarField
   , psEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
-} deriving Show
-
-data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
-    psEmbeddedFieldName :: String -- bar
-  , psDbEmbeddedFieldName :: Maybe String -- SQLbar
-  , psSubEmbedded :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
 data PSConstraintDef = PSConstraintDef {

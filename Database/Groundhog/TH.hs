@@ -13,7 +13,7 @@ module Database.Groundhog.TH
   ) where
 
 import Database.Groundhog.Core (PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull)
-import Database.Groundhog.Generic (failMessage)
+import Database.Groundhog.Generic (failMessage, applyEmbeddedSettings)
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (StrictType, VarStrictType, Lift(..))
@@ -192,10 +192,6 @@ applyFieldSettings settings def@(THFieldDef{..}) =
       , embeddedDef = psEmbeddedDef settings
       }
 
-applyEmbeddedFieldSettings :: Maybe PSEmbeddedFieldDef -> Q Exp -> Q Exp
-applyEmbeddedFieldSettings Nothing a = a
-applyEmbeddedFieldSettings (Just s) a = [| case $a of DbEmbedded _ xs -> undefined xs; _ -> error $ "expected DbEmbedded, got " ++ show $a |]
-
 notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]
 notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
 
@@ -301,7 +297,7 @@ mkPersistEntityInstance def = do
                       wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
                   in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
              else [| undefined :: $(return $ fieldType f) |]
-        [| (fname, dbType $nvar) |]
+        [| (fname, $(maybe id (\emb t -> [| applyEmbeddedSettings $(lift emb) $t |]) (embeddedDef f) $ [|dbType $nvar|]) ) |]
     let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
         mkConstructorDef cNum c@(THConstructorDef _ _ name params conss) = [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) $(listE $ map (mkConstraint params) conss) |]
         mkConstraint params (PSConstraintDef name fields) = [| Constraint name $(listE $ map (lift . getFieldName params) fields) |]

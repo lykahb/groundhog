@@ -18,6 +18,8 @@ module Database.Groundhog.Generic
   , bracket
   , finally
   , onException
+  , PSEmbeddedFieldDef(..)
+  , applyEmbeddedSettings
   ) where
 
 import Database.Groundhog.Core
@@ -37,9 +39,9 @@ import qualified Data.Map as Map
 -- The stateful Map is used to avoid duplicate migrations when an entity type
 -- occurs several times in a datatype
 migrateRecursively :: (Monad m, PersistEntity e) => 
-     (EntityDef   -> m SingleMigration) -- ^ migrate entity
-  -> (DbType   -> m SingleMigration) -- ^ migrate list
-  -> e                                  -- ^ initial entity
+     (EntityDef -> m SingleMigration) -- ^ migrate entity
+  -> (DbType    -> m SingleMigration) -- ^ migrate list
+  -> e                                -- ^ initial entity
   -> StateT NamedMigrations m ()
 migrateRecursively migE migL = go . dbType where
   go l@(DbList lName t) = f lName (migL l) (go t)
@@ -168,3 +170,24 @@ onException :: MonadBaseControl IO m
         -> m b
         -> m a
 onException io what = control $ \runInIO -> E.onException (runInIO io) (runInIO what)
+
+data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
+    psEmbeddedFieldName :: String -- bar
+  , psDbEmbeddedFieldName :: Maybe String -- SQLbar
+  , psSubEmbedded :: Maybe [PSEmbeddedFieldDef]
+} deriving Show
+
+applyEmbeddedSettings :: [PSEmbeddedFieldDef] -> DbType -> DbType
+--applyEmbeddedSettings _ db = trace "applyEmbedded" db
+applyEmbeddedSettings settings (DbEmbedded _ fields) = DbEmbedded True $ go settings fields where
+  go [] [] = []
+  go [] fs = fs
+  go st [] = error $ "applyEmbeddedSettings: embedded datatype does not have following fields: " ++ show st
+  go st (f@(fName, fType):fs) = case find fName st of
+    Just (rest, PSEmbeddedFieldDef _ dbName subs) -> (maybe fName id dbName, maybe id applyEmbeddedSettings subs $ fType):go rest fs
+    Nothing -> f:go st fs
+  find :: String -> [PSEmbeddedFieldDef] -> Maybe ([PSEmbeddedFieldDef], PSEmbeddedFieldDef)
+  find _ [] = Nothing
+  find name (def:defs) | psEmbeddedFieldName def == name = Just (defs, def)
+                       | otherwise = fmap (\(defs', result) -> (def:defs', result)) $ find name defs
+applyEmbeddedSettings _ t = error $ "applyEmbeddedSettings: expected DbEmbedded, got " ++ show t
