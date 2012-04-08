@@ -165,9 +165,9 @@ close database = do
 
 foreign import ccall "sqlite3_prepare_v2"
   prepareC :: Ptr () -> CString -> Int -> Ptr (Ptr ()) -> Ptr (Ptr ()) -> IO Int
-prepareError :: Database -> String -> IO (Either Statement Error)
+prepareError :: Database -> BS.ByteString -> IO (Either Statement Error)
 prepareError db@(Database database) text = do
-  BS.useAsCString (UTF8.fromString text)
+  BS.useAsCString text
                   (\textC -> do
                      alloca (\statementC -> do
                                err <- prepareC database textC (-1) statementC nullPtr
@@ -176,7 +176,7 @@ prepareError db@(Database database) text = do
                                    statement <- peek statementC
                                    return $ Left $ Statement statement db
                                  else return $ Right err))
-prepare :: Database -> String -> IO Statement
+prepare :: Database -> BS.ByteString -> IO Statement
 prepare database text = do
   statementOrError <- prepareError database text
   case statementOrError of
