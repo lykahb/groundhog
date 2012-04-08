@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes #-}
 
 import Control.Monad
 import Database.Groundhog.TH
@@ -6,7 +6,9 @@ import Database.Groundhog.Sqlite
 
 data Person = Person {name :: String, age :: Int, height :: Int} deriving (Eq, Show)
 
-deriveEntity ''Person Nothing
+mkPersist fieldNamingStyle [groundhog|
+- entity: Person
+|]
 
 -- 0.0.1.1 sqlite
 -- 100000 $ insert ~1.54
