@@ -8,7 +8,7 @@ data Item = Product {productName :: String, quantity :: Int, customer :: Custome
           | Service {serviceName :: String, deliveryAddress :: String, servicePrice :: Int}
      deriving Show
 
-mkPersist fieldNamingStyle [groundhog|
+mkPersist suffixNamingStyle [groundhog|
 - entity: Customer
   constructors:
     - name: Customer
@@ -20,7 +20,7 @@ mkPersist fieldNamingStyle [groundhog|
 
 main = withSqliteConn ":memory:" $ runSqliteConn $ do
   -- Customer is also migrated because Item contains it
-  runMigration silentMigrationLogger $ migrate (undefined :: Item)
+  runMigration defaultMigrationLogger $ migrate (undefined :: Item)
   let john = Customer "John Doe" "Phone: 01234567"
   johnKey <- insert john
   -- John is inserted only once because of the name constraint

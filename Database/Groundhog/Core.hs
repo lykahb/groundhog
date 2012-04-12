@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FlexibleContexts, GeneralizedNewtypeDeriving, ConstraintKinds #-}
 
 -- | This module defines the functions and datatypes used throughout the framework.
--- Most of them are for internal use
+-- Most of them are for the internal use
 module Database.Groundhog.Core
   ( 
   -- * Main types
@@ -61,7 +61,7 @@ import Data.Time (Day, TimeOfDay, UTCTime)
 import qualified GHC.Exts as E
 
 -- | Only instances of this class can be persisted in a database
-class PersistField v => PersistEntity v where
+class SinglePersistField v => PersistEntity v where
   -- | This type is used for typesafe manipulation of separate fields of datatype v.
   -- Each constructor in 'Field' corresponds to its field in a datatype v.
   -- It is parametrised by constructor phantom type and field value type.

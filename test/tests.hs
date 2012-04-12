@@ -28,11 +28,12 @@ data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
 data Settable = Settable {settable1 :: String, settable2 :: String, settableTuple :: (Int, (String, Int))} deriving (Eq, Show)
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String), refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String))}
+data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
 deriving instance Show Keys
 
-mkPersist fieldNamingStyle [groundhog|
+mkPersist suffixNamingStyle [groundhog|
 - entity: Number
 - entity: MaybeContext
 - entity: Single
@@ -44,7 +45,7 @@ mkPersist fieldNamingStyle [groundhog|
     - name: Settable
       phantomName: SettableFooBarConstructor
       dbName: entity_db_name_is_used_instead
-      constrParams:
+      fields:
         - name: settable1
           dbName: sqlsettable1
           exprName: Settable1Fld
@@ -62,6 +63,14 @@ mkPersist fieldNamingStyle [groundhog|
       constraints:
         - name: someconstraint
           fields: [settable1, settable2]
+- embedded: EmbeddedSample
+  fields:
+    - name: embedded2
+      embeddedType:
+        - name: val0
+          dbName: embeddedTuple0
+        - name: val1
+          dbName: embeddedTuple1
 |]
 
 main :: IO ()
@@ -81,6 +90,7 @@ mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String ->
 mkTestSuite label run = testGroup label
   [ testCase "testNumber" $ run testNumber
   , testCase "testPersistSettings" $ run testPersistSettings
+  , testCase "testEmbedded" $ run testEmbedded
   , testCase "testInsert" $ run testInsert
   , testCase "testSelect" $ run testSelect
   , testCase "testCond" $ run testCond
@@ -135,10 +145,25 @@ testPersistSettings = do
   migr settable
   k <- insert settable
   (settable' :: Maybe Settable) <- queryRaw False "select 0, \"sqlsettable1\", \"settable2\", \"firstTupleElement\", \"secondTupleElement\", \"thirdTupleElement\" from \"sqlsettable\" where id$=?" [toPrim k] (firstRow >=> maybe (return Nothing) (fmap Just . fromEntityPersistValues))
-  settable' @=? Just settable
-  vals <- select (Settable1Fld ==. "abc") [] 0 0
-  vals @=? [(k, settable)]
+  Just settable @=? settable'
+  vals <- select (Settable1Fld ==. "abc" &&. SettableTupleField ~> Tuple2_0Selector ==. (1 :: Int) &&. SettableTupleField ~> Tuple2_1Selector ~> Tuple2_0Selector ==. "qqq") [] 0 0
+  [(k, settable)] @=? vals
   assertExc "Uniqueness constraint not enforced" $ insert settable
+
+testEmbedded :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testEmbedded = do
+  let val1 = Single (EmbeddedSample "abc" (5, 6))
+  migr val1
+  k1 <- insert val1
+  val1' <- get k1
+  Just val1 @=? val1'
+  vals <- select (SingleField ~> Embedded1Selector ==. "abc" &&. SingleField ~> Embedded2Selector ==. (5, 6) &&. SingleField ~> Embedded2Selector ~> Tuple2_0Selector ==. (5 :: Int)) [] 0 0
+  [(k1, val1)] @=? vals
+  let val2 = Single ((EmbeddedSample "abc" (5, 6), "def"))
+  migr val2
+  k2 <- insert val2
+  val2' <- get k2
+  Just val2 @=? val2'
 
 testInsert :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testInsert = do
@@ -146,7 +171,7 @@ testInsert = do
   let val = Single "abc"
   k <- insert val
   val' <- get k
-  val' @=? Just val
+  Just val @=? val'
 
 testSelect :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testSelect = do

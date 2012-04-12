@@ -1,61 +1,36 @@
-{-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE TemplateHaskell, RecordWildCards #-}
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
-  ( mkPersist
+  ( 
+  -- * Settings format
+  -- $settingsDoc
+    mkPersist
   , groundhog
   , groundhogFile
+  -- * Naming styles
+  -- $namingStylesDoc
   , NamingStyle(..)
-  , fieldNamingStyle
+  , suffixNamingStyle
   , persistentNamingStyle
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core (PersistEntity(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull)
-import Database.Groundhog.Generic (failMessage, applyEmbeddedSettings)
+import Database.Groundhog.TH.CodeGen
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (StrictType, VarStrictType, Lift(..))
 import Language.Haskell.TH.Quote
-import Control.Monad (liftM, forM, forM_, foldM, when)
+import Control.Monad (forM, forM_, when)
 import Data.ByteString.Char8 (pack)
 import Data.Char (toUpper, toLower, isSpace)
-import Data.Either ( partitionEithers)
 import Data.List (nub, (\\))
 import Data.Yaml (decodeEither)
 
--- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
-
-data THEntityDef = THEntityDef {
-    dataName :: Name -- SomeData
-  , dbEntityName :: String  -- SQLSomeData
-  , thTypeParams :: [TyVarBndr]
-  , thConstructors :: [THConstructorDef]
-} deriving Show
-
-data THEmbeddedDef = THEmbeddedDef {
-    embeddedName :: Name
-  , dbEmbeddedName :: String -- used only to set polymorphic part of name of its container
-  , thEmbeddedTypeParams :: [TyVarBndr]
-  , embeddedFields :: [THFieldDef]
-} deriving Show
-
-data THConstructorDef = THConstructorDef {
-    thConstrName    :: Name -- U2
-  , thPhantomConstrName :: String -- U2Constructor
-  , dbConstrName    :: String -- SQLU2
-  , thConstrParams  :: [THFieldDef]
-  , thConstrConstrs :: [PSConstraintDef]
-} deriving Show
-
-data THFieldDef = THFieldDef {
-    fieldName :: String -- bar
-  , dbFieldName :: String -- SQLbar
-  , exprName :: String -- BarField
-  , fieldType :: Type
-  , embeddedDef :: Maybe [PSEmbeddedFieldDef]
-} deriving Show
+-- $namingStylesDoc
+-- When describing a datatype you can omit the most of the declarations. 
+-- In this case the omitted parts of description will be automatically generated using the default names created by naming style.
+-- Any default name can be overridden by setting its value explicitly.
 
 -- | Defines how the names are created. The mk* functions correspond to the set* functions.
 -- Functions mkNormal* define names of non-record constructor Field
@@ -70,15 +45,19 @@ data NamingStyle = NamingStyle {
   , mkDbFieldName :: String -> String -> Int -> String -> Int -> String
   -- | Create name of field constructor used in expressions. Parameters: data name, constructor name, constructor position, field record name, field position.
   , mkExprFieldName :: String -> String -> Int -> String -> Int -> String
-  -- | Create field name used to refer to the it. Parameters: data name, constructor name, constructor position, field position.
+  -- | Create name of selector (see 'Embedded') constructor used in expressions. Parameters: data name, constructor name, field record name, field position.
+  , mkExprSelectorName :: String -> String -> String -> Int -> String
+  -- | Create field name used to refer to the it in settings for non-record constructors. Parameters: data name, constructor name, constructor position, field position.
   , mkNormalFieldName :: String -> String -> Int -> Int -> String
   -- | Create name of the field column in a database. Parameters: data name, constructor name, constructor position, field position.
   , mkNormalDbFieldName :: String -> String -> Int -> Int -> String
   -- | Create name of field constructor used in expressions. Parameters: data name, constructor name, constructor position, field position.
   , mkNormalExprFieldName :: String -> String -> Int -> Int -> String
+  -- | Create name of selector (see 'Embedded') constructor used in expressions. Parameters: data name, constructor name, field position.
+  , mkNormalExprSelectorName :: String -> String -> Int -> String
 }
 
--- | Default style. Adds \"Field\" to each record field name
+-- | Default style. Adds \"Field\" to each record field name.
 --
 -- Example:
 --
@@ -92,16 +71,18 @@ data NamingStyle = NamingStyle {
 -- >     BarField :: Field RecordConstructor (Maybe String)
 -- >     AscField :: Field RecordConstructor a
 -- > ...
-fieldNamingStyle :: NamingStyle
-fieldNamingStyle = NamingStyle {
+suffixNamingStyle :: NamingStyle
+suffixNamingStyle = NamingStyle {
     mkDbEntityName = \dName -> dName
   , mkPhantomName = \_ cName _ -> cName ++ "Constructor"
   , mkDbConstrName = \_ cName _ -> cName
   , mkDbFieldName = \_ _ _ fName _ -> fName
   , mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName ++ "Field"
+  , mkExprSelectorName = \_ _ fName _ -> firstLetter toUpper fName ++ "Selector"
   , mkNormalFieldName = \_ cName _ fNum -> firstLetter toLower cName ++ show fNum
   , mkNormalDbFieldName = \_ cName _ fNum -> firstLetter toLower cName ++ show fNum
-  , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
+  , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum ++ "Field"
+  , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum ++ "Selector"
 }
 
 -- | Creates field names in Persistent fashion prepending constructor names to the fields.
@@ -119,11 +100,14 @@ fieldNamingStyle = NamingStyle {
 -- >     RecordAsc :: Field RecordConstructor a
 -- > ...
 persistentNamingStyle :: NamingStyle
-persistentNamingStyle = fieldNamingStyle {
-  mkExprFieldName = \_ cName _ fName _ -> cName ++ firstLetter toUpper fName
+persistentNamingStyle = suffixNamingStyle {
+    mkExprFieldName = \_ cName _ fName _ -> cName ++ firstLetter toUpper fName
+  , mkExprSelectorName = \_ cName fName _ -> cName ++ firstLetter toUpper fName
+  , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
+  , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum
 }
 
--- | Creates the shortest field names. Very prone to conflicts
+-- | Creates the shortest field names. It is more likely to lead in name conflicts than other naming styles.
 --
 -- Example:
 --
@@ -138,8 +122,11 @@ persistentNamingStyle = fieldNamingStyle {
 -- >     Asc :: Field RecordConstructor a
 -- > ...
 conciseNamingStyle :: NamingStyle
-conciseNamingStyle = fieldNamingStyle {
-  mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName
+conciseNamingStyle = suffixNamingStyle {
+    mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName
+  , mkExprSelectorName = \_ _ fName _ -> firstLetter toUpper fName
+  , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
+  , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum
 }
 
 replaceOne :: (Eq c, Show c) => (a -> c) -> (b -> c) -> (a -> b -> b) -> a -> [b] -> [b]
@@ -148,7 +135,7 @@ replaceOne getter1 getter2 apply a bs = case length (filter ((getter1 a ==) . ge
   0 -> error $ "Element with name " ++ show (getter1 a) ++ " not found"
   _ -> error $ "Found more than one element with name " ++ show (getter1 a)
 
--- | Create the auxiliary structures. 
+-- | Creates the auxiliary structures. 
 -- Particularly, it creates GADT 'Field' data instance for referring to the fields in expressions and phantom types for data constructors.
 -- The default names of auxiliary datatypes and names used in database are generated using the naming style and can be changed via configuration.
 -- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'. 
@@ -156,18 +143,19 @@ mkPersist :: NamingStyle -> PersistSettings -> Q [Dec]
 mkPersist style (PersistSettings defs) = do
   let duplicates = notUniqueBy id $ map (either psDataName psEmbeddedName) defs
   when (not $ null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
-  let (entities, embeddeds) = partitionEithers defs
-  entitiesDecs <- forM entities $ \ent -> do
-    let name = mkName $ psDataName ent
+  decs <- forM defs $ \def -> do
+    let name = mkName $ either psDataName psEmbeddedName def
     info <- reify name
     case info of
       TyConI x -> do
         case x of
-          def@(DataD _ _ _ _ _)  -> mkDecs $ either error id $ validate $ applyEntitySettings ent $ mkTHEntityDefWith style def
+          d@(DataD _ _ _ _ _)  -> case def of
+            Left  ent -> mkEntityDecs $ either error id $ validateEntity $ applyEntitySettings ent $ mkTHEntityDefWith style d
+            Right emb -> mkEmbeddedDecs $ either error id $ validateEmbedded $ applyEmbeddedSettings emb $ mkTHEmbeddedDefWith style d
           NewtypeD _ _ _ _ _ -> error "Newtypes are not supported"
           _ -> error $ "Unknown declaration type: " ++ show name ++ " " ++ show x
       _        -> error $ "Only datatypes can be processed: " ++ show name
-  return $ concat entitiesDecs
+  return $ concat decs
 
 applyEntitySettings :: PSEntityDef -> THEntityDef -> THEntityDef
 applyEntitySettings settings def@(THEntityDef{..}) =
@@ -180,7 +168,7 @@ applyConstructorSettings :: PSConstructorDef -> THConstructorDef -> THConstructo
 applyConstructorSettings settings def@(THConstructorDef{..}) =
   def { thPhantomConstrName = maybe thPhantomConstrName id $ psPhantomConstrName settings
       , dbConstrName = maybe dbConstrName id $ psDbConstrName settings
-      , thConstrParams = maybe thConstrParams (f thConstrParams) $ psConstrParams settings
+      , thConstrFields = maybe thConstrFields (f thConstrFields) $ psConstrFields settings
       , thConstrConstrs = maybe thConstrConstrs id $ psConstrConstrs settings
       } where
   f = foldr $ replaceOne psFieldName fieldName applyFieldSettings
@@ -192,22 +180,32 @@ applyFieldSettings settings def@(THFieldDef{..}) =
       , embeddedDef = psEmbeddedDef settings
       }
 
+applyEmbeddedSettings :: PSEmbeddedDef -> THEmbeddedDef -> THEmbeddedDef
+applyEmbeddedSettings settings def@(THEmbeddedDef{..}) =
+  def { dbEmbeddedName = maybe dbEmbeddedName id $ psDbEmbeddedName settings
+      , embeddedFields = maybe embeddedFields (f embeddedFields) $ psEmbeddedFields settings
+      } where
+  f = foldr $ replaceOne psFieldName fieldName applyFieldSettings
+
 notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]
 notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
 
-validate :: THEntityDef -> Either String THEntityDef
-validate def = do
-  let assertUnique f xs what = case notUniqueBy f xs of
+assertUnique :: (Monad m, Eq b, Show b) => (a -> b) -> [a] -> String -> m ()
+assertUnique f xs what = case notUniqueBy f xs of
         [] -> return ()
         ys -> fail $ "All " ++ what ++ " must be unique: " ++ show ys
-  -- we need to validate datatype names because TH just creates unusable fields with spaces
-  let isSpaceFree = not . any isSpace
-  let assertSpaceFree s what = if isSpaceFree s then return () else fail $ "Spaces in " ++ what ++ " are not allowed: " ++ show s
+
+-- we need to validate datatype names because TH just creates unusable fields with spaces
+assertSpaceFree :: Monad m => String -> String -> m ()
+assertSpaceFree s what = if all (not . isSpace) s then return () else fail $ "Spaces in " ++ what ++ " are not allowed: " ++ show s
+
+validateEntity :: THEntityDef -> Either String THEntityDef
+validateEntity def = do
   let constrs = thConstructors def
   assertUnique thPhantomConstrName constrs "constructor phantom name"
   assertUnique dbConstrName constrs "constructor db name"
   forM_ constrs $ \cdef -> do
-    let fields = thConstrParams cdef
+    let fields = thConstrFields cdef
     assertSpaceFree (thPhantomConstrName cdef) "constructor phantom name"
     assertUnique exprName fields "expr field name in a constructor"
     assertUnique dbFieldName fields "db field name in a constructor"
@@ -217,312 +215,85 @@ validate def = do
       ys -> fail $ "Constraints cannot have no fields: " ++ show ys
   return def
 
-mkTHEntityDef :: Dec -> THEntityDef
-mkTHEntityDef = mkTHEntityDefWith persistentNamingStyle
+validateEmbedded :: THEmbeddedDef -> Either String THEmbeddedDef
+validateEmbedded def = do
+  let fields = embeddedFields def
+  assertUnique exprName fields "expr field name in an embedded datatype"
+  assertUnique dbFieldName fields "db field name in an embedded datatype"
+  forM_ fields $ \fdef -> assertSpaceFree (exprName fdef) "field expr name"
+  return def
 
 mkTHEntityDefWith :: NamingStyle -> Dec -> THEntityDef
-mkTHEntityDefWith (NamingStyle{..}) (DataD _ dname typeVars cons _) =
-  THEntityDef dname (mkDbEntityName dname') typeVars constrs where
+mkTHEntityDefWith (NamingStyle{..}) (DataD _ dName typeVars cons _) =
+  THEntityDef dName (mkDbEntityName dName') typeVars constrs where
   constrs = zipWith mkConstr [0..] cons
-  dname' = nameBase dname
+  dName' = nameBase dName
 
   mkConstr cNum c = case c of
     (NormalC name params) -> mkConstr' name $ zipWith (mkField (nameBase name)) params [0..]
     (RecC name params) -> mkConstr' name $ zipWith (mkVarField (nameBase name)) params [0..]
-    (InfixC _ _ _) -> error "Types with infix constructors are not supported"
-    (ForallC _ _ _) -> error "Types with existential quantification are not supported"
+    (InfixC _ _ _) -> error $ "Types with infix constructors are not supported" ++ show dName
+    (ForallC _ _ _) -> error $ "Types with existential quantification are not supported" ++ show dName
    where
-    mkConstr' name params = THConstructorDef name (mkPhantomName dname' (nameBase name) cNum) (mkDbConstrName dname' (nameBase name) cNum) params []
+    mkConstr' name params = THConstructorDef name (mkPhantomName dName' (nameBase name) cNum) (mkDbConstrName dName' (nameBase name) cNum) params []
 
     mkField :: String -> StrictType -> Int -> THFieldDef
-    mkField cname (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (apply mkNormalExprFieldName) t Nothing where
-      apply f = f dname' cname cNum fNum
+    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (apply mkNormalExprFieldName) t Nothing where
+      apply f = f dName' cName cNum fNum
     mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-    mkVarField cname (fname, _, t) fNum = THFieldDef fname' (apply mkDbFieldName) (apply mkExprFieldName) t Nothing where
-      apply f = f dname' cname cNum fname' fNum
-      fname' = nameBase fname
+    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) (apply mkExprFieldName) t Nothing where
+      apply f = f dName' cName cNum fName' fNum
+      fName' = nameBase fName
 mkTHEntityDefWith _ _ = error "Only datatypes can be processed"
+
+mkTHEmbeddedDefWith :: NamingStyle -> Dec -> THEmbeddedDef
+mkTHEmbeddedDefWith (NamingStyle{..}) (DataD _ dName typeVars cons _) =
+  THEmbeddedDef dName cName (mkDbEntityName dName') typeVars fields where
+  dName' = nameBase dName
+  
+  (cName, fields) = case cons of
+    [NormalC name params] -> (name, zipWith (mkField (nameBase name)) params [0..])
+    [RecC name params] -> (name, zipWith (mkVarField (nameBase name)) params [0..])
+    [InfixC _ _ _] -> error $ "Types with infix constructors are not supported" ++ show dName
+    [ForallC _ _ _] -> error $ "Types with existential quantification are not supported" ++ show dName
+    _ -> error $ "An embedded datatype must have exactly one constructor: " ++ show dName
+  
+  mkField :: String -> StrictType -> Int -> THFieldDef
+  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (mkNormalExprSelectorName dName' cName' fNum) t Nothing where
+    apply f = f dName' cName' 0 fNum
+  mkVarField :: String -> VarStrictType -> Int -> THFieldDef
+  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) (mkExprSelectorName dName' cName' fName' fNum) t Nothing where
+    apply f = f dName' cName' 0 fName' fNum
+    fName' = nameBase fName
+mkTHEmbeddedDefWith _ _ = error "Only datatypes can be processed"
 
 firstLetter :: (Char -> Char) -> String -> String
 firstLetter f s = f (head s):tail s
 
-mkDecs :: THEntityDef -> Q [Dec]
-mkDecs def = do
-  --runIO (print def)
-  decs <- fmap concat $ sequence
-    [ mkPhantomConstructors def
-    , mkPhantomConstructorInstances def
-    , mkPersistFieldInstance def
-    , mkSinglePersistFieldInstance def
-    , mkPersistEntityInstance def
-    , mkNeverNullInstance def
-    ]
---  runIO $ putStrLn $ pprint decs
-  return decs
--- $(reify ''SomeData >>= stringE.show)
-
-mkPhantomConstructors :: THEntityDef -> Q [Dec]
-mkPhantomConstructors def = mapM f $ thConstructors def where
-  f c = dataD (cxt []) (mkName $ thPhantomConstrName c) [] [] []
-  
-mkPhantomConstructorInstances :: THEntityDef -> Q [Dec]
-mkPhantomConstructorInstances def = sequence $ zipWith f [0..] $ thConstructors def where
-  f :: Int -> THConstructorDef -> Q Dec
-  f cNum c = instanceD (cxt []) (appT (conT ''Constructor) (conT $ mkName $ thPhantomConstrName c)) [phantomConstrName', phantomConstrNum'] where
-    phantomConstrName' = funD 'phantomConstrName [clause [wildP] (normalB $ stringE $ dbConstrName c) []]
-    phantomConstrNum' = funD 'phantomConstrNum [clause [wildP] (normalB $ [|cNum  |]) []]
-
-mkPersistEntityInstance :: THEntityDef -> Q [Dec]
-mkPersistEntityInstance def = do
-  let entity = foldl AppT (ConT (dataName def)) $ map extractType $ thTypeParams def
-  
-  fields' <- do
-    cParam <- newName "c"
-    fParam <- newName "f"
-    let mkField name field = ForallC [] ([EqualP (VarT cParam) (ConT name), EqualP (VarT fParam) (fieldType field)]) $ NormalC (mkName $ exprName field) []
-    let f cdef = map (mkField $ mkName $ thPhantomConstrName cdef) $ thConstrParams cdef
-    let constrs = concatMap f $ thConstructors def
-    return $ DataInstD [] ''Field [entity, VarT cParam, VarT fParam] constrs []
-    
-  entityDef' <- do
-    v <- newName "v"
-    let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
-    let types = map extractType $ thTypeParams def
-    let typeParams' = listE $ map (\t -> [| dbType ($(mkLambda t) $(varE v)) |]) types
-    let mkField c fNum f = do
-        a <- newName "a"
-        let fname = dbFieldName f
-        let nvar = if hasFreeVars (fieldType f)
-             then let pat = conP (thConstrName c) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrParams c) - fNum - 1) wildP
-                      wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
-                  in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
-             else [| undefined :: $(return $ fieldType f) |]
-        [| (fname, $(maybe id (\emb t -> [| applyEmbeddedSettings $(lift emb) $t |]) (embeddedDef f) $ [|dbType $nvar|]) ) |]
-    let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
-        mkConstructorDef cNum c@(THConstructorDef _ _ name params conss) = [| ConstructorDef cNum name $(listE $ zipWith (mkField c) [0..] params) $(listE $ map (mkConstraint params) conss) |]
-        mkConstraint params (PSConstraintDef name fields) = [| Constraint name $(listE $ map (lift . getFieldName params) fields) |]
-        getFieldName params name = case filter ((== name) . fieldName) params of
-          [f] -> dbFieldName f
-          []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"
-          _   -> error $ "It can never happen. Found several fields with one database name " ++ show name
-    
-    let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
-    let fullEntityName = case null types of
-         True  -> [| $(stringE $ dbEntityName def) |]
-         False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
-
-    let body = normalB [| EntityDef $fullEntityName $typeParams' $constrs |]
-    let pat = if null $ thTypeParams def then wildP else varP v
-    funD 'entityDef $ [ clause [pat] body [] ]
-
-  toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0..] $ thConstructors def) $ \(cNum, c) -> do
-    vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ thConstrParams c
-    let pat = conP (thConstrName c) $ map (varP . fst) vars
-    (lastPrims, fields) <- spanM (isPrim . snd) $ reverse vars
-    let lastPrims' = map (appE (varE 'toPrim) . varE . fst) $ reverse $ lastPrims
-    let body = if null fields
-        then [| return $ $(listE $ [|toPrim (cNum :: Int)|]:lastPrims') |]
-        else do
-          let go (m, f) (fname, t) = isPrim t >>= \isP -> if isP
-              then return (m, [| (toPrim $(varE fname):) |]:f)
-              else newName "x" >>= \x -> return (bindS (varP x) [| toPersistValues $(varE fname) |]:m, varE x:f)
-          (stmts, func) <- foldM go ([], []) fields        -- foldM puts reversed fields in normal order
-          doE $ stmts ++ [noBindS [| return $ (toPrim (cNum :: Int):) . $(foldr1 (\a b -> [|$a . $b|]) func) $ $(listE lastPrims') |]]
-    clause [pat] (normalB body) []
-
-  fromEntityPersistValues' <- let
-    goField xs vars result failure = do
-      (fields, rest) <- spanM (liftM not . isPrim . snd) vars
-      xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
-      let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValues $(varE oldXs) |]
-      let stmts = zipWith3 f xss (tail xss) fields
-      doE $ stmts ++ [noBindS $ goPrim (last xss) rest result failure]
-    goPrim xs vars result failure = do
-      xs' <- newName "xs"
-      (prim, rest) <- spanM (isPrim . snd) vars
-      let (pat, body') = if null rest then (conP '[] [], result) else (varP xs', goField xs' rest result failure)
-      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []
-      caseE (varE xs) [m, failure]
-    mkArg (fname, t) = isPrim t >>= \isP -> (if isP then appE (varE 'fromPrim) else id) (varE fname)
-    in do
-      xs <- newName "xs"
-      let failureBody = normalB [| (\a -> fail (failMessage a $(varE xs)) >> return a) undefined |]
-      failureName <- newName "failure"
-      let failure = match wildP (normalB $ varE failureName) []
-      matches <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
-        vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ thConstrParams c
-        let result = appE (varE 'return) $ foldl (\a f -> appE a $ mkArg f) (conE $ thConstrName c) vars
-        let cNum' = conP 'PersistInt64 [litP $ integerL cNum]
-        xs' <- newName "xs"
-        (prim, rest) <- spanM (isPrim . snd) vars
-        let (pat, body') = if null rest then (conP '[] [], result) else (varP xs', goField xs' rest result failure)
-        return $ match (infixP cNum' '(:) $ foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []
-      let start = caseE (varE xs) $ matches ++ [failure]
-      let failureFunc = funD failureName [clause [] failureBody []]
-      funD 'fromEntityPersistValues [clause [varP xs] (normalB start) [failureFunc]]
-
-  --TODO: support constraints with embedded datatypes fields
-  getConstraints' <- let
-    hasConstraints = not . null . thConstrConstrs
-    clauses = zipWith mkClause [0::Int ..] (thConstructors def)
-    mkClause cNum cdef | not (hasConstraints cdef) = clause [conP (thConstrName cdef) pats] (normalB [| (cNum, []) |]) [] where
-      pats = map (const wildP) $ thConstrParams cdef
-    mkClause cNum cdef = do
-      let allConstrainedFields = concatMap psConstraintFields $ thConstrConstrs cdef
-      names <- mapM (\name -> newName name >>= \name' -> return (name, name `elem` allConstrainedFields, name')) $ map fieldName $ thConstrParams cdef
-      let body = normalB $ [| (cNum, $(listE $ map (\(PSConstraintDef cname fnames) -> [|(cname, $(listE $ map (\fname -> [| toPrim $(varE $ getFieldName fname) |] ) fnames )) |] ) $ thConstrConstrs cdef)) |]
-          getFieldName name = case filter (\(a, _, _) -> a == name) names of
-            [(_, _, name')] -> name'
-            []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"
-            _   -> error $ "It can never happen. Found several fields with one database name " ++ show name
-          pattern = map (\(_, isConstrained, name') -> if isConstrained then varP name' else wildP) names
-      clause [conP (thConstrName cdef) pattern] body []
-    in funD 'getConstraints clauses
-     
-  entityFieldChain' <- let
-    fieldNames = thConstructors def >>= thConstrParams
-    clauses = map (\f -> mkChain f >>= \(fArg, body) -> clause [maybe id asP fArg $ conP (mkName $ exprName f) []] (normalB body) []) fieldNames
-    mkChain f = isPrim (fieldType f) >>= \isP -> if isP
-      then return (Nothing, [| Left $(lift $ dbFieldName f) |])
-      else do
-        fArg <- newName "f"
-        let body = [| Right [ ($(lift $ dbFieldName f), dbType $ (undefined :: Field v c a -> a) $ $(varE fArg)) ] |]
-        return (Just fArg, body)
-    in funD 'entityFieldChain clauses
-
-  let context = paramsContext def
-  let decs = [fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getConstraints', entityFieldChain']
-  return $ [InstanceD context (AppT (ConT ''PersistEntity) entity) decs]
-
-mkPersistFieldInstance :: THEntityDef -> Q [Dec]
-mkPersistFieldInstance def = do
-  let types = map extractType $ thTypeParams def
-  let entity = foldl AppT (ConT (dataName def)) types
-  
-  persistName' <- do
-    v <- newName "v"
-    let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
-    
-    let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
-    let fullEntityName = case null types of
-         True  -> [| $(stringE $ dbEntityName def) |]
-         False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
-    let body = normalB $ fullEntityName
-    let pat = if null $ thTypeParams def then wildP else varP v
-    funD 'persistName $ [ clause [pat] body [] ]
-  
-  toPersistValues' <- do
-    let body = normalB [| liftM (:) . toSinglePersistValue |]
-    funD 'toPersistValues $ [ clause [] body [] ]
-  fromPersistValue' <- do
-    x <- newName "x"
-    xs <- newName "xs"
-    let body = normalB [| fromSinglePersistValue $(varE x) >>= \a -> return (a, $(varE xs)) |]
-    funD 'fromPersistValues $ [ clause [infixP (varP x) '(:) (varP xs)] body [], clause [wildP] (normalB [| error "fromPersistValue: empty list" |]) [] ]
-  dbType' <- funD 'dbType $ [ clause [] (normalB [| DbEntity . entityDef |]) [] ]
-
-  let context = paramsContext def
-  let decs = [persistName', toPersistValues', fromPersistValue', dbType']
-  return $ [InstanceD context (AppT (ConT ''PersistField) entity) decs]
-
-mkSinglePersistFieldInstance :: THEntityDef -> Q [Dec]
-mkSinglePersistFieldInstance def = do
-  let types = map extractType $ thTypeParams def
-  let entity = foldl AppT (ConT (dataName def)) types
-
-  toSinglePersistValue' <- do
-    let body = normalB [| liftM (either toPrim toPrim) . insertBy |]
-    funD 'toSinglePersistValue $ [ clause [] body [] ]
-  fromSinglePersistValue' <- do
-    x <- newName "x"
-    let body = normalB [| get (fromPrim $(varE x)) >>= maybe (fail $ "No data with id " ++ show $(varE x)) return |]
-    funD 'fromSinglePersistValue $ [ clause [varP x] body []]
-
-  let context = paramsContext def
-  let decs = [toSinglePersistValue', fromSinglePersistValue']
-  return $ [InstanceD context (AppT (ConT ''SinglePersistField) entity) decs]
-
-mkNeverNullInstance :: THEntityDef -> Q [Dec]
-mkNeverNullInstance def = do
-  let types = map extractType $ thTypeParams def
-  let entity = foldl AppT (ConT (dataName def)) types
-  let context = paramsContext def
-  return $ [InstanceD context (AppT (ConT ''NeverNull) entity) []]
-
-paramsContext :: THEntityDef -> Cxt
-paramsContext def = classPred ''PersistField params ++ classPred ''SinglePersistField maybys ++ classPred ''NeverNull maybys where
-  classPred clazz = map (\t -> ClassP clazz [t])
-  -- every type must be an instance of PersistField
-  params = map extractType $ thTypeParams def
-  -- all datatype fields also must be instances of PersistField
-  -- if Maybe is applied to a type param, the param must be also an instance of NeverNull
-  -- so that (Maybe param) is an instance of PersistField
-  maybys = nub $ thConstructors def >>= thConstrParams >>= insideMaybe . fieldType
-
-extractType :: TyVarBndr -> Type
-extractType (PlainTV name) = VarT name
-extractType (KindedTV name _) = VarT name
-
-#if MIN_VERSION_template_haskell(2, 7, 0)
-#define isClassInstance isInstance
-#endif
-
-isPrim :: Type -> Q Bool
--- we cannot use simply isClassInstance because it crashes on type vars and in this case
--- class PrimitivePersistField a
--- instance PrimitivePersistField Int
--- instance PrimitivePersistField a => Maybe a
--- it will consider (Maybe anytype) instance of PrimitivePersistField
-isPrim t | hasFreeVars t = return False
-isPrim t@(ConT _) = isClassInstance ''PrimitivePersistField [t]
-isPrim (AppT (ConT key) _)  | key == ''Key = return True
-isPrim (AppT (ConT tcon) t) | tcon == ''Maybe = isPrim t
-isPrim _ = return False
-
-foldType :: (Type -> a) -> (a -> a -> a) -> Type -> a
-foldType f (<>) = go where
-  go (ForallT _ _ _) = error "forall'ed fields are not allowed"
-  go z@(AppT a b)    = f z <> go a <> go b
-  go z@(SigT t _)    = f z <> go t
-  go z               = f z
-
-hasFreeVars :: Type -> Bool
-hasFreeVars = foldType f (||) where
-  f (VarT _) = True
-  f _ = False
-
-insideMaybe :: Type -> [Type]
-insideMaybe = foldType f (++) where
-  f (AppT (ConT c) t@(VarT _)) | c == ''Maybe = [t]
-  f _ = []
-
-spanM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
-spanM p = go  where
-  go [] = return ([], [])
-  go (x:xs) = do
-    flg <- p x
-    if flg then do
-        (ys, zs) <- go xs
-        return (x:ys, zs)
-      else return ([], x:xs)
-
--- | Converts quasiquoted settings into the datatype used by mkPersist. The settings are represented in YAML.
+-- $settingsDoc
+-- Groundhog needs to analyze the datatypes and create the auxiliary definitions before it can work with them.
+-- We use YAML-based settings to list the datatypes and adjust the result of their introspection.
+-- 
+-- A datatype can be treated as entity or embedded. An entity is stored in its own table, can be referenced in fields of other data, etc. It is a first-class value.
+-- An embedded type can only be a field of an entity or another embedded type. For example, the tuples are embedded.
+-- You can create your own embedded types and adjust the fields names of an existing embedded type individually for any place where it is used.
+-- 
 -- Unless the property is marked as mandatory, it can be omitted. In this case value created by the NamingStyle will be used.
--- The settings below have all properties set explicitly.
+-- The example below has all properties set explicitly.
 --
 -- @
 --data Settable = First {foo :: String, bar :: Int} deriving (Eq, Show)
 --
---mkPersist fieldNamingStyle [groundhog|
---definitions:                           # Optional header before the definitions list
---                                       # The list elements start with -
+--mkPersist suffixNamingStyle [groundhog|
+--definitions:                           # First level key whose value is a list of definitions. It can be considered an optional header.
+--                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space.
 --  - entity: Settable                   # Mandatory. Entity datatype name
 --    dbName: Settable                   # Name of the main table
 --    constructors:                      # List of constructors. The constructors you don't change can be omitted
 --      - name: First                    # Mandatory. Constructor name
 --        phantomName: FooBarConstructor # Constructor phantom type name used to guarantee type safety
 --        dbName: First                  # Name of constructor table which is created only for datatypes with multiple constructors
---        constrParams:                  # List of constructor parameters. The parameters you don't change can be omitted
+--        fields:                        # List of constructor fields. If you don't change a field, you can omit it
 --          - name: foo
 --            dbName: foo                # Column name
 --            exprName: FooField         # Name of a field used in expressions
@@ -538,7 +309,7 @@ spanM p = go  where
 -- which is equivalent to the declaration with defaulted names
 --
 -- @
---mkPersist fieldNamingStyle [groundhog|
+--mkPersist suffixNamingStyle [groundhog|
 --entity: Settable                       # If we did not want to add a constraint, this line would be enough
 --constructors:
 --  - name: First
@@ -547,6 +318,43 @@ spanM p = go  where
 --        fields: [foo, bar]
 -- |]
 -- @
+--
+-- This is an example of embedded datatype usage.
+--
+-- @
+--data Company = Company {name :: String, headquarter :: Address, dataCentre :: Address, salesOffice :: Address} deriving (Eq, Show)
+--data Address = Address {city :: String, zipCode :: String, street :: String} deriving (Eq, Show)
+--
+--mkPersist suffixNamingStyle [groundhog|
+--definitions:
+--  - entity: Company
+--    constructors:
+--      - name: Company
+--        fields:
+--                                        # Property embeddedType of headquarter field is not mentioned, so the corresponding table columns will have names prefixed with headquarter (headquarter$city, headquarter$zip_code, headquarter$street)
+--          - name: dataCentre
+--            embeddedType:               # If a field has an embedded type you can access its subfields. If you do it, the database columns will match with the embedded dbNames (no prefixing).
+--              - name: city              # Just a regular list of fields. However, note that you should use default dbNames of embedded
+--                dbName: dc_city
+--              - name: zip_code          # Here we use embedded dbName (zip_code) which differs from the name used in Address definition (zipCode) for accessing the field.
+--                dbName: dc_zipcode
+--              - name: street
+--                dbName: dc_street
+--          - name: salesOffice
+--            embeddedType:               # Similar declaration, but using another syntax for YAML objects
+--              - {name: city, dbName: sales_city}
+--              - {name: zip_code, dbName: sales_zipcode}
+--              - {name: street, dbName: sales_street}
+--  - embedded: Address                        
+--    fields:                             # The syntax is the same as for constructor fields. Nested embedded types are allowed.
+--      - name: city                      # This line does nothing and can be omitted. Default settings for city are not changed.
+--      - name: zipCode
+--        dbName: zip_code                # Change column name.
+--                                        # Street is not mentioned so it will have default settings.
+-- |]
+-- @
+
+-- | Converts quasiquoted settings into the datatype used by mkPersist.
 groundhog :: QuasiQuoter
 groundhog = QuasiQuoter { quoteExp  = parseSettings
                         , quotePat  = error "groundhog: pattern quasiquoter"
@@ -555,10 +363,37 @@ groundhog = QuasiQuoter { quoteExp  = parseSettings
                         }
 
 -- | Parses configuration stored in the file
--- > mkPersist fieldNamingStyle [groundhogFile|../groundhog.yaml|]
+--
+-- > mkPersist suffixNamingStyle [groundhogFile|../groundhog.yaml|]
 groundhogFile :: QuasiQuoter
 groundhogFile = quoteFile groundhog
 
 parseSettings :: String -> Q Exp
 parseSettings s = either fail lift result where
   result = decodeEither $ pack s :: Either String PersistSettings
+
+
+mkEntityDecs :: THEntityDef -> Q [Dec]
+mkEntityDecs def = do
+  --runIO (print def)
+  decs <- fmap concat $ sequence
+    [ mkEntityPhantomConstructors def
+    , mkEntityPhantomConstructorInstances def
+    , mkEntityPersistFieldInstance def
+    , mkEntitySinglePersistFieldInstance def
+    , mkPersistEntityInstance def
+    , mkEntityNeverNullInstance def
+    ]
+--  runIO $ putStrLn $ pprint decs
+  return decs
+
+mkEmbeddedDecs :: THEmbeddedDef -> Q [Dec]
+mkEmbeddedDecs def = do
+  --runIO (print def)
+  decs <- fmap concat $ sequence
+    [ mkEmbeddedPersistFieldInstance def
+    , mkEmbeddedPurePersistFieldInstance def
+    , mkEmbeddedInstance def
+    ]
+--  runIO $ putStrLn $ pprint decs
+  return decs

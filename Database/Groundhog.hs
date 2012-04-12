@@ -13,7 +13,7 @@
 --          | Service {serviceName :: String, deliveryAddress :: String, servicePrice :: Int}
 --     deriving Show
 --
---'mkPersist' fieldNamingStyle [groundhog|
+--'mkPersist' suffixNamingStyle [groundhog|
 -- - entity: Customer
 --   constructors:
 --     - name: Customer
@@ -52,7 +52,10 @@ import Database.Groundhog.Core
   , Key(..)
   , Cond(..)
   , Order(..)
-  , (=.), (&&.), (||.), (==.), (/=.), (<.), (<=.), (>.), (>=.)
+  , (=.)
+  , (~>)
+  , (&&.), (||.)
+  , (==.), (/=.), (<.), (<=.), (>.), (>=.)
   , wrapPrim
   , toArith)
 import Database.Groundhog.Generic

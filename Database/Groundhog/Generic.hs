@@ -19,7 +19,7 @@ module Database.Groundhog.Generic
   , finally
   , onException
   , PSEmbeddedFieldDef(..)
-  , applyEmbeddedSettings
+  , applyEmbeddedDbTypeSettings
   ) where
 
 import Database.Groundhog.Core
@@ -177,17 +177,16 @@ data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
   , psSubEmbedded :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
-applyEmbeddedSettings :: [PSEmbeddedFieldDef] -> DbType -> DbType
---applyEmbeddedSettings _ db = trace "applyEmbedded" db
-applyEmbeddedSettings settings (DbEmbedded _ fields) = DbEmbedded True $ go settings fields where
+applyEmbeddedDbTypeSettings :: [PSEmbeddedFieldDef] -> DbType -> DbType
+applyEmbeddedDbTypeSettings settings (DbEmbedded _ fields) = DbEmbedded True $ go settings fields where
   go [] [] = []
   go [] fs = fs
-  go st [] = error $ "applyEmbeddedSettings: embedded datatype does not have following fields: " ++ show st
+  go st [] = error $ "applyEmbeddedDbTypeSettings: embedded datatype does not have following fields: " ++ show st
   go st (f@(fName, fType):fs) = case find fName st of
-    Just (rest, PSEmbeddedFieldDef _ dbName subs) -> (maybe fName id dbName, maybe id applyEmbeddedSettings subs $ fType):go rest fs
+    Just (rest, PSEmbeddedFieldDef _ dbName subs) -> (maybe fName id dbName, maybe id applyEmbeddedDbTypeSettings subs $ fType):go rest fs
     Nothing -> f:go st fs
   find :: String -> [PSEmbeddedFieldDef] -> Maybe ([PSEmbeddedFieldDef], PSEmbeddedFieldDef)
   find _ [] = Nothing
   find name (def:defs) | psEmbeddedFieldName def == name = Just (defs, def)
                        | otherwise = fmap (\(defs', result) -> (def:defs', result)) $ find name defs
-applyEmbeddedSettings _ t = error $ "applyEmbeddedSettings: expected DbEmbedded, got " ++ show t
+applyEmbeddedDbTypeSettings _ t = error $ "applyEmbeddedDbTypeSettings: expected DbEmbedded, got " ++ show t

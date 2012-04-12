@@ -8,7 +8,7 @@ data AddConstructorToMany = AddConstructorToMany0 {addConstructorToMany0 :: Int}
                           | AddConstructorToMany1 {addConstructorToMany1 :: Int}
                           | AddConstructorToMany2 {addConstructorToMany2 :: String} deriving (Eq, Show)
 
-mkPersist fieldNamingStyle [groundhog|
+mkPersist suffixNamingStyle [groundhog|
 - entity: AddColumn
 - entity: AddConstructorToMany
 |]

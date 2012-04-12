@@ -2,6 +2,10 @@
 
 module Database.Groundhog.TH.Settings
   ( PersistSettings(..)
+  , THEntityDef(..)
+  , THEmbeddedDef(..)
+  , THConstructorDef(..)
+  , THFieldDef(..)
   , PSEntityDef(..)
   , PSEmbeddedDef(..)
   , PSConstructorDef(..)
@@ -11,12 +15,46 @@ module Database.Groundhog.TH.Settings
   ) where
 
 import Database.Groundhog.Generic (PSEmbeddedFieldDef(..))
+import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
 import Control.Monad (mzero)
 import Data.Yaml
 
 data PersistSettings = PersistSettings {definitions :: [Either PSEntityDef PSEmbeddedDef]} deriving Show
+
+-- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
+
+data THEntityDef = THEntityDef {
+    dataName :: Name -- SomeData
+  , dbEntityName :: String  -- SQLSomeData
+  , thTypeParams :: [TyVarBndr]
+  , thConstructors :: [THConstructorDef]
+} deriving Show
+
+data THEmbeddedDef = THEmbeddedDef {
+    embeddedName :: Name
+  , embeddedConstructorName :: Name
+  , dbEmbeddedName :: String -- used only to set polymorphic part of name of its container
+  , thEmbeddedTypeParams :: [TyVarBndr]
+  , embeddedFields :: [THFieldDef]
+} deriving Show
+
+data THConstructorDef = THConstructorDef {
+    thConstrName    :: Name -- U2
+  , thPhantomConstrName :: String -- U2Constructor
+  , dbConstrName    :: String -- SQLU2
+  , thConstrFields  :: [THFieldDef]
+  , thConstrConstrs :: [PSConstraintDef]
+} deriving Show
+
+data THFieldDef = THFieldDef {
+    fieldName :: String -- bar
+  , dbFieldName :: String -- SQLbar
+  , exprName :: String -- BarField
+  , fieldType :: Type
+  , embeddedDef :: Maybe [PSEmbeddedFieldDef]
+} deriving Show
 
 data PSEntityDef = PSEntityDef {
     psDataName :: String -- SomeData
@@ -34,7 +72,7 @@ data PSConstructorDef = PSConstructorDef {
     psConstrName    :: String -- U2
   , psPhantomConstrName :: Maybe String -- U2Constructor
   , psDbConstrName    :: Maybe String -- SQLU2
-  , psConstrParams  :: Maybe [PSFieldDef]
+  , psConstrFields  :: Maybe [PSFieldDef]
   , psConstrConstrs :: Maybe [PSConstraintDef]
 } deriving Show
 
@@ -60,7 +98,7 @@ instance Lift PSEmbeddedDef where
   lift (PSEmbeddedDef {..}) = [| PSEmbeddedDef $(lift psEmbeddedName) $(lift psDbEmbeddedName) $(lift psEmbeddedFields) |]
 
 instance Lift PSConstructorDef where
-  lift (PSConstructorDef {..}) = [| PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psConstrParams) $(lift psConstrConstrs) |]
+  lift (PSConstructorDef {..}) = [| PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psConstrFields) $(lift psConstrConstrs) |]
 
 instance Lift PSConstraintDef where
   lift (PSConstraintDef name fields) = [| PSConstraintDef $(lift name) $(lift fields) |]
@@ -102,7 +140,7 @@ instance FromJSON (Either PSEntityDef PSEmbeddedDef) where
   parseJSON _          = mzero
 
 instance FromJSON PSConstructorDef where
-  parseJSON (Object v) = PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "constrParams" <*> v .:? "constraints"
+  parseJSON (Object v) = PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "fields" <*> v .:? "constraints"
   parseJSON _          = mzero
 
 instance FromJSON PSConstraintDef where

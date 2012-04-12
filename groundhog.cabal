@@ -33,6 +33,7 @@ library
                      Database.Groundhog.Instances
                      Database.Groundhog.TH
     other-modules:   Database.Groundhog.TH.Settings
+                     Database.Groundhog.TH.CodeGen
     ghc-options:     -Wall
     
 source-repository head
