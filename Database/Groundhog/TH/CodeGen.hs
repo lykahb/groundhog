@@ -4,6 +4,7 @@
 module Database.Groundhog.TH.CodeGen
   ( mkEmbeddedPersistFieldInstance
   , mkEmbeddedPurePersistFieldInstance
+  , mkEmbeddedExpressionInstance
   , mkEmbeddedInstance
   , mkEntityPhantomConstructors
   , mkEntityPhantomConstructorInstances
@@ -13,12 +14,12 @@ module Database.Groundhog.TH.CodeGen
   , mkEntityNeverNullInstance
   ) where
   
-import Database.Groundhog.Core (PersistEntity(..), Embedded(..), Key, PersistField(..), SinglePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull)
+import Database.Groundhog.Core (PersistEntity(..), Embedded(..), Key, PersistField(..), SinglePersistField(..), PurePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull, Expression(..), Expr(..))
 import Database.Groundhog.Generic (failMessage, applyEmbeddedDbTypeSettings)
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
-import Control.Monad (liftM, forM, foldM)
+import Control.Monad (liftM, forM, foldM, filterM)
 import Data.List (nub)
 
 mkEmbeddedPersistFieldInstance :: THEmbeddedDef -> Q [Dec]
@@ -37,6 +38,8 @@ mkEmbeddedPersistFieldInstance def = do
     let pat = if null types then wildP else varP v
     funD 'persistName $ [ clause [pat] body [] ]
     
+  -- TODO: remove ([]++) from
+  -- data D a = D a; do { x_a3vQ <- toPersistValues x_a3vP;(return $ (x_a3vQ . ([] ++))) }
   toPersistValues' <- do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ embeddedFields def
     let pat = conP (embeddedConstructorName def) $ map (varP . fst) vars
@@ -58,29 +61,30 @@ mkEmbeddedPersistFieldInstance def = do
       xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
       let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValues $(varE oldXs) |]
       let stmts = zipWith3 f xss (tail xss) fields
-      doE $ stmts ++ [noBindS $ goPrim (last xss) rest result failure]
+      (isFailureUsed, expr) <- goPrim (last xss) rest result failure
+      return (isFailureUsed, doE $ stmts ++ [noBindS expr])
     goPrim xs vars result failure = do
       xs' <- newName "xs"
       (prim, rest) <- spanM (isPrim . snd) vars
-      let (pat, body') = if null rest then (varP xs', [| return ($result, $(varE xs')) |]) else (varP xs', goField xs' rest result failure)
-      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []
-      caseE (varE xs) $ if null rest then [m] else [m, failure]
+      (isFailureUsed, body') <- case rest of
+        [] -> return (False, [| return ($result, $(varE xs')) |])
+        _  -> goField xs' rest result failure
+      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
+      return $ if not (null rest || null prim)
+         then (True, caseE (varE xs) [m, failure])
+         else (isFailureUsed, caseE (varE xs) [m])
     mkArg (fname, t) = isPrim t >>= \isP -> (if isP then appE (varE 'fromPrim) else id) (varE fname)
     in do
       xs <- newName "xs"
       let failureBody = normalB [| (\a -> fail (failMessage a $(varE xs)) >> return (a, [])) undefined |]
       failureName <- newName "failure"
+      vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ embeddedFields def
       let failure = match wildP (normalB $ varE failureName) []
-      matches <- do
-        vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ embeddedFields def
-        let result = foldl (\a f -> appE a $ mkArg f) (conE $ embeddedConstructorName def) vars
-        xs' <- newName "xs"
-        (prim, rest) <- spanM (isPrim . snd) vars
-        let (pat, body') = if null rest then (varP xs', [| return ($result, $(varE xs')) |]) else (varP xs', goField xs' rest result failure)
-        return $ [match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) pat prim) (normalB body') []]
-      let start = caseE (varE xs) $ matches ++ [failure]
+      let result = foldl (\a f -> appE a $ mkArg f) (conE $ embeddedConstructorName def) vars
+      (isFailureUsed, start) <- goPrim xs vars result failure
       let failureFunc = funD failureName [clause [] failureBody []]
-      funD 'fromPersistValues [clause [varP xs] (normalB start) [failureFunc]]
+      let locals = if isFailureUsed then [failureFunc] else []
+      funD 'fromPersistValues [clause [varP xs] (normalB start) locals]
   
   dbType' <- do
     v <- newName "v"
@@ -102,7 +106,69 @@ mkEmbeddedPersistFieldInstance def = do
   return $ [InstanceD context (AppT (ConT ''PersistField) embedded) decs]
 
 mkEmbeddedPurePersistFieldInstance :: THEmbeddedDef -> Q [Dec]
-mkEmbeddedPurePersistFieldInstance _ = return [] -- error "mkEmbeddedPurePersistFieldInstance"
+mkEmbeddedPurePersistFieldInstance def = do
+  let types = map extractType $ thEmbeddedTypeParams def
+  let embedded = foldl AppT (ConT (embeddedName def)) types
+  
+  toPurePersistValues' <- do
+    vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ embeddedFields def
+    let pat = conP (embeddedConstructorName def) $ map (varP . fst) vars
+    let result = map (\(v, t) -> isPrim t >>= \isP -> if isP then [| (toPrim $(varE v):) |] else [| toPurePersistValues $(varE v) |]) vars
+    let body = foldr1 (\a b -> [|$a . $b|]) result
+    funD 'toPurePersistValues [clause [pat] (normalB body) []]
+
+  fromPurePersistValues' <- let
+    goField xs vars result failure = do
+      (fields, rest) <- spanM (liftM not . isPrim . snd) vars
+      xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
+      let f oldXs newXs (fname, _) = valD (conP '(,) [varP fname, varP newXs]) (normalB [| fromPurePersistValues $(varE oldXs) |]) []
+      let stmts = zipWith3 f xss (tail xss) fields
+      (isFailureUsed, expr) <- goPrim (last xss) rest result failure
+      return (isFailureUsed, letE stmts expr)
+    goPrim xs vars result failure = do
+      xs' <- newName "xs"
+      (prim, rest) <- spanM (isPrim . snd) vars
+      (isFailureUsed, body') <- case rest of
+        [] -> return (False, [| ($result, $(varE xs')) |])
+        _  -> goField xs' rest result failure
+      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
+      return $ if not (null rest || null prim)
+         then (True, caseE (varE xs) [m, failure])
+         else (isFailureUsed, caseE (varE xs) [m])
+    mkArg (fname, t) = isPrim t >>= \isP -> (if isP then appE (varE 'fromPrim) else id) (varE fname)
+    in do
+      xs <- newName "xs"
+      let failureBody = normalB [| (\a -> error (failMessage a $(varE xs)) `asTypeOf` (a, [])) undefined |]
+      failureName <- newName "failure"
+      vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) $ embeddedFields def
+      let failure = match wildP (normalB $ varE failureName) []
+      let result = foldl (\a f -> appE a $ mkArg f) (conE $ embeddedConstructorName def) vars
+      (isFailureUsed, start) <- goPrim xs vars result failure
+      let failureFunc = funD failureName [clause [] failureBody []]
+      let locals = if isFailureUsed then [failureFunc] else []
+      funD 'fromPurePersistValues [clause [varP xs] (normalB start) locals]
+  
+  context <- paramsPureContext (thEmbeddedTypeParams def) (embeddedFields def)
+  case context of
+    Nothing -> return []
+    Just context' -> do
+      let decs = [toPurePersistValues', fromPurePersistValues']
+      return $ [InstanceD context' (AppT (ConT ''PurePersistField) embedded) decs]
+
+mkEmbeddedExpressionInstance :: THEmbeddedDef -> Q [Dec]
+mkEmbeddedExpressionInstance def = do
+  let types = map extractType $ thEmbeddedTypeParams def
+  let embedded = foldl AppT (ConT (embeddedName def)) types
+  -- funcE is left by default
+  let funcA' = TySynInstD ''FuncA [embedded] embedded
+  wrap' <- funD 'wrap [clause [] (normalB [|ExprPure|]) []]
+
+  context <- paramsPureContext (thEmbeddedTypeParams def) (embeddedFields def)
+  case context of
+    Nothing -> return []
+    Just context' -> do
+      let decs = [funcA', wrap']
+      return $ [InstanceD context' (AppT (ConT ''Expression) embedded) decs]  
 
 mkEmbeddedInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedInstance def = do
@@ -326,6 +392,21 @@ paramsContext types fields = classPred ''PersistField params ++ classPred ''Sing
   -- if Maybe is applied to a type param, the param must be also an instance of NeverNull
   -- so that (Maybe param) is an instance of PersistField
   maybys = nub $ fields >>= insideMaybe . fieldType
+
+paramsPureContext :: [TyVarBndr] -> [THFieldDef] -> Q (Maybe Cxt)
+paramsPureContext types fields = do
+  let isValidType (VarT _) = return True
+      isValidType t = isPrim t
+  invalid <- filterM (liftM not . isValidType . fieldType) fields
+  return $ case invalid of
+    [] -> Just $ classPred ''PurePersistField params ++ classPred ''PrimitivePersistField maybys ++ classPred ''NeverNull maybys where
+          params = map extractType types
+          classPred clazz = map (\t -> ClassP clazz [t])
+          -- all datatype fields also must be instances of PersistField
+          -- if Maybe is applied to a type param, the param must be also an instance of NeverNull
+          -- so that (Maybe param) is an instance of PersistField
+          maybys = nub $ fields >>= insideMaybe . fieldType
+    _  -> Nothing
 
 extractType :: TyVarBndr -> Type
 extractType (PlainTV name) = VarT name

@@ -2,13 +2,12 @@
 module Main where
 import qualified Data.Map as M
 import qualified Control.Exception as E
-import Control.Exception.Base(SomeException)
-import Control.Monad(replicateM_, liftM, forM_, (>=>), unless)
+import Control.Exception.Base (SomeException)
+import Control.Monad (replicateM_, liftM, forM_, (>=>), unless)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Control(MonadBaseControl, control)
+import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Database.Groundhog.Core
-import Database.Groundhog.Generic.Sql.String
-import Database.Groundhog.Instances
+import Database.Groundhog.Generic.Sql
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
@@ -196,7 +195,7 @@ testCond = do
   let rend :: forall v c s . (StringLike s, PersistEntity v) => Cond v c -> Maybe (RenderS s)
       rend = renderCond id (fromString "id") (\a b -> a <> fromString "=" <> b) (\a b -> a <> fromString "<>" <> b)
   let (===) :: forall v c . PersistEntity v => (String, [PersistValue]) -> Cond v c -> m ()
-      (query, vals) === cond = let Just (RenderS q v) = rend cond in (query, vals) @=? (fromStringS q "", v [])
+      (query, vals) === cond = let Just (RenderS q v) = rend cond in (query, vals) @=? (q, v [])
       
   -- should cover all cases of renderCond comparison rendering
   ("int=?", [toPrim (4 :: Int)]) === (IntField ==. (4 :: Int))

@@ -388,6 +388,7 @@ data Expr v c a where
 -- | Instances of this type can be converted to 'Expr'
 class Expression a where
   type FuncE a v c :: E.Constraint
+  type FuncE a v c = (v ~ v, c ~ c) -- the default type is not applied if it equals (). Is it a bug???
   type FuncA a
   wrap :: FuncE a v c => a -> Expr v c (FuncA a)
 

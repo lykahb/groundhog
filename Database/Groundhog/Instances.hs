@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances, ConstraintKinds #-}
+{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances, ConstraintKinds, UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 
@@ -56,75 +56,7 @@ instance (PersistField a', PersistField b', PersistField c', PersistField d', Pe
   selectorNum Tuple5_3Selector = 3
   selectorNum Tuple5_4Selector = 4
   
-instance SinglePersistField String where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField T.Text where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField ByteString where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Int where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Int8 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Int16 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Int32 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Int64 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Word8 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Word16 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Word32 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Word64 where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Double where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Bool where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField Day where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField TimeOfDay where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance SinglePersistField UTCTime where
-  toSinglePersistValue = return . toPrim
-  fromSinglePersistValue = return . fromPrim
-
-instance PersistEntity a => SinglePersistField (Key a) where
+instance PrimitivePersistField a => SinglePersistField a where
   toSinglePersistValue = return . toPrim
   fromSinglePersistValue = return . fromPrim
 
@@ -134,92 +66,7 @@ instance (SinglePersistField a, NeverNull a) => SinglePersistField (Maybe a) whe
   fromSinglePersistValue PersistNull = return Nothing
   fromSinglePersistValue a = liftM Just $ fromSinglePersistValue a
 
-instance PurePersistField String where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField T.Text where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField ByteString where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Int where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Int8 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Int16 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Int32 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Int64 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Word8 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Word16 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Word32 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Word64 where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Double where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Bool where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField Day where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField TimeOfDay where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PurePersistField UTCTime where
-  toPurePersistValues a = (toPrim a:)
-  fromPurePersistValues (x:xs) = (fromPrim x, xs)
-  fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance PersistEntity a => PurePersistField (Key a) where
+instance PrimitivePersistField a => PurePersistField a where
   toPurePersistValues a = (toPrim a:)
   fromPurePersistValues (x:xs) = (fromPrim x, xs)
   fromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
@@ -414,6 +261,7 @@ instance PersistEntity v => Expression (Arith v c a) where
   type FuncA (Arith v c a) = a
   wrap = ExprArith
 
+-- TODO: investigate how to write a single Expression instance for all PurePersistField instances
 instance (Expression a, PrimitivePersistField a, NeverNull a) => Expression (Maybe a) where
   type FuncE (Maybe a) v c = ()
   type FuncA (Maybe a) = (Maybe (FuncA a))

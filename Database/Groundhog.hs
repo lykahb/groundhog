@@ -44,6 +44,7 @@
 module Database.Groundhog
   ( module Database.Groundhog.Core
   , module Database.Groundhog.Generic
+  , module Database.Groundhog.Instances
   ) where
 
 import Database.Groundhog.Core
@@ -52,6 +53,7 @@ import Database.Groundhog.Core
   , Key(..)
   , Cond(..)
   , Order(..)
+  , Selector(..)
   , (=.)
   , (~>)
   , (&&.), (||.)
@@ -68,4 +70,6 @@ import Database.Groundhog.Generic
   , silentMigrationLogger
   , defaultMigrationLogger)
 
-import Database.Groundhog.Instances ()
+import Database.Groundhog.Instances
+
+shit = Tuple2_0Selector

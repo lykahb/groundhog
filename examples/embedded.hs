@@ -39,7 +39,13 @@ main = do
   let commonAddress = Address "Sunnyvale" "18144" "El Camino Real"
   let company = Company "Cyberdyne Systems" commonAddress commonAddress commonAddress
   runMigration defaultMigrationLogger $ migrate company
-  k <- insert company
-  -- compare embedded data as a whole and compare their fields individually
-  vals <- select (DataCentreField ==. HeadquarterField &&. SalesOfficeField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) [] 0 0
-  liftIO $ print vals
+  insert company
+  -- compare embedded data fields as a whole and compare their subfields individually
+  select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) [] 0 0 >>= liftIO . print
+  -- After the Cyberdyne headquarter was destroyed by John Connor and T-800, the Skynet development was continued by Cyber Research Systems affiliated with Pentagon
+  let newAddress = Address "Washington" "20301" "1400 Defense Pentagon"
+  -- compare fields with an embedded value as a whole and update embedded field with a value
+  update [NameField =. "Cyber Research Systems", HeadquarterField =. newAddress] (NameField ==. "Cyberdyne Systems" &&. HeadquarterField ==. commonAddress)
+  -- update embedded field with another field as a whole. Separate subfields can be accessed individually for update via ~> as in the select above
+  update [DataCentreField =. HeadquarterField, SalesOfficeField =. HeadquarterField] (NameField ==. "Cyber Research Systems" &&. HeadquarterField ==. newAddress)
+  select (HeadquarterField ~> ZipCodeSelector ==. "20301") [] 0 0 >>= liftIO . print

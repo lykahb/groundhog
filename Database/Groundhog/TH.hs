@@ -393,6 +393,7 @@ mkEmbeddedDecs def = do
   decs <- fmap concat $ sequence
     [ mkEmbeddedPersistFieldInstance def
     , mkEmbeddedPurePersistFieldInstance def
+    , mkEmbeddedExpressionInstance def
     , mkEmbeddedInstance def
     ]
 --  runIO $ putStrLn $ pprint decs
