@@ -23,10 +23,12 @@ library
                    , monad-control           >= 0.3       && < 0.4
                    , containers              >= 0.2       && < 0.5
                    , utf8-string             >= 0.3.4     && < 0.4
+                   , blaze-builder           >= 0.3.0.0   && < 0.4
                    , pool                    >= 0.1       && < 0.2
                    , unordered-containers
     exposed-modules: Database.Sqlite
                      Database.Groundhog.Sqlite
+    other-modules:   Database.Groundhog.Generic.Sql.Utf8
     ghc-options:     -Wall -fno-warn-unused-do-bind
     if flag(systemlib)
         extra-libraries: sqlite3

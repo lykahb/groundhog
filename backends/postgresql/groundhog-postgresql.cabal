@@ -24,6 +24,7 @@ library
                    , pool                    >= 0.1       && < 0.2
                    , time                    >= 1.1
     exposed-modules: Database.Groundhog.Postgresql
-    other-modules:   Database.Groundhog.Postgresql.Base
+    other-modules:   Database.Groundhog.Generic.Sql.String
+                     Database.Groundhog.Postgresql.Base
                      Database.Groundhog.Postgresql.Migration
     ghc-options:     -Wall -fno-warn-unused-do-bind

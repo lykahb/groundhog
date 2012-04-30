@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, GADTs, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, GADTs, OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE CPP #-}
 
 -- | This module defines the functions which are used only for backends creation.
@@ -36,6 +36,10 @@ data RenderS s = RenderS {
 instance Monoid s => Monoid (RenderS s) where
   mempty = RenderS mempty id
   (RenderS f1 g1) `mappend` (RenderS f2 g2) = RenderS (f1 `mappend` f2) (g1 . g2)
+
+-- Has bad performance. This instance exists only for testing purposes
+instance StringLike String where
+  fromChar c = [c]
 
 {-# INLINABLE parens #-}
 parens :: StringLike s => Int -> Int -> RenderS s -> RenderS s

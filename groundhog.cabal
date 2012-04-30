@@ -21,15 +21,12 @@ library
                    , containers               >= 0.2       && < 0.5
                    , monad-control            >= 0.3       && < 0.4
                    , pool                     >= 0.1       && < 0.2
-                   , blaze-builder            >= 0.3.0.0   && < 0.4
                    , transformers-base
                    , yaml                     >= 0.6.1     && < 0.8
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core
                      Database.Groundhog.Generic
                      Database.Groundhog.Generic.Sql
-                     Database.Groundhog.Generic.Sql.String
-                     Database.Groundhog.Generic.Sql.Utf8
                      Database.Groundhog.Instances
                      Database.Groundhog.TH
     other-modules:   Database.Groundhog.TH.Settings
