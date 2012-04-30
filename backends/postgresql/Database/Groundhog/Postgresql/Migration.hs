@@ -112,6 +112,7 @@ migrate' = migrateRecursively migE migL where
       (Just _, Just (Left errs)) -> Left errs
       (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
       (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
+  migL t = fail $ "migrate: expected DbList, got " ++ show t
 
 createReference :: String -> Column -> Maybe SingleMigration
 createReference tname (Column name isNull _ _ ref) = fmap f ref where
