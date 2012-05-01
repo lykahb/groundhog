@@ -16,10 +16,10 @@ import Database.Groundhog.Generic.Sql.Utf8
 import qualified Database.Sqlite as S
 
 import Control.Arrow ((&&&))
-import Control.Monad(liftM, forM, (>=>))
-import Control.Monad.Trans.Control(MonadBaseControl)
+import Control.Monad (liftM, forM, (>=>))
+import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Reader(ask)
+import Control.Monad.Trans.Reader (ask)
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
 import Data.List (group, intercalate)

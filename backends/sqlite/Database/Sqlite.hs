@@ -345,18 +345,10 @@ column statement columnIndex = do
 typedColumn :: ColumnType -> Statement -> Int -> IO SQLData
 typedColumn theType statement columnIndex = do
   case theType of
-    IntegerColumn -> do
-                 int64 <- columnInt64 statement columnIndex
-                 return $ SQLInteger int64
-    FloatColumn -> do
-                 double <- columnDouble statement columnIndex
-                 return $ SQLFloat double
-    TextColumn -> do
-                 text <- columnText statement columnIndex
-                 return $ SQLText text
-    BlobColumn -> do
-                 byteString <- columnBlob statement columnIndex
-                 return $ SQLBlob byteString
+    IntegerColumn -> fmap SQLInteger $ columnInt64 statement columnIndex
+    FloatColumn -> fmap SQLFloat $ columnDouble statement columnIndex
+    TextColumn -> fmap SQLText $ columnText statement columnIndex
+    BlobColumn -> fmap SQLBlob $ columnBlob statement columnIndex
     NullColumn -> return SQLNull
 
 columns :: Statement -> IO [SQLData]
@@ -367,8 +359,10 @@ columns statement = do
 unsafeColumns :: Statement -> [Maybe ColumnType] -> IO [SQLData]
 unsafeColumns statement types = go 0 types where
   go :: Int -> [Maybe ColumnType] -> IO [SQLData]
-  go _ [] = return []
+  go n [] = n `seq` return []
   go n (t:ts) = do
-    c <- (maybe column typedColumn t) statement n
+    c <- case t of
+      Nothing -> column statement n
+      Just t' -> typedColumn t' statement n
     cs <- go (n + 1) ts
     return (c:cs)
