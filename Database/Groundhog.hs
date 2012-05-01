@@ -71,5 +71,3 @@ import Database.Groundhog.Generic
   , defaultMigrationLogger)
 
 import Database.Groundhog.Instances
-
-shit = Tuple2_0Selector
