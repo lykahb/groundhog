@@ -382,7 +382,7 @@ mkEntityDecs def = do
     , mkEntityPersistFieldInstance def
     , mkEntitySinglePersistFieldInstance def
     , mkPersistEntityInstance def
-    , mkEntityNeverNullInstance def
+--    , mkEntityNeverNullInstance def
     ]
 --  runIO $ putStrLn $ pprint decs
   return decs
@@ -393,7 +393,6 @@ mkEmbeddedDecs def = do
   decs <- fmap concat $ sequence
     [ mkEmbeddedPersistFieldInstance def
     , mkEmbeddedPurePersistFieldInstance def
-    , mkEmbeddedExpressionInstance def
     , mkEmbeddedInstance def
     ]
 --  runIO $ putStrLn $ pprint decs

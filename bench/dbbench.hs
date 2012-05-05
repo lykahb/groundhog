@@ -6,7 +6,7 @@ import Database.Groundhog.Sqlite
 
 data Person = Person {name :: String, age :: Int, height :: Int} deriving (Eq, Show)
 
-mkPersist fieldNamingStyle [groundhog|
+mkPersist suffixNamingStyle [groundhog|
 - entity: Person
 |]
 

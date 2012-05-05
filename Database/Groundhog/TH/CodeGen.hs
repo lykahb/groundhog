@@ -4,7 +4,6 @@
 module Database.Groundhog.TH.CodeGen
   ( mkEmbeddedPersistFieldInstance
   , mkEmbeddedPurePersistFieldInstance
-  , mkEmbeddedExpressionInstance
   , mkEmbeddedInstance
   , mkEntityPhantomConstructors
   , mkEntityPhantomConstructorInstances
@@ -14,7 +13,7 @@ module Database.Groundhog.TH.CodeGen
   , mkEntityNeverNullInstance
   ) where
   
-import Database.Groundhog.Core (PersistEntity(..), Embedded(..), Key, PersistField(..), SinglePersistField(..), PurePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull, Expression(..), Expr(..))
+import Database.Groundhog.Core (PersistEntity(..), Embedded(..), Key, PersistField(..), SinglePersistField(..), PurePersistField(..), PrimitivePersistField(..), PersistBackend(..), DbType(..), Constraint(..), Constructor(..), EntityDef(..), ConstructorDef(..), PersistValue(..), NeverNull)
 import Database.Groundhog.Generic (failMessage, applyEmbeddedDbTypeSettings)
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
@@ -154,21 +153,6 @@ mkEmbeddedPurePersistFieldInstance def = do
     Just context' -> do
       let decs = [toPurePersistValues', fromPurePersistValues']
       return $ [InstanceD context' (AppT (ConT ''PurePersistField) embedded) decs]
-
-mkEmbeddedExpressionInstance :: THEmbeddedDef -> Q [Dec]
-mkEmbeddedExpressionInstance def = do
-  let types = map extractType $ thEmbeddedTypeParams def
-  let embedded = foldl AppT (ConT (embeddedName def)) types
-  -- funcE is left by default
-  let funcA' = TySynInstD ''FuncA [embedded] embedded
-  wrap' <- funD 'wrap [clause [] (normalB [|ExprPure|]) []]
-
-  context <- paramsPureContext (thEmbeddedTypeParams def) (embeddedFields def)
-  case context of
-    Nothing -> return []
-    Just context' -> do
-      let decs = [funcA', wrap']
-      return $ [InstanceD context' (AppT (ConT ''Expression) embedded) decs]  
 
 mkEmbeddedInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedInstance def = do

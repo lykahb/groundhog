@@ -25,6 +25,7 @@ library
                    , yaml                     >= 0.6.1     && < 0.8
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core
+                     Database.Groundhog.Expression
                      Database.Groundhog.Generic
                      Database.Groundhog.Generic.Sql
                      Database.Groundhog.Instances

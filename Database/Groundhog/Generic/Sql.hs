@@ -88,7 +88,7 @@ renderCond esc idName rendEq rendNotEq (cond :: Cond v c) = go cond 0 where
     Le -> renderComp 2 p " OR " (\a b -> a <> "<=" <> b) f1 f2
   go (KeyIs k) _ = Just $ RenderS (fromString idName <> "=?") (toPrim k:)
 
-  renderComp :: Int -> Int -> s -> (s -> s -> s) -> Expr v c a -> Expr v c a -> Maybe (RenderS s)
+  renderComp :: Int -> Int -> s -> (s -> s -> s) -> Expr v c a -> Expr v c b -> Maybe (RenderS s)
   renderComp p pOuter logicOp op expr1 expr2 = (case expr1 of
     ExprField field -> case fieldChain field of
       Left f -> Just $ case expr2 of

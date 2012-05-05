@@ -1,5 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FlexibleContexts, GeneralizedNewtypeDeriving, ConstraintKinds #-}
-
+{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FlexibleContexts, GeneralizedNewtypeDeriving #-}
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
 module Database.Groundhog.Core
@@ -14,15 +13,12 @@ module Database.Groundhog.Core
   , Embedded(..)
   , Key(..)
   -- * Constructing expressions
-  -- $exprDoc
   , Cond(..)
   , ExprRelation(..)
   , Update(..)
-  , (=.), (&&.), (||.), (==.), (/=.), (<.), (<=.), (>.), (>=.), (~>)
-  , wrapPrim
+  , (~>)
   , toArith
   , FieldLike(..)
-  , Expression(..)
   , NeverNull
   , Numeric
   , Arith(..)
@@ -58,7 +54,6 @@ import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
 import Data.Time (Day, TimeOfDay, UTCTime)
-import qualified GHC.Exts as E
 
 -- | Only instances of this class can be persisted in a database
 class SinglePersistField v => PersistEntity v where
@@ -81,28 +76,18 @@ class SinglePersistField v => PersistEntity v where
 -- | A unique identifier of a value stored in a database
 data PersistEntity v => Key v = Key Int64 deriving (Show, Eq)
 
--- $exprDoc
--- The expressions are used in conditions and right part of Update statement.
--- Despite the wordy types of the comparison functions, they are simple to use.
--- Type of the compared polymorphic values like numbers or Nothing must be supplied manually. Example:
---
--- @
--- StringField ==. \"abc\" &&. NumberField >. (0 :: Int) ||. MaybeField ==. (Nothing :: Maybe String) ||. MaybeField ==. Just \"def\"
--- @
---
-
 -- | Represents condition for a query.
 data Cond v c =
     And (Cond v c) (Cond v c)
   | Or  (Cond v c) (Cond v c)
   | Not (Cond v c)
-  | forall a.PersistField a => Compare ExprRelation (Expr v c a) (Expr v c a)
+  | forall a b . Compare ExprRelation (Expr v c a) (Expr v c b)
   -- | Lookup will be performed only in table for the specified constructor c. To fetch value by key without constructor limitation use 'get'
   | KeyIs (Key v)
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
-data Update v c = forall a f . FieldLike f => Update (f v c a) (Expr v c a)
+data Update v c = forall f a b . FieldLike f => Update (f v c a) (Expr v c b)
 --deriving instance (Show (Field c a)) => Show (Update c)
 
 -- | Defines sort order of a result-set
@@ -134,53 +119,6 @@ instance FieldLike SubField where
 
 instance FieldLike Field where
   fieldChain = entityFieldChain
-
--- | Update field
-infixr 3 =.
-(=.) ::
-  ( Expression a
-  , FuncE a v c
-  , FieldLike f)
-  => f v c (FuncA a) -> a -> Update v c
-f =. a = Update f (wrap a)
-
--- | Boolean \"and\" operator.
-(&&.) :: Cond v c -> Cond v c -> Cond v c
-
--- | Boolean \"or\" operator.  
-(||.) :: Cond v c -> Cond v c -> Cond v c
-
-infixr 3 &&.
-a &&. b = And a b
-
-infixr 2 ||.
-a ||. b = Or a b
-
-(==.), (/=.) ::
-  ( Expression a
-  , Expression b
-  , FuncE a v c
-  , FuncE b v c
-  , FuncA a ~ FuncA b
-  , PersistField (FuncA a))
-  => a -> b -> Cond v c
-
-(<.), (<=.), (>.), (>=.) ::
-  ( Expression a
-  , Expression b
-  , FuncE a v c
-  , FuncE b v c
-  , FuncA a ~ FuncA b
-  , PersistField (FuncA a))
-  => a -> b -> Cond v c
-
-infix 4 ==., <., <=., >., >=.
-a ==. b = Compare Eq (wrap a) (wrap b)
-a /=. b = Compare Ne (wrap a) (wrap b)
-a <.  b = Compare Lt (wrap a) (wrap b)
-a <=. b = Compare Le (wrap a) (wrap b)
-a >.  b = Compare Gt (wrap a) (wrap b)
-a >=. b = Compare Ge (wrap a) (wrap b)
 
 newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
   deriving (Monad, MonadIO, Functor, Applicative, MonadTrans)
@@ -380,31 +318,9 @@ class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a wher
 -- | Used to uniformly represent fields, literals and arithmetic expressions.
 -- A value should be converted to 'Expr' for usage in expressions
 data Expr v c a where
-  ExprField :: (FieldLike f, PersistEntity v) => f v c a -> Expr v c a
-  ExprArith :: PersistEntity v => Arith v c a -> Expr v c a
-  ExprPure :: forall a v c a' . PurePersistField a => a -> Expr v c a'
-
--- I wish wrap could return Expr with both fixed and polymorphic v&c. Any is used to emulate polymorphic types.
--- | Instances of this type can be converted to 'Expr'
-class Expression a where
-  type FuncE a v c :: E.Constraint
-  type FuncE a v c = (v ~ v, c ~ c) -- the default type is not applied if it equals (). Is it a bug???
-  type FuncA a
-  wrap :: FuncE a v c => a -> Expr v c (FuncA a)
-
--- | By default during converting values of certain types to 'Expr', the types can be changed. For example, @'Key' a@ is transformed into @a@.
--- It is convenient because the fields usually contain reference to a certain datatype, not its 'Key'.
--- But sometimes when automatic transformation gets in the way function 'wrapPrim' will help. Use it when a field in a datatype has type @(Key a)@ or @Maybe (Key a)@. Example:
---
--- @
---data Example = Example {entity1 :: Maybe Smth, entity2 :: Key Smth}
---Entity1Field ==. Just k &&. Entity2Field ==. wrapPrim k
--- @
-wrapPrim :: PrimitivePersistField a => a -> Expr v c a
--- We cannot create different Expression instances for (Field v c a) and (Field v c (Key a))
--- so that Func (Field v c a) = a and Func (Field v c (Key a)) = a
--- because of the type families overlap restrictions. Neither we can create different instances for Key a
-wrapPrim = ExprPure
+  ExprField :: (FieldLike f, PersistEntity v) => f v c a -> Expr v c (f v c a)
+  ExprArith :: PersistEntity v => Arith v c a -> Expr v c (Arith v c a)
+  ExprPure :: forall a v c . PurePersistField a => a -> Expr v c a
 
 -- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where

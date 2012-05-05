@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, FlexibleInstances, OverloadedStrings, RecordWildCards #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Database.Groundhog.TH.Settings
   ( PersistSettings(..)

@@ -463,7 +463,7 @@ testKeys :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testKeys = do
   migr (undefined :: Keys)
   k <- insert $ Single ""
-  let cond = RefDirectField ==. k ||. RefKeyField ==. wrapPrim k ||. RefDirectMaybeField ==. Just k ||. RefKeyMaybeField ==. wrapPrim (Just k)
+  let cond = RefDirectField ==. k ||. RefKeyField ==. k ||. RefDirectMaybeField ==. Just k ||. RefKeyMaybeField ==. Just k
   select cond [] 0 0
   return ()
   

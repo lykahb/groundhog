@@ -43,6 +43,7 @@
 -- @
 module Database.Groundhog
   ( module Database.Groundhog.Core
+  , module Database.Groundhog.Expression
   , module Database.Groundhog.Generic
   , module Database.Groundhog.Instances
   ) where
@@ -54,12 +55,9 @@ import Database.Groundhog.Core
   , Cond(..)
   , Order(..)
   , Selector(..)
-  , (=.)
   , (~>)
-  , (&&.), (||.)
-  , (==.), (/=.), (<.), (<=.), (>.), (>=.)
-  , wrapPrim
   , toArith)
+import Database.Groundhog.Expression
 import Database.Groundhog.Generic
   ( createMigration
   , executeMigration

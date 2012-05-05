@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances, ConstraintKinds, UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, FlexibleInstances, UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 
@@ -114,6 +114,8 @@ instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersis
     (d, rest3) = fromPurePersistValues rest2
     (e, rest4) = fromPurePersistValues rest3
     in ((a, b, c, d, e), rest4)
+
+instance PersistEntity v => NeverNull v
 
 instance Numeric Int
 instance Numeric Int8
@@ -240,113 +242,6 @@ instance NeverNull Day
 instance NeverNull TimeOfDay
 instance NeverNull UTCTime
 instance NeverNull (Key a)
-
-instance Expression (Expr v c a) where
-  type FuncE (Expr v c a) v' c' = (v ~ v', c ~ c')
-  type FuncA (Expr v c a) = a
-  wrap = id
-
-instance PersistEntity v => Expression (Field v c a) where
-  type FuncE (Field v c a) v' c' = (v ~ v', c ~ c')
-  type FuncA (Field v c a) = a
-  wrap = ExprField
-
-instance PersistEntity v => Expression (SubField v c a) where
-  type FuncE (SubField v c a) v' c' = (v ~ v', c ~ c')
-  type FuncA (SubField v c a) = a
-  wrap = ExprField
-
-instance PersistEntity v => Expression (Arith v c a) where
-  type FuncE (Arith v c a) v' c' = (v ~ v', c ~ c')
-  type FuncA (Arith v c a) = a
-  wrap = ExprArith
-
--- TODO: investigate how to write a single Expression instance for all PurePersistField instances
-instance (Expression a, PrimitivePersistField a, NeverNull a) => Expression (Maybe a) where
-  type FuncE (Maybe a) v c = ()
-  type FuncA (Maybe a) = (Maybe (FuncA a))
-  wrap = ExprPure
-
-instance PersistEntity a => Expression (Key a) where
-  type FuncE (Key a) v c = (); type FuncA (Key a) = a
-  wrap = ExprPure
-
-instance Expression () where
-  type FuncE () v c = ()
-  type FuncA () = ()
-  wrap = ExprPure
-
-instance (PurePersistField a, PurePersistField b) => Expression (a, b) where
-  type FuncE (a, b) v c = ()
-  type FuncA (a, b) = (a, b)
-  wrap = ExprPure
-
-instance (PurePersistField a, PurePersistField b, PurePersistField c) => Expression (a, b, c) where
-  type FuncE (a, b, c) v c = ()
-  type FuncA (a, b, c) = (a, b, c)
-  wrap = ExprPure
-
-instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d) => Expression (a, b, c, d) where
-  type FuncE (a, b, c, d) v c = ()
-  type FuncA (a, b, c, d) = (a, b, c, d)
-  wrap = ExprPure
-
-instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d, PurePersistField e) => Expression (a, b, c, d, e) where
-  type FuncE (a, b, c, d, e) v c = ()
-  type FuncA (a, b, c, d, e) = (a, b, c, d, e)
-  wrap = ExprPure
-
-instance Expression Int where
-  type FuncE Int v c = (); type FuncA Int = Int
-  wrap = ExprPure
-
-instance Expression Int8 where
-  type FuncE Int8 v c = (); type FuncA Int8 = Int8
-  wrap = ExprPure
-
-instance Expression Int16 where
-  type FuncE Int16 v c = (); type FuncA Int16 = Int16
-  wrap = ExprPure
-
-instance Expression Int32 where
-  type FuncE Int32 v c = (); type FuncA Int32 = Int32
-  wrap = ExprPure
-
-instance Expression Int64 where
-  type FuncE Int64 v c = (); type FuncA Int64 = Int64
-  wrap = ExprPure
-
-instance Expression Word8 where
-  type FuncE Word8 v c = (); type FuncA Word8 = Word8
-  wrap = ExprPure
-
-instance Expression Word16 where
-  type FuncE Word16 v c = (); type FuncA Word16 = Word16
-  wrap = ExprPure
-
-instance Expression Word32 where
-  type FuncE Word32 v c = (); type FuncA Word32 = Word32
-  wrap = ExprPure
-
-instance Expression Word64 where
-  type FuncE Word64 v c = (); type FuncA Word64 = Word64
-  wrap = ExprPure
-
-instance Expression String where
-  type FuncE String v c = (); type FuncA String = String
-  wrap = ExprPure
-
-instance Expression ByteString where
-  type FuncE ByteString v c = (); type FuncA ByteString = ByteString
-  wrap = ExprPure
-
-instance Expression T.Text where
-  type FuncE T.Text v c = (); type FuncA T.Text = T.Text
-  wrap = ExprPure
-
-instance Expression Bool where
-  type FuncE Bool v c = (); type FuncA Bool = Bool
-  wrap = ExprPure
 
 readHelper :: Read a => PersistValue -> String -> a
 readHelper s errMessage = case s of
