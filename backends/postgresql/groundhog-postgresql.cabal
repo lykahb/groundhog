@@ -4,7 +4,7 @@ license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
-synopsis:        Backend for the groundhog library using PostgreSQL.
+synopsis:        PostgreSQL backend for the groundhog library.
 description:     This package uses HDBC-postgresql.
 category:        Database
 stability:       Non-stable
@@ -21,7 +21,7 @@ library
                    , monad-control           >= 0.3       && < 0.4
                    , containers              >= 0.2       && < 0.5
                    , utf8-string             >= 0.3.4     && < 0.4
-                   , pool                    >= 0.1       && < 0.2
+                   , pool-conduit            >= 0.1       && < 0.2
                    , time                    >= 1.1
     exposed-modules: Database.Groundhog.Postgresql
     other-modules:   Database.Groundhog.Generic.Sql.String

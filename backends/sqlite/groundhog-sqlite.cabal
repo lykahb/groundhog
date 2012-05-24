@@ -4,7 +4,7 @@ license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
-synopsis:        Backend for the groundhog library using sqlite3.
+synopsis:        Sqlite3 backend for the groundhog library
 description:     This package includes a thin sqlite3 wrapper based on the direct-sqlite package, as well as the entire C library, so there are no system dependencies.
 category:        Database
 stability:       Non-stable
@@ -24,7 +24,7 @@ library
                    , containers              >= 0.2       && < 0.5
                    , utf8-string             >= 0.3.4     && < 0.4
                    , blaze-builder           >= 0.3.0.0   && < 0.4
-                   , pool                    >= 0.1       && < 0.2
+                   , pool-conduit            >= 0.1       && < 0.2
                    , unordered-containers
     exposed-modules: Database.Sqlite
                      Database.Groundhog.Sqlite

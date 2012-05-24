@@ -26,7 +26,7 @@ import Data.List (group, intercalate)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
 import Data.Monoid
-import Data.Pool
+import Data.Conduit.Pool
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
@@ -60,7 +60,7 @@ withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
                -> Int -- ^ number of connections to open
                -> (Pool Sqlite -> m a)
                -> m a
-withSqlitePool s = createPool (open' s) close'
+withSqlitePool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
 
 {-# SPECIALIZE withSqliteConn :: String -> (Sqlite -> IO a) -> IO a #-}
 {-# INLINE withSqliteConn #-}
@@ -72,7 +72,7 @@ withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
 
 {-# SPECIALIZE runSqlitePool :: DbPersist Sqlite IO a -> Pool Sqlite -> IO a #-}
 runSqlitePool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m a -> Pool Sqlite -> m a
-runSqlitePool = flip withPool' . runSqliteConn
+runSqlitePool f pconn = withResource pconn $ runSqliteConn f
 
 {-# SPECIALIZE runSqliteConn :: DbPersist Sqlite IO a -> Sqlite -> IO a #-}
 {-# INLINE runSqliteConn #-}

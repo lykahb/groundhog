@@ -27,7 +27,7 @@ import Data.List (intercalate)
 import Data.IORef
 import qualified Data.Map as Map
 import Data.Monoid
-import Data.Pool
+import Data.Conduit.Pool
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgresql m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
@@ -58,7 +58,7 @@ withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
                -> Int -- ^ number of connections to open
                -> (Pool Postgresql -> m a)
                -> m a
-withPostgresqlPool s = createPool (open' s) close'
+withPostgresqlPool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
 
 {-# SPECIALIZE withPostgresqlConn :: String -> (Postgresql -> IO a) -> IO a #-}
 {-# INLINE withPostgresqlConn #-}
@@ -70,7 +70,7 @@ withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO.close')
 
 {-# SPECIALIZE runPostgresqlPool :: DbPersist Postgresql IO a -> Pool Postgresql -> IO a #-}
 runPostgresqlPool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Pool Postgresql -> m a
-runPostgresqlPool = flip withPool' . runPostgresqlConn
+runPostgresqlPool f pconn = withResource pconn $ runPostgresqlConn f
 
 {-# SPECIALIZE runPostgresqlConn :: DbPersist Postgresql IO a -> Postgresql -> IO a #-}
 {-# INLINE runPostgresqlConn #-}
