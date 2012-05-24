@@ -26,20 +26,14 @@ class Expression a v c where
 instance PurePersistField a => Expression a v c where
   wrap = ExprPure
 
-instance (PersistEntity v, Expression' (Field v c a) v' c', v ~ v', c ~ c') => Expression (Field v c a) v' c' where
+instance (PersistEntity v, v ~ v', c ~ c') => Expression (Field v c a) v' c' where
   wrap = ExprField
 
-instance (PersistEntity v, Expression' (SubField v c a) v' c', v ~ v', c ~ c') => Expression (SubField v c a) v' c' where
+instance (PersistEntity v, v ~ v', c ~ c') => Expression (SubField v c a) v' c' where
   wrap = ExprField
 
-instance (PersistEntity v, Expression' (Arith v c a) v' c', v ~ v', c ~ c') => Expression (Arith v c a) v' c' where
+instance (PersistEntity v, v ~ v', c ~ c') => Expression (Arith v c a) v' c' where
   wrap = ExprArith
-
-class Expression' a v c | a -> v c where
-instance PersistEntity v => Expression' (Field v c a) v c where
-instance PersistEntity v => Expression' (SubField v c a) v c where
-instance PersistEntity v => Expression' (Arith v c a) v c where
-
 
 data HTrue
 data HFalse
