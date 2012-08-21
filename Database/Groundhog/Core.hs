@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FlexibleContexts, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, GeneralizedNewtypeDeriving, EmptyDataDecls #-}
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
 module Database.Groundhog.Core
@@ -11,7 +11,15 @@ module Database.Groundhog.Core
   , PurePersistField(..)
   , PrimitivePersistField(..)
   , Embedded(..)
-  , Key(..)
+  , Projection(..)
+  , RestrictionHolder
+  , Unique
+  , KeyForBackend(..)
+  , BackendSpecific
+  , ConstructorMarker
+  , UniqueMarker
+  , Proxy
+  , phantomDb
   -- * Constructing expressions
   , Cond(..)
   , ExprRelation(..)
@@ -19,24 +27,29 @@ module Database.Groundhog.Core
   , (~>)
   , toArith
   , FieldLike(..)
+  , SubField (..)
+  , AutoKeyField (..)
+  , FieldChain
   , NeverNull
   , Numeric
   , Arith(..)
   , Expr(..)
-  , SubField (..)
   , Order(..)
   -- * Type description
   , DbType(..)
   , EntityDef(..)
+  , EmbeddedDef(..)
   , ConstructorDef(..)
   , Constructor(..)
-  , Constraint(..)
+  , IsUniqueKey(..)
+  , UniqueDef(..)
   -- * Migration
   , SingleMigration
   , NamedMigrations
   , Migration
   -- * Database
   , PersistBackend(..)
+  , DbDescriptor(..)
   , RowPopper
   , DbPersist(..)
   , runDbPersist
@@ -56,69 +69,98 @@ import Data.Map (Map)
 import Data.Time (Day, TimeOfDay, UTCTime)
 
 -- | Only instances of this class can be persisted in a database
-class SinglePersistField v => PersistEntity v where
+class (PersistField v, PurePersistField (AutoKey v)) => PersistEntity v where
   -- | This type is used for typesafe manipulation of separate fields of datatype v.
   -- Each constructor in 'Field' corresponds to its field in a datatype v.
   -- It is parametrised by constructor phantom type and field value type.
-  data Field v :: * -> * -> *
+  data Field v :: ((* -> *) -> *) -> * -> *
+  -- | A unique identifier of a value stored in a database. This may be a primary key, a constraint or unique indices. The second parameter is the key description.
+  data Key v :: * -> *
+  -- | This type is the default autoincremented key for the entity. If entity does not have such key, AutoKey v = ().
+  type AutoKey v
+  -- | This type is the default key for the entity.
+  type DefaultKey v
   -- | Returns a complete description of the type
   entityDef :: v -> EntityDef
   -- | Marshalls value to a list of 'PersistValue' ready for insert to a database
-  toEntityPersistValues :: PersistBackend m => v -> m [PersistValue]
+  toEntityPersistValues :: PersistBackend m => v -> m ([PersistValue] -> [PersistValue])
   -- | Constructs the value from the list of 'PersistValue'
-  fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m v
-  -- | Returns constructor number and a list of constraint names and corresponding field values
-  getConstraints :: v -> (Int, [(String, [PersistValue])])
+  fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m (v, [PersistValue])
+  -- | Returns constructor number and a list of uniques names and corresponding field values
+  getUniques :: DbDescriptor db => Proxy db -> v -> (Int, [(String, [PersistValue])])
   -- | Is internally used by FieldLike Field instance
   -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
-  entityFieldChain :: Field v c a -> Either String [(String, DbType)]
+  entityFieldChain :: Field v c a -> FieldChain
 
--- | A unique identifier of a value stored in a database
-data PersistEntity v => Key v = Key Int64 deriving (Show, Eq)
+-- | A holder for Unique constraints
+data Unique (u :: (* -> *) -> *)
+-- | Key marked with this type can have value for any backend
+data BackendSpecific
+-- | A phantom datatype to make instance head diffirent @c (ConstructorMarker, v)@
+data ConstructorMarker v a
+-- | A phantom datatype to make instance head diffirent @u (UniqueMarker, v)@
+data UniqueMarker v a
+
+-- | A holder for DB type in backend-specific keys
+data KeyForBackend db v = (DbDescriptor db, PersistEntity v) => KeyForBackend (AutoKeyType db)
+
+data Proxy a
+
+phantomDb :: PersistBackend m => m (Proxy (PhantomDb m))
+phantomDb = return $ error "phantomDb"
 
 -- | Represents condition for a query.
-data Cond v c =
+data Cond v (c :: (* -> *) -> *) =
     And (Cond v c) (Cond v c)
   | Or  (Cond v c) (Cond v c)
   | Not (Cond v c)
   | forall a b . Compare ExprRelation (Expr v c a) (Expr v c b)
-  -- | Lookup will be performed only in table for the specified constructor c. To fetch value by key without constructor limitation use 'get'
-  | KeyIs (Key v)
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
-data Update v c = forall f a b . FieldLike f => Update (f v c a) (Expr v c b)
---deriving instance (Show (Field c a)) => Show (Update c)
+data Update v c = forall f a b . (FieldLike f (RestrictionHolder v c) a) => Update f (Expr v c b)
 
 -- | Defines sort order of a result-set
-data Order v c = forall a f . FieldLike f => Asc  (f v c a)
-               | forall a f . FieldLike f => Desc (f v c a)
+data Order v c = forall a f . (FieldLike f (RestrictionHolder v c) a) => Asc  f
+               | forall a f . (FieldLike f (RestrictionHolder v c) a) => Desc f
 
--- | Generalises data that can occur in expressions (so far there are regular Field and SubField).
-class FieldLike f where
+type FieldChain = ((String, DbType), [(String, EmbeddedDef)])
+
+-- | Generalises data that can occur in expressions (so far there are Field and SubField).
+class Projection f r a => FieldLike f r a | f -> r a where
   -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
   -- Function fieldChain can be simplified to f v c a -> [(String, DbType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
-  fieldChain :: PersistEntity v => f v c a -> Either String [(String, DbType)]
+  fieldChain :: f -> FieldChain
 
 class PersistField v => Embedded v where
   data Selector v :: * -> *
   selectorNum :: Selector v a -> Int
 
 infixl 5 ~>
-(~>) :: (FieldLike f, PersistEntity v, Embedded a) => f v c a -> Selector a a' -> SubField v c a'
+-- | Accesses fields of the embedded datatypes. For example, @SomeField ==. (\"abc\", \"def\") ||. SomeField ~> Tuple2_0Selector ==. \"def\"@
+(~>) :: (PersistEntity v, Constructor c, FieldLike f (RestrictionHolder v c) a, Embedded a) => f -> Selector a a' -> SubField v c a'
 field ~> sel = case fieldChain field of
-  Right (fs@((_, f):_)) -> case f of
-    DbEmbedded _ ts -> SubField (ts !! selectorNum sel : fs)
+  ((name, typ), prefix) -> case typ of
+    DbEmbedded emb@(EmbeddedDef _ ts)             -> SubField (ts !! selectorNum sel, (name, emb):prefix)
+    DbEntity (Just (emb@(EmbeddedDef _ ts), _)) _ -> SubField (ts !! selectorNum sel, (name, emb):prefix)
     other -> error $ "(~>): cannot get subfield of non-embedded type " ++ show other
-  other -> error $ "(~>): cannot get subfield of " ++ show other
 
-newtype SubField v c a = SubField [(String, DbType)]
+newtype SubField v (c :: (* -> *) -> *) a = SubField ((String, DbType), [(String, EmbeddedDef)])
 
-instance FieldLike SubField where
-  fieldChain (SubField fs) = Right fs
+-- | It can be used in expressions like a regular field. Note that the constructor should be specified for the condition.
+-- For example, @delete (AutoKeyField `asTypeOf` (undefined :: f v SomeConstructor) ==. k)@
+-- or @delete (AutoKeyField ==. k ||. SomeField ==. \"DUPLICATE\")@
+data AutoKeyField v c where
+  AutoKeyField :: (PersistEntity v, Constructor c) => AutoKeyField v c
 
-instance FieldLike Field where
-  fieldChain = entityFieldChain
+data RestrictionHolder v (c :: (* -> *) -> *)
+
+-- | Any data that can be fetched from a database
+class Projection a r a' | a -> r a' where
+  -- | It is like a 'fieldChain' for many fields. Difflist is used for concatenation efficiency.
+  projectionFieldChains :: a -> [FieldChain] -> [FieldChain]
+  -- | It is like 'fromPersistValues'. However, we cannot use it for projections in all cases. For the 'PersistEntity' instances 'fromPersistValues' expects entity id instead of the entity values.
+  projectionResult :: PersistBackend m => a -> [PersistValue] -> m (a', [PersistValue])
 
 newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
   deriving (Monad, MonadIO, Functor, Applicative, MonadTrans)
@@ -139,35 +181,54 @@ instance MonadBaseControl IO m => MonadBaseControl IO (DbPersist conn m) where
 runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
 runDbPersist = runReaderT . unDbPersist
 
-class Monad m => PersistBackend m where
+class PrimitivePersistField (AutoKeyType a) => DbDescriptor a where
+  -- | Type of the database default autoincremented key. For example, Sqlite has Int64
+  type AutoKeyType a
+
+class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
+  -- | A token which defines the DB type. For example, different monads working with Sqlite, return Sqlite type.
+  type PhantomDb m
   -- | Insert a new record to a database and return its 'Key'
-  insert        :: PersistEntity v => v -> m (Key v)
-  -- | Try to insert a record and return Right newkey. If there is a constraint violation, Left oldkey is returned
-  -- , where oldkey is an identifier of the record with the same constraint values. Note that if several constraints are violated, a key of an arbitrary matching record is returned.
-  insertBy      :: PersistEntity v => v -> m (Either (Key v) (Key v))
-  -- | Replace a record with the given key. Result is undefined if the record does not exist.
-  replace       :: PersistEntity v => Key v -> v -> m ()
+  insert        :: PersistEntity v => v -> m (AutoKey v)
+  -- | Try to insert a record and return Right newkey. If there is a constraint violation for the given constraint, Left oldkey is returned
+  -- , where oldkey is an identifier of the record with the matching values.
+  insertBy      :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => u (UniqueMarker v) -> v -> m (Either (AutoKey v) (AutoKey v))
+  -- | Try to insert a record and return Right newkey. If there is a constraint violation for any constraint, Left oldkey is returned
+  -- , where oldkey is an identifier of the record with the matching values. Note that if several constraints are violated, a key of an arbitrary matching record is returned.
+  insertByAll   :: PersistEntity v => v -> m (Either (AutoKey v) (AutoKey v))
+  -- | Replace a record with the given autogenerated key. Result is undefined if the record does not exist.
+  replace       :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> v -> m ()
   -- | Return a list of the records satisfying the condition
   select        :: (PersistEntity v, Constructor c)
                 => Cond v c
                 -> [Order v c]
                 -> Int -- ^ limit
                 -> Int -- ^ offset
-                -> m [(Key v, v)]
-  -- | Return a list of all records. Order is undefined
-  selectAll     :: PersistEntity v => m [(Key v, v)]
+                -> m [v]
+  -- | Return a list of all records. Order is undefined. It is useful for datatypes with multiple constructors.
+  selectAll     :: PersistEntity v => m [(AutoKey v, v)]
   -- | Fetch an entity from a database
-  get           :: PersistEntity v => Key v -> m (Maybe v)
+  get           :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m (Maybe v)
+  -- | Fetch an entity from a database by its unique key
+  getBy         :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => Key v (Unique u) -> m (Maybe v)
   -- | Update the records satisfying the condition
   update        :: (PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> m ()
   -- | Remove the records satisfying the condition
   delete        :: (PersistEntity v, Constructor c) => Cond v c -> m ()
   -- | Remove the record with given key. No-op if the record does not exist
-  deleteByKey   :: PersistEntity v => Key v -> m ()
+  deleteByKey   :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m ()
   -- | Count total number of records satisfying the condition
   count         :: (PersistEntity v, Constructor c) => Cond v c -> m Int
   -- | Count total number of records with all constructors
   countAll      :: PersistEntity v => v -> m Int
+  -- | Fetch projection of some fields
+  project       :: (PersistEntity v, Constructor c, Projection a (RestrictionHolder v c) a')
+                => a
+                -> Cond v c
+                -> [Order v c]
+                -> Int -- ^ limit
+                -> Int -- ^ offset
+                -> m [a']
   -- | Check database schema and create migrations for the entity and the entities it contains
   migrate       :: PersistEntity v => v -> Migration m
   -- | Execute raw query
@@ -183,7 +244,7 @@ class Monad m => PersistBackend m where
                 -> m a
   insertList    :: PersistField a => [a] -> m Int64
   getList       :: PersistField a => Int64 -> m [a]
-  
+
 type RowPopper m = m (Maybe [PersistValue])
 
 type Migration m = StateT NamedMigrations m ()
@@ -210,24 +271,34 @@ data ConstructorDef = ConstructorDef {
     constrNum     :: Int
   -- | Constructor name
   , constrName    :: String
+  -- | Autokey name if any
+  , constrAutoKeyName :: Maybe String
   -- | Parameter names with their named type
   , constrParams  :: [(String, DbType)]
   -- | Uniqueness constraints on the constructor fiels
-  , constrConstrs :: [Constraint]
+  , constrUniques :: [UniqueDef]
 } deriving (Show, Eq)
 
 -- | Phantom constructors are made instances of this class. This class should be used only by Template Haskell codegen
-class Constructor a where
+class Constructor c where
   -- returning ConstructorDef seems more logical, but it would require the value datatype
   -- it can be supplied either as a part of constructor type, eg instance Constructor (MyDataConstructor (MyData a)) which requires -XFlexibleInstances
   -- or as a separate type, eg instance Constructor MyDataConstructor (MyData a) which requires -XMultiParamTypeClasses
   -- the phantoms are primarily used to get the constructor name. So to keep user code cleaner we return only the name and number, which can be later used to get ConstructorDef from the EntityDef
-  phantomConstrName :: a -> String
-  phantomConstrNum :: a -> Int
+  phantomConstrName :: c (a :: * -> *) -> String
+  phantomConstrNum :: c (a :: * -> *) -> Int
 
--- | Constraint name and list of the field names that form a unique combination.
--- Only fields of 'PrimitivePersistField' types can be used in a constraint
-data Constraint = Constraint String [String] deriving (Show, Eq)
+class (Constructor (UniqueConstr uKey), PurePersistField uKey) => IsUniqueKey uKey where
+  type UniqueConstr uKey :: (* -> *) -> *
+  extractUnique :: uKey ~ Key v u => v -> uKey
+  uniqueNum :: uKey -> Int
+
+-- | Unique name and list of the field names that form a unique combination.
+-- Only fields of 'PrimitivePersistField' types can be used in a unique definition
+data UniqueDef = UniqueDef {
+    uniqueName :: String
+  , uniqueFields :: [(String, DbType)]
+}  deriving (Show, Eq)
 
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
 -- datatypes, eg DbString instead of DbVarchar. Different databases may
@@ -244,10 +315,14 @@ data DbType = DbString
 -- More complex types
             | DbMaybe DbType
             | DbList String DbType -- list name and type of its argument
-            -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True). False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
-            | DbEmbedded Bool [(String, DbType)]
-            | DbEntity EntityDef
+            | DbEmbedded EmbeddedDef
+            -- Nothing means autokey, Just contains a unique key definition and a name of unique constraint.
+            | DbEntity (Maybe (EmbeddedDef, String)) EntityDef
   deriving (Eq, Show)
+
+-- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True).
+-- Value False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
+data EmbeddedDef = EmbeddedDef Bool [(String, DbType)] deriving (Eq, Show)
 
 -- | A raw value which can be stored in any backend and can be marshalled to
 -- and from a 'PersistField'.
@@ -268,10 +343,10 @@ data Arith v c a =
   | Minus (Arith v c a) (Arith v c a)
   | Mult  (Arith v c a) (Arith v c a)
   | Abs   (Arith v c a)
-  | forall f . FieldLike f => ArithField (f v c a)
+  | forall f . (FieldLike f (RestrictionHolder v c) a) => ArithField f
   | Lit   Int64
 
-instance PersistEntity v => Eq (Arith v c a) where
+instance (PersistEntity v, Constructor c) => Eq (Arith v c a) where
   (Plus a1 b1)   == (Plus a2 b2)   = a1 == a2 && b1 == b2
   (Minus a1 b1)  == (Minus a2 b2)  = a1 == a2 && b1 == b2
   (Mult a1 b1)   == (Mult a2 b2)   = a1 == a2 && b1 == b2
@@ -280,7 +355,7 @@ instance PersistEntity v => Eq (Arith v c a) where
   (Lit a)        == (Lit b)        = a == b
   _              == _              = False
 
-instance PersistEntity v => Show (Arith v c a) where
+instance (PersistEntity v, Constructor c) => Show (Arith v c a) where
   show (Plus a b)     = "Plus (" ++ show a ++ ") (" ++ show b ++ ")"
   show (Minus a b)    = "Minus (" ++ show a ++ ") (" ++ show b ++ ")"
   show (Mult a b)     = "Mult (" ++ show a ++ ") (" ++ show b ++ ")"
@@ -288,7 +363,7 @@ instance PersistEntity v => Show (Arith v c a) where
   show (ArithField a) = "ArithField " ++ show (fieldChain a)
   show (Lit a)        = "Lit " ++ show a
 
-instance (PersistEntity v, Numeric a) => Num (Arith v c a) where
+instance (PersistEntity v, Constructor c, Numeric a) => Num (Arith v c a) where
   a + b       = Plus  a b
   a - b       = Minus a b
   a * b       = Mult  a b
@@ -297,10 +372,10 @@ instance (PersistEntity v, Numeric a) => Num (Arith v c a) where
   fromInteger = Lit . fromInteger
   
 -- | Convert field to an arithmetic value
-toArith :: (FieldLike f, PersistEntity v) => f v c a -> Arith v c a
+toArith :: (PersistEntity v, FieldLike f (RestrictionHolder v c) a') => f -> Arith v c a'
 toArith = ArithField
 
--- | Constraint for use in arithmetic expressions. 'Num' is not used to explicitly include only types supported by the library .
+-- | Constraint for use in arithmetic expressions. 'Num' is not used to explicitly include only types supported by the library.
 -- TODO: consider replacement with 'Num'
 class Numeric a
 
@@ -310,17 +385,17 @@ class Numeric a
 -- Maybe this class can be removed when support for inner Maybe's appears.
 class NeverNull a
 
--- | Datatypes which can be converted directly to 'PersistValue'
+-- | Datatypes which can be converted directly to 'PersistValue'. The no-value parameter @DbDescriptor db => Proxy db@ allows conversion depend the database details while keeping it pure.
 class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a where
-  toPrim :: a -> PersistValue
-  fromPrim :: PersistValue -> a
+  toPrim :: DbDescriptor db => Proxy db -> a -> PersistValue
+  fromPrim :: DbDescriptor db => Proxy db -> PersistValue -> a
 
 -- | Used to uniformly represent fields, literals and arithmetic expressions.
 -- A value should be converted to 'Expr' for usage in expressions
 data Expr v c a where
-  ExprField :: (FieldLike f, PersistEntity v) => f v c a -> Expr v c (f v c a)
+  ExprField :: (PersistEntity v, FieldLike f (RestrictionHolder v c) a') => f -> Expr v c f
   ExprArith :: PersistEntity v => Arith v c a -> Expr v c (Arith v c a)
-  ExprPure :: forall a v c . PurePersistField a => a -> Expr v c a
+  ExprPure :: forall v c a . PurePersistField a => a -> Expr v c a
 
 -- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where
@@ -341,5 +416,5 @@ class PersistField a => SinglePersistField a where
 
 -- | Represents all datatypes that map into several columns. Getting values for those columns is pure.
 class PersistField a => PurePersistField a where
-  toPurePersistValues :: a -> ([PersistValue] -> [PersistValue])
-  fromPurePersistValues :: [PersistValue] -> (a, [PersistValue])
+  toPurePersistValues :: DbDescriptor db => Proxy db -> a -> ([PersistValue] -> [PersistValue])
+  fromPurePersistValues :: DbDescriptor db => Proxy db -> [PersistValue] -> (a, [PersistValue])

@@ -22,17 +22,19 @@ instance StringLike StringS where
 
 {-# SPECIALIZE (<>) :: RenderS StringS -> RenderS StringS -> RenderS StringS #-}
 
-{-# SPECIALIZE renderArith :: PersistEntity v => (StringS -> StringS) -> Arith v c a -> RenderS StringS #-}
+{-# SPECIALIZE renderArith :: (PersistEntity v, Constructor c, DbDescriptor db) => Proxy db -> (StringS -> StringS) -> Arith v c a -> RenderS StringS #-}
 
-{-# SPECIALIZE renderCond :: PersistEntity v
-  => (StringS -> StringS)
-  -> String -- name of id in constructor table
+{-# SPECIALIZE renderCond :: (PersistEntity v, Constructor c, DbDescriptor db)
+  => Proxy db
+  -> (StringS -> StringS)
   -> (StringS -> StringS -> StringS)
   -> (StringS -> StringS -> StringS)
   -> Cond v c -> Maybe (RenderS StringS) #-}
 
-{-# SPECIALIZE renderOrders :: PersistEntity v => (StringS -> StringS) -> [Order v c] -> StringS #-}
+{-# SPECIALIZE renderOrders :: (PersistEntity v, Constructor c) => (StringS -> StringS) -> [Order v c] -> StringS #-}
 
-{-# SPECIALIZE renderUpdates :: PersistEntity v => (StringS -> StringS) -> [Update v c] -> Maybe (RenderS StringS) #-}
+{-# SPECIALIZE renderUpdates :: (PersistEntity v, Constructor c, DbDescriptor db) => Proxy db -> (StringS -> StringS) -> [Update v c] -> Maybe (RenderS StringS) #-}
 
 {-# SPECIALIZE renderFields :: (StringS -> StringS) -> [(String, DbType)] -> StringS #-}
+
+{-# SPECIALIZE renderChain :: (StringS -> StringS) -> FieldChain -> [StringS] -> [StringS] #-}

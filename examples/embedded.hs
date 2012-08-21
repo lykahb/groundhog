@@ -26,23 +26,24 @@ definitions:
               - {name: city, dbName: sales_city}
               - {name: zip_code, dbName: sales_zipcode}
               - {name: street, dbName: sales_street}
-  - embedded: Address                        
+  - embedded: Address
+    dbName: Address                     # This name is used only to set polymorphic part of name of its container. E.g, persistName (a :: SomeData Address) = "SomeData$Address"
     fields:                             # The syntax is the same as for constructor fields. Nested embedded types are allowed.
       - name: city                      # This line does nothing and can be omitted. Default settings for city are not changed.
       - name: zipCode
         dbName: zip_code                # Change column name.
+        exprName: ZipCodeSelector       # Set the default name explicitly
                                         # Street is not mentioned so it will have default settings.
  |]
 
-main = do
-  withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runSqliteConn $ do
   let commonAddress = Address "Sunnyvale" "18144" "El Camino Real"
   let company = Company "Cyberdyne Systems" commonAddress commonAddress commonAddress
   runMigration defaultMigrationLogger $ migrate company
   insert company
   -- compare embedded data fields as a whole and compare their subfields individually
   select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) [] 0 0 >>= liftIO . print
-  -- After the Cyberdyne headquarter was destroyed by John Connor and T-800, the Skynet development was continued by Cyber Research Systems affiliated with Pentagon
+  -- after the Cyberdyne headquarter was destroyed by John Connor and T-800, the Skynet development was continued by Cyber Research Systems affiliated with Pentagon
   let newAddress = Address "Washington" "20301" "1400 Defense Pentagon"
   -- compare fields with an embedded value as a whole and update embedded field with a value
   update [NameField =. "Cyber Research Systems", HeadquarterField =. newAddress] (NameField ==. "Cyberdyne Systems" &&. HeadquarterField ==. commonAddress)

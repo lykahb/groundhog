@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances #-}
 import Control.Monad.IO.Class(liftIO)
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite

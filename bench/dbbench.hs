@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances #-}
 
 import Control.Monad
 import Database.Groundhog.TH
@@ -21,5 +21,6 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   runMigration silentMigrationLogger $ migrate (undefined :: Person)
   let person = Person "abc" 22 180
   k <- insert $ person
-  replicateM_ 1000000 $ get k
+--  replicateM_ 1000000 $ get k --4.3
+  replicateM_ 1000000 $ select ((AutoKeyField `asTypeOf` (undefined :: f Person PersonConstructor)) ==. k) [] 0 0 --9.6
 --  replicateM_ 100000 $ insert person

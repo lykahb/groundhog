@@ -29,17 +29,19 @@ instance StringLike Utf8 where
 
 {-# SPECIALIZE (<>) :: RenderS Utf8 -> RenderS Utf8 -> RenderS Utf8 #-}
 
-{-# SPECIALIZE renderArith :: PersistEntity v => (Utf8 -> Utf8) -> Arith v c a -> RenderS Utf8 #-}
+{-# SPECIALIZE renderArith :: (PersistEntity v, Constructor c, DbDescriptor db) => Proxy db -> (Utf8 -> Utf8) -> Arith v c a -> RenderS Utf8 #-}
 
-{-# SPECIALIZE renderCond :: PersistEntity v
-  => (Utf8 -> Utf8)
-  -> String -- name of id in constructor table
+{-# SPECIALIZE renderCond :: (PersistEntity v, Constructor c, DbDescriptor db)
+  => Proxy db
+  -> (Utf8 -> Utf8)
   -> (Utf8 -> Utf8 -> Utf8)
   -> (Utf8 -> Utf8 -> Utf8)
   -> Cond v c -> Maybe (RenderS Utf8) #-}
 
-{-# SPECIALIZE renderOrders :: PersistEntity v => (Utf8 -> Utf8) -> [Order v c] -> Utf8 #-}
+{-# SPECIALIZE renderOrders :: (PersistEntity v, Constructor c) => (Utf8 -> Utf8) -> [Order v c] -> Utf8 #-}
 
-{-# SPECIALIZE renderUpdates :: PersistEntity v => (Utf8 -> Utf8) -> [Update v c] -> Maybe (RenderS Utf8) #-}
+{-# SPECIALIZE renderUpdates :: (PersistEntity v, Constructor c, DbDescriptor db) => Proxy db -> (Utf8 -> Utf8) -> [Update v c] -> Maybe (RenderS Utf8) #-}
 
 {-# SPECIALIZE renderFields :: (Utf8 -> Utf8) -> [(String, DbType)] -> Utf8 #-}
+
+{-# SPECIALIZE renderChain :: (Utf8 -> Utf8) -> FieldChain -> [Utf8] -> [Utf8] #-}

@@ -7,12 +7,16 @@ module Database.Groundhog.TH.Settings
   , THEmbeddedDef(..)
   , THConstructorDef(..)
   , THFieldDef(..)
+  , THUniqueKeyDef(..)
+  , THAutoKeyDef(..)
   , PSEntityDef(..)
   , PSEmbeddedDef(..)
   , PSConstructorDef(..)
   , PSFieldDef(..)
   , PSEmbeddedFieldDef(..)
-  , PSConstraintDef(..)
+  , PSUniqueDef(..)
+  , PSUniqueKeyDef(..)
+  , PSAutoKeyDef(..)
   ) where
 
 import Database.Groundhog.Generic (PSEmbeddedFieldDef(..))
@@ -29,8 +33,15 @@ data PersistSettings = PersistSettings {definitions :: [Either PSEntityDef PSEmb
 data THEntityDef = THEntityDef {
     dataName :: Name -- SomeData
   , dbEntityName :: String  -- SQLSomeData
+  , thAutoKey :: Maybe THAutoKeyDef
+  , thUniqueKeys :: [THUniqueKeyDef]
   , thTypeParams :: [TyVarBndr]
   , thConstructors :: [THConstructorDef]
+} deriving Show
+
+data THAutoKeyDef = THAutoKeyDef {
+    thAutoKeyConstrName :: String
+  , thAutoKeyIsDef :: Bool
 } deriving Show
 
 data THEmbeddedDef = THEmbeddedDef {
@@ -45,8 +56,9 @@ data THConstructorDef = THConstructorDef {
     thConstrName    :: Name -- U2
   , thPhantomConstrName :: String -- U2Constructor
   , dbConstrName    :: String -- SQLU2
+  , thDbAutoKeyName :: Maybe String -- u2_id
   , thConstrFields  :: [THFieldDef]
-  , thConstrConstrs :: [PSConstraintDef]
+  , thConstrUniques :: [PSUniqueDef]
 } deriving Show
 
 data THFieldDef = THFieldDef {
@@ -57,9 +69,21 @@ data THFieldDef = THFieldDef {
   , embeddedDef :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
+data THUniqueKeyDef = THUniqueKeyDef {
+    thUniqueKeyName :: String
+  , thUniqueKeyPhantomName :: String
+  , thUniqueKeyConstrName :: String
+  , thUniqueKeyDbName :: String -- used only to set polymorphic part of name of its container
+  , thUniqueKeyFields :: [THFieldDef]
+  , thUniqueKeyMakeEmbedded :: Bool -- whether to make it an instance of Embedded
+  , thUniqueKeyIsDef :: Bool
+} deriving Show
+
 data PSEntityDef = PSEntityDef {
     psDataName :: String -- SomeData
   , psDbEntityName :: Maybe String  -- SQLSomeData
+  , psAutoKey :: Maybe (Maybe PSAutoKeyDef) -- SomeDataKey. Nothing - default key. Just Nothing - no autokey. Just (Just _) - specify autokey settings
+  , psUniqueKeys :: Maybe [PSUniqueKeyDef]
   , psConstructors :: Maybe [PSConstructorDef]
 } deriving Show
 
@@ -70,11 +94,12 @@ data PSEmbeddedDef = PSEmbeddedDef {
 } deriving Show
 
 data PSConstructorDef = PSConstructorDef {
-    psConstrName    :: String -- U2
+    psConstrName :: String -- U2
   , psPhantomConstrName :: Maybe String -- U2Constructor
-  , psDbConstrName    :: Maybe String -- SQLU2
+  , psDbConstrName :: Maybe String -- SQLU2
+  , psDbAutoKeyName :: Maybe (Maybe String) -- u2_id
   , psConstrFields  :: Maybe [PSFieldDef]
-  , psConstrConstrs :: Maybe [PSConstraintDef]
+  , psConstrUniques :: Maybe [PSUniqueDef]
 } deriving Show
 
 data PSFieldDef = PSFieldDef {
@@ -84,31 +109,52 @@ data PSFieldDef = PSFieldDef {
   , psEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
-data PSConstraintDef = PSConstraintDef {
-    psConstraintName :: String
-  , psConstraintFields :: [String]
+data PSUniqueDef = PSUniqueDef {
+    psUniqueName :: String
+  , psUniqueFields :: [String]
+} deriving Show
+
+data PSUniqueKeyDef = PSUniqueKeyDef {
+    psUniqueKeyName :: String
+  , psUniqueKeyPhantomName :: Maybe String
+  , psUniqueKeyConstrName :: Maybe String
+  , psUniqueKeyDbName :: Maybe String
+  , psUniqueKeyFields :: Maybe [PSFieldDef]
+  , psUniqueKeyMakeEmbedded :: Maybe Bool
+  , psUniqueKeyIsDef :: Maybe Bool
+} deriving Show
+
+data PSAutoKeyDef = PSAutoKeyDef {
+    psAutoKeyConstrName :: Maybe String
+  , psAutoKeyIsDef :: Maybe Bool
 } deriving Show
 
 instance Lift PersistSettings where
   lift (PersistSettings {..}) = [| PersistSettings $(lift definitions) |]
 
 instance Lift PSEntityDef where
-  lift (PSEntityDef {..}) = [| PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psConstructors) |]
+  lift (PSEntityDef {..}) = [| PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors) |]
 
 instance Lift PSEmbeddedDef where
   lift (PSEmbeddedDef {..}) = [| PSEmbeddedDef $(lift psEmbeddedName) $(lift psDbEmbeddedName) $(lift psEmbeddedFields) |]
 
 instance Lift PSConstructorDef where
-  lift (PSConstructorDef {..}) = [| PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psConstrFields) $(lift psConstrConstrs) |]
+  lift (PSConstructorDef {..}) = [| PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psDbAutoKeyName) $(lift psConstrFields) $(lift psConstrUniques) |]
 
-instance Lift PSConstraintDef where
-  lift (PSConstraintDef name fields) = [| PSConstraintDef $(lift name) $(lift fields) |]
+instance Lift PSUniqueDef where
+  lift (PSUniqueDef name fields) = [| PSUniqueDef $(lift name) $(lift fields) |]
 
 instance Lift PSFieldDef where
   lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psExprName) $(lift psEmbeddedDef) |]
 
 instance Lift PSEmbeddedFieldDef where
   lift (PSEmbeddedFieldDef {..}) = [| PSEmbeddedFieldDef $(lift psEmbeddedFieldName) $(lift psDbEmbeddedFieldName) $(lift psSubEmbedded) |]
+
+instance Lift PSUniqueKeyDef where
+  lift (PSUniqueKeyDef {..}) = [| PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef) |]
+
+instance Lift PSAutoKeyDef where
+  lift (PSAutoKeyDef {..}) = [| PSAutoKeyDef $(lift psAutoKeyConstrName) $(lift psAutoKeyIsDef) |]
 
 instance FromJSON PersistSettings where
   {- it allows omitting parts of the settings file. All these forms are possible:
@@ -130,22 +176,30 @@ instance FromJSON PersistSettings where
     _ -> mzero
 
 instance FromJSON (Either PSEntityDef PSEmbeddedDef) where
-  parseJSON (Object v) = do
+  parseJSON obj@(Object v) = do
     entity   <- v .:? "entity"
     embedded <- v .:? "embedded"
     case (entity, embedded) of
-      (Just _, Nothing) -> fmap Left $ PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> v .:? "constructors"
-      (Nothing, Just _) -> fmap Right $ PSEmbeddedDef <$> v .: "embedded" <*> v .:? "dbName" <*> v .:? "fields"
+      (Just _, Nothing) -> fmap Left $ parseJSON obj
+      (Nothing, Just _) -> fmap Right $ parseJSON obj
       (Just entName, Just embName) -> fail $ "Record has both entity name " ++ entName ++ " and embedded name " ++ embName
       (Nothing, Nothing) -> fail "Record must have either entity name or embedded name"
   parseJSON _          = mzero
 
-instance FromJSON PSConstructorDef where
-  parseJSON (Object v) = PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "fields" <*> v .:? "constraints"
+instance FromJSON PSEntityDef where
+  parseJSON (Object v) = PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> optional (v .: "autoKey") <*> v .:? "keys" <*> v .:? "constructors"
   parseJSON _          = mzero
 
-instance FromJSON PSConstraintDef where
-  parseJSON (Object v) = PSConstraintDef <$> v .: "name" <*> v .: "fields"
+instance FromJSON PSEmbeddedDef where
+  parseJSON (Object v) = PSEmbeddedDef <$> v .: "embedded" <*> v .:? "dbName" <*> v .:? "fields"
+  parseJSON _          = mzero
+
+instance FromJSON PSConstructorDef where
+  parseJSON (Object v) = PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "keyDbName" <*> v .:? "fields" <*> v .:? "uniques"
+  parseJSON _          = mzero
+
+instance FromJSON PSUniqueDef where
+  parseJSON (Object v) = PSUniqueDef <$> v .: "name" <*> v .: "fields"
   parseJSON _          = mzero
 
 instance FromJSON PSFieldDef where
@@ -154,4 +208,12 @@ instance FromJSON PSFieldDef where
 
 instance FromJSON PSEmbeddedFieldDef where
   parseJSON (Object v) = PSEmbeddedFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "embeddedType"
+  parseJSON _          = mzero
+
+instance FromJSON PSUniqueKeyDef where
+  parseJSON (Object v) = PSUniqueKeyDef <$> v .: "name" <*> v .:? "keyPhantom" <*> v .:? "constrName" <*> v .:? "dbName" <*> v .:? "fields" <*> v .:? "mkEmbedded" <*> v .:? "default"
+  parseJSON _          = mzero
+
+instance FromJSON PSAutoKeyDef where
+  parseJSON (Object v) = PSAutoKeyDef <$> v .:? "constrName" <*> v .:? "default"
   parseJSON _          = mzero

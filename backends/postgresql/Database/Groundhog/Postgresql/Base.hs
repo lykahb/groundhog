@@ -1,27 +1,28 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, TypeFamilies #-}
 
 module Database.Groundhog.Postgresql.Base
     ( Postgresql (..)
     , escape
     , isSimple
-    , constrId
     , mapAllRows
     , getStatement
     , queryRaw'
     , pToSql
     , pFromSql
+    , proxy
     ) where
 
 import Database.Groundhog.Core
-import Database.Groundhog.Generic.Sql
+import Database.Groundhog.Instances ()
 
 import qualified Database.HDBC as H
 import qualified Database.HDBC.PostgreSQL as H
 
-import Control.Monad(liftM, (>=>))
+import Control.Monad (liftM, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Control(MonadBaseControl)
-import Control.Monad.Trans.Reader(ask)
+import Control.Monad.Trans.Control (MonadBaseControl)
+import Control.Monad.Trans.Reader (ask)
+import Data.Int (Int64)
 import Data.IORef
 import qualified Data.Map as Map
 
@@ -30,6 +31,9 @@ import Data.Time.LocalTime (localTimeToUTC, utc)
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 data Postgresql = Postgresql H.Connection (IORef (Map.Map String H.Statement))
 
+instance DbDescriptor Postgresql where
+  type AutoKeyType Postgresql = Int64
+
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String
 escape s = '\"' : s ++ "\""
@@ -37,9 +41,6 @@ escape s = '\"' : s ++ "\""
 isSimple :: [a] -> Bool
 isSimple [_] = True
 isSimple _   = False
-
-constrId :: String
-constrId = defId
 
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where
@@ -52,6 +53,7 @@ getStatement sql = do
   
 queryRaw' :: (MonadBaseControl IO m, MonadIO m) => String -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRaw' query vals f = do
+--  liftIO $ print $ query ++ show vals
   stmt <- getStatement query
   liftIO $ H.execute stmt (map pToSql vals)
   f $ liftIO $ do
@@ -87,3 +89,6 @@ pFromSql (H.SqlUTCTime d) = PersistUTCTime d
 pFromSql H.SqlNull = PersistNull
 pFromSql (H.SqlLocalTime d) = PersistUTCTime $ localTimeToUTC utc d
 pFromSql x = PersistString $ H.fromSql x -- FIXME
+
+proxy :: Proxy Postgresql
+proxy = error "Proxy Sqlite"
