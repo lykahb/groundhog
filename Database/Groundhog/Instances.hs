@@ -136,7 +136,7 @@ instance PrimitivePersistField String where
   fromPrim _ (PersistTimeOfDay d) = show d
   fromPrim _ (PersistUTCTime d) = show d
   fromPrim _ (PersistBool b) = show b
-  fromPrim _ PersistNull = error "Unexpected null"
+  fromPrim _ PersistNull = error "Unexpected NULL"
 
 instance PrimitivePersistField T.Text where
   toPrim _ a = PersistString (T.unpack a)
@@ -245,11 +245,11 @@ readHelper :: Read a => PersistValue -> String -> a
 readHelper s errMessage = case s of
   PersistString str -> readHelper' str
   PersistByteString str -> readHelper' (unpack str)
-  _ -> error errMessage
+  _ -> error $ "readHelper: " ++ errMessage
   where
     readHelper' str = case reads str of
       (a, _):_ -> a
-      _        -> error errMessage
+      _        -> error $ "readHelper: " ++ errMessage
 
 instance PersistField ByteString where
   persistName _ = "ByteString"
@@ -353,13 +353,16 @@ instance PersistField UTCTime where
   fromPersistValues = primFromPersistValue
   dbType _ = DbDayTime
 
-instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where
+-- There is a weird bug in GHC 7.4.1 which causes program to hang. See ticket 7126.
+-- instance (PersistField a, NeverNull a) => PersistField (Maybe a) where -- OK
+-- instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where -- HANGS
+instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
   persistName a = "Maybe$" ++ persistName ((undefined :: Maybe a -> a) a)
   toPersistValues Nothing = return (PersistNull:)
-  toPersistValues (Just a) = toSinglePersistValue a >>= \x -> return (x:)
+  toPersistValues (Just a) = toPersistValues a
   fromPersistValues [] = fail "fromPersistValues Maybe: empty list"
   fromPersistValues (PersistNull:xs) = return (Nothing, xs)
-  fromPersistValues (x:xs) = fromSinglePersistValue x >>= \x' -> return (Just x', xs)
+  fromPersistValues xs = fromPersistValues xs >>= \(x, xs') -> return (Just x, xs')
   dbType a = DbMaybe $ dbType ((undefined :: Maybe a -> a) a)
 
 instance (PersistField a) => PersistField [a] where
