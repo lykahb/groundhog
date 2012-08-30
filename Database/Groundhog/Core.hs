@@ -20,6 +20,7 @@ module Database.Groundhog.Core
   , UniqueMarker
   , Proxy
   , phantomDb
+  , ZT (..) -- ZonedTime wrapper
   -- * Constructing expressions
   , Cond(..)
   , ExprRelation(..)
@@ -67,6 +68,7 @@ import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
 import Data.Time (Day, TimeOfDay, UTCTime)
+import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, zonedTimeToLocalTime, zonedTimeZone)
 
 -- | Only instances of this class can be persisted in a database
 class (PersistField v, PurePersistField (AutoKey v)) => PersistEntity v where
@@ -311,6 +313,7 @@ data DbType = DbString
             | DbDay
             | DbTime
             | DbDayTime
+            | DbDayTimeZoned
             | DbBlob    -- ByteString
 -- More complex types
             | DbMaybe DbType
@@ -334,8 +337,17 @@ data PersistValue = PersistString String
                   | PersistDay Day
                   | PersistTimeOfDay TimeOfDay
                   | PersistUTCTime UTCTime
+                  | PersistZonedTime ZT
                   | PersistNull
-  deriving (Show, Eq)
+  deriving (Eq, Show)
+
+-- | Avoid orphan instances.
+newtype ZT = ZT ZonedTime deriving (Show, Read)
+
+instance Eq ZT where
+    ZT a == ZT b = zonedTimeToLocalTime a == zonedTimeToLocalTime b && zonedTimeZone a == zonedTimeZone b
+instance Ord ZT where
+    ZT a `compare` ZT b = zonedTimeToUTC a `compare` zonedTimeToUTC b
 
 -- | Arithmetic expressions which can include fields and literals
 data Arith v c a =

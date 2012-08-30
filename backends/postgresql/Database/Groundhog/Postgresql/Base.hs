@@ -69,6 +69,7 @@ pToSql (PersistBool b) = H.SqlBool b
 pToSql (PersistDay d) = H.SqlLocalDate d
 pToSql (PersistTimeOfDay t) = H.SqlLocalTimeOfDay t
 pToSql (PersistUTCTime t) = H.SqlUTCTime t
+pToSql (PersistZonedTime (ZT t)) = H.SqlZonedTime t
 pToSql PersistNull = H.SqlNull
 
 pFromSql :: H.SqlValue -> PersistValue
@@ -86,9 +87,10 @@ pFromSql (H.SqlRational b) = PersistDouble $ fromRational b
 pFromSql (H.SqlLocalDate d) = PersistDay d
 pFromSql (H.SqlLocalTimeOfDay d) = PersistTimeOfDay d
 pFromSql (H.SqlUTCTime d) = PersistUTCTime d
+pFromSql (H.SqlZonedTime d) = PersistZonedTime (ZT d)
 pFromSql H.SqlNull = PersistNull
 pFromSql (H.SqlLocalTime d) = PersistUTCTime $ localTimeToUTC utc d
 pFromSql x = PersistString $ H.fromSql x -- FIXME
 
 proxy :: Proxy Postgresql
-proxy = error "Proxy Sqlite"
+proxy = error "Proxy Postgresql"

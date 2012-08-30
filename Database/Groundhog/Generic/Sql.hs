@@ -198,6 +198,7 @@ defaultShowPrim (PersistBool x) = if x then "1" else "0"
 defaultShowPrim (PersistDay x) = show x
 defaultShowPrim (PersistTimeOfDay x) = show x
 defaultShowPrim (PersistUTCTime x) = show x
+defaultShowPrim (PersistZonedTime x) = show x
 defaultShowPrim (PersistNull) = "NULL"
 
 {-# INLINABLE renderOrders #-}

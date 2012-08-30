@@ -14,6 +14,7 @@ import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
 import Data.Int
 import qualified Data.Map as Map
+import qualified Data.Time as Time
 import Data.Word
 import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit
@@ -131,6 +132,7 @@ mkTestSuite label run = testGroup label
   , testCase "testProjection" $ run testProjection
   , testCase "testKeyNormalization" $ run testKeyNormalization
   , testCase "testAutoKeyField" $ run testAutoKeyField
+  , testCase "testTime" $ run testTime
   ]
 
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
@@ -572,6 +574,22 @@ testKeys = do
   let cond = RefDirectField ==. k ||. RefKeyField ==. k ||. RefDirectMaybeField ==. Just k ||. RefKeyMaybeField ==. Just k
   select cond [] 0 0
   return ()
+
+instance Eq Time.ZonedTime where
+  a == b = show a == show b
+
+testTime :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testTime = do
+  utcTime <- liftIO Time.getCurrentTime
+  let dayTime = Time.timeToTimeOfDay $ Time.utctDayTime utcTime
+  let day = Time.utctDay utcTime
+  zonedTime <- liftIO Time.getZonedTime
+  liftIO $ print zonedTime
+  let val = Single (utcTime, dayTime, day, zonedTime)
+  migr val
+  k <- insert val
+  val' <- get k
+  Just val @=? val'
  
 -- TODO: write test which inserts data before adding new columns
 

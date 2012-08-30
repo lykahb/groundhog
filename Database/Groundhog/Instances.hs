@@ -14,6 +14,7 @@ import Data.Bits (bitSize)
 import Data.ByteString.Char8 (ByteString, unpack)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)
+import Data.Time.LocalTime (ZonedTime)
 import Data.Word (Word8, Word16, Word32, Word64)
 
 instance (PersistField a', PersistField b') => Embedded (a', b') where
@@ -135,6 +136,7 @@ instance PrimitivePersistField String where
   fromPrim _ (PersistDay d) = show d
   fromPrim _ (PersistTimeOfDay d) = show d
   fromPrim _ (PersistUTCTime d) = show d
+  fromPrim _ (PersistZonedTime z) = show z
   fromPrim _ (PersistBool b) = show b
   fromPrim _ PersistNull = error "Unexpected NULL"
 
@@ -218,6 +220,11 @@ instance PrimitivePersistField UTCTime where
   toPrim _ a = PersistUTCTime a
   fromPrim _ (PersistUTCTime a) = a
   fromPrim _ x = readHelper x ("Expected UTCTime, received: " ++ show x)
+
+instance PrimitivePersistField ZonedTime where
+  toPrim _ a = PersistZonedTime (ZT a)
+  fromPrim _ (PersistZonedTime (ZT a)) = a
+  fromPrim _ x = readHelper x ("Expected ZonedTime, received: " ++ show x)
 
 instance (PrimitivePersistField a, NeverNull a) => PrimitivePersistField (Maybe a) where
   toPrim p a = maybe PersistNull (toPrim p) a
@@ -352,6 +359,12 @@ instance PersistField UTCTime where
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
   dbType _ = DbDayTime
+
+instance PersistField ZonedTime where
+  persistName _ = "ZonedTime"
+  toPersistValues = primToPersistValue
+  fromPersistValues = primFromPersistValue
+  dbType _ = DbDayTimeZoned
 
 -- There is a weird bug in GHC 7.4.1 which causes program to hang. See ticket 7126.
 -- instance (PersistField a, NeverNull a) => PersistField (Maybe a) where -- OK

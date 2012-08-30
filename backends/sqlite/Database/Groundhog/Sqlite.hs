@@ -387,6 +387,7 @@ showSqlType DbBool = "BOOLEAN"
 showSqlType DbDay = "DATE"
 showSqlType DbTime = "TIME"
 showSqlType DbDayTime = "TIMESTAMP"
+showSqlType DbDayTimeZoned = "TIMESTAMP"
 showSqlType DbBlob = "BLOB"
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = "INTEGER"
@@ -404,6 +405,7 @@ dbTypeAffinity DbBool = NUMERIC
 dbTypeAffinity DbDay = NUMERIC
 dbTypeAffinity DbTime = NUMERIC
 dbTypeAffinity DbDayTime = NUMERIC
+dbTypeAffinity DbDayTimeZoned = NUMERIC
 dbTypeAffinity DbBlob = NONE
 dbTypeAffinity (DbMaybe t) = dbTypeAffinity t
 dbTypeAffinity (DbList _ _) = INTEGER
@@ -799,6 +801,7 @@ bind stmt = go 1 where
       PersistDay d           -> S.bindText stmt i $ show d
       PersistTimeOfDay d     -> S.bindText stmt i $ show d
       PersistUTCTime d       -> S.bindText stmt i $ show d
+      PersistZonedTime (ZT d)-> S.bindText stmt i $ show d
     go (i + 1) xs
 
 executeRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
@@ -861,6 +864,7 @@ typeToSqlite DbBool = Just S.IntegerColumn
 typeToSqlite DbDay = Nothing
 typeToSqlite DbTime = Nothing
 typeToSqlite DbDayTime = Nothing
+typeToSqlite DbDayTimeZoned = Nothing
 typeToSqlite DbBlob = Just S.BlobColumn
 typeToSqlite (DbMaybe _) = Nothing
 typeToSqlite (DbList _ _) = Just S.IntegerColumn

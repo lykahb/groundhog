@@ -6,14 +6,14 @@ import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Postgresql.Base
 
-import Control.Arrow ((&&&), (***), first, second)
+import Control.Arrow ((&&&), (***), second)
 import Control.Monad (liftM)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int32)
-import Data.List (intercalate, group, groupBy, sort, partition, deleteFirstsBy)
+import Data.List (intercalate, group, groupBy, sort)
 import Data.Maybe (catMaybes, fromJust, fromMaybe, maybeToList)
 
 {- ********************RULES******************** --
@@ -72,7 +72,7 @@ migrate' = migrateRecursively migE migL where
             return $ if null orphans
               then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
               else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
-          Just (Right (Just mainTableId, columns, [], [])) -> do
+          Just (Right (Just _, columns, [], [])) -> do
             if haveSameElems compareColumns columns mainTableColumns
               then do
                 -- the datatype had also many constructors before
@@ -150,7 +150,7 @@ migConstr simple name constr = do
       expectedTableStructure = (constrAutoKeyName constr, columns, uniques, map (\r -> (Nothing, r)) refs')
       (migErrs, constrExisted, mig) = case tableStructure of
         Nothing  -> let
-          rest = AlterTable cName addTable expectedTableStructure expectedTableStructure $ map (\(UniqueDef name fields) -> AddUniqueConstraint name (map fst fields)) uniques ++ map AddReference refs
+          rest = AlterTable cName addTable expectedTableStructure expectedTableStructure $ map (\(UniqueDef uName fields) -> AddUniqueConstraint uName (map fst fields)) uniques ++ map AddReference refs
           in ([], False, [AddTable addTable, rest])
         Just (Right oldTableStructure) -> let
           alters = getAlters oldTableStructure expectedTableStructure
@@ -436,6 +436,7 @@ readSqlType "varchar" = Right $ DbString
 readSqlType "date" = Right $ DbDay
 readSqlType "bool" = Right $ DbBool
 readSqlType "timestamp" = Right $ DbDayTime
+readSqlType "timestampz" = Right $ DbDayTimeZoned
 readSqlType "float4" = Right $ DbReal
 readSqlType "float8" = Right $ DbReal
 readSqlType "bytea" = Right $ DbBlob
@@ -450,6 +451,7 @@ showSqlType DbBool = "BOOLEAN"
 showSqlType DbDay = "DATE"
 showSqlType DbTime = "TIME"
 showSqlType DbDayTime = "TIMESTAMP"
+showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
 showSqlType DbBlob = "BYTEA"
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = "INTEGER"
