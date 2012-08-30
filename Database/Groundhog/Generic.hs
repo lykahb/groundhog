@@ -149,35 +149,18 @@ failMessage :: PersistField a => a -> [PersistValue] -> String
 failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs
 
 -- Describes a database column. Field cType always contains DbType that maps to one column (no DbEmbedded)
-data Column = Column
+data Column typ = Column
     { cName :: String
     , cNull :: Bool
-    , cType :: DbType
+    , cType :: typ
     , cDefault :: Maybe String
     } deriving (Eq, Show)
-{-
-mkColumns :: String -> DbType -> [Column]
-mkColumns columnName dbtype = go "" (columnName, dbtype) [] where
-  go prefix (fname, typ) acc = case typ of
-    DbEmbedded (EmbeddedDef False ts) -> foldr (go $ prefix ++ fname ++ "$") acc ts
-    DbEmbedded (EmbeddedDef True  ts) -> foldr (go "") acc ts
-    DbEntity (Just (emb, _)) _        -> go prefix (fname, DbEmbedded emb) acc
-    _          -> column:acc where
-      column = Column (prefix ++ fname) isNullable simpleType Nothing ref
-      (isNullable, simpleType, ref) = analyze typ
-      analyze x = case x of
-        DbMaybe a      -> let (_, t', ref') = analyze a in (True, t', ref')
-        t@(DbEntity Nothing e) -> (False, t, Just $ entityName e)
-        t@(DbList lName _)   -> (False, t, Just lName)
-        DbEntity (Just _) _ -> error "mkColumns: unexpected DbEntity with unique key"
-        DbEmbedded _ -> error "mkColumns: unexpected DbEmbedded"
-        a              -> (False, a, Nothing)
--}
+
 -- | Foreign table name and names of the corresponding columns
 type Reference = (String, [(String, String)])
 
-mkColumns :: String -> DbType -> ([Column], [Reference])
-mkColumns columnName dbtype = go "" (columnName, dbtype) where
+mkColumns :: (DbType -> typ) -> String -> DbType -> ([Column typ], [Reference])
+mkColumns mkType columnName dbtype = go "" (columnName, dbtype) where
   go prefix (fname, typ) = (case typ of
     DbEmbedded (EmbeddedDef False ts) -> concatMap' (go $ prefix ++ fname ++ "$") ts
     DbEmbedded (EmbeddedDef True  ts) -> concatMap' (go "") ts
@@ -193,14 +176,14 @@ mkColumns columnName dbtype = go "" (columnName, dbtype) where
       UniqueDef _ uFields = findOne "unique" id uniqueName uName $ constrUniques cDef
       fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) uFields
       (foreignColumns, _) = concatMap' (go "") fields
-    t@(DbEntity Nothing e) -> ([Column name False t Nothing], refs) where
+    t@(DbEntity Nothing e) -> ([Column name False (mkType t) Nothing], refs) where
       refs = [(entityName e, [(name, keyName)])]
       keyName = case constructors e of
         [cDef] -> fromMaybe (error "mkColumns: autokey name is Nothing") $ constrAutoKeyName cDef
         _      -> "id"
-    t@(DbList lName _) -> ([Column name False t Nothing], refs) where
+    t@(DbList lName _) -> ([Column name False (mkType t) Nothing], refs) where
       refs = [(lName, [(name, "id")])]
-    t -> ([Column name False t Nothing], [])) where
+    t -> ([Column name False (mkType t) Nothing], [])) where
       name = prefix ++ fname
       concatMap' f xs = concat *** concat $ unzip $ map f xs
       zipWith' _ [] [] = []
@@ -309,14 +292,14 @@ findOne what getter1 getter2 a bs = case filter ((getter1 a ==) . getter2) bs of
 
 -- | Returns only old elements, only new elements, and matched pairs (old, new).
 -- The new ones exist only in datatype, the old are present only in DB, match is typically by name (the properties of the matched elements may differ).
-matchElements :: Show a => (a -> a -> Bool) -> [a] -> [a] -> ([a], [a], [(a, a)])
+matchElements :: Show a => (a -> b -> Bool) -> [a] -> [b] -> ([a], [b], [(a, b)])
 matchElements eq oldElems newElems = foldr f (oldElems, [], []) newElems where
-  f new (olds, news, matches) = case partition (eq new) olds of
+  f new (olds, news, matches) = case partition (`eq` new) olds of
     ([], rest) -> (rest, new:news, matches)
     ([old], rest) -> (rest, news, (old, new):matches)
     (xs, _) -> error $ "matchElements: more than one element matched " ++ show xs
 
-haveSameElems :: Show a => (a -> a -> Bool) -> [a] -> [a] -> Bool
+haveSameElems :: Show a => (a -> b -> Bool) -> [a] -> [b] -> Bool
 haveSameElems p xs ys = case matchElements p xs ys of
   ([], [], _) -> True
   _           -> False

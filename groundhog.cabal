@@ -29,7 +29,7 @@ library
                      Database.Groundhog.Generic.Sql
                      Database.Groundhog.Instances
                      Database.Groundhog.TH
-    other-modules:   Database.Groundhog.TH.Settings
+                     Database.Groundhog.TH.Settings
                      Database.Groundhog.TH.CodeGen
     ghc-options:     -Wall
     ghc-prof-options: -prof -auto-all

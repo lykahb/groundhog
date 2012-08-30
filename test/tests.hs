@@ -104,6 +104,7 @@ mkTestSuite label run = testGroup label
   , testCase "testPersistSettings" $ run testPersistSettings
   , testCase "testEmbedded" $ run testEmbedded
   , testCase "testInsert" $ run testInsert
+  , testCase "testMaybe" $ run testMaybe
   , testCase "testSelect" $ run testSelect
   , testCase "testCond" $ run testCond
   , testCase "testCount" $ run testCount
@@ -119,6 +120,8 @@ mkTestSuite label run = testGroup label
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
+  , testCase "testMigrateAddUnique" $ run testMigrateAddUnique
+  , testCase "testMigrateDropUnique" $ run testMigrateDropUnique
   , testCase "testMigrateAddConstructorToMany" $ run testMigrateAddConstructorToMany
   , testCase "testLongNames" $ run testLongNames
   , testCase "testReference" $ run testReference
@@ -128,9 +131,8 @@ mkTestSuite label run = testGroup label
   , testCase "testProjection" $ run testProjection
   , testCase "testKeyNormalization" $ run testKeyNormalization
   , testCase "testAutoKeyField" $ run testAutoKeyField
--- testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
   ]
-  
+
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
 sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
   [ testCase "testOrphanConstructors" $ run testOrphanConstructors
@@ -143,8 +145,7 @@ testOrphanConstructors :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) =
 testOrphanConstructors = do
   migr (undefined :: Multi String)
   executeRaw False "drop table Multi$String" []
-  mig <- createMigration (migrate (undefined :: Multi String))
-  [("Multi$String", Left ["Orphan constructor table found: Multi$String$First","Orphan constructor table found: Multi$String$Second"])] @=? M.toList mig
+  assertExc "Migration must fail in presence of orhpan constructor tables" $ migr (undefined :: Multi String)
 
 testNumber :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testNumber = do
@@ -190,6 +191,17 @@ testInsert :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testInsert = do
   migr (undefined :: Single String)
   let val = Single "abc"
+  k <- insert val
+  val' <- get k
+  Just val @=? val'
+
+-- There is a weird bug in GHC 7.4.1 which causes program to hang if there is a type class constraint which is not used. See ticket 7126. It may arise with maybes
+-- instance (PersistField a, NeverNull a) => PersistField (Maybe a) where -- OK
+-- instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where -- HANGS
+testMaybe :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMaybe = do
+  let val = Single (Just "abc")
+  migr val
   k <- insert val
   val' <- get k
   Just val @=? val'
@@ -419,10 +431,31 @@ testMigrateAddColumnSingle = do
   migr (undefined :: New.AddColumn)
   m <- createMigration $ migrate (undefined :: New.AddColumn)
   [] @=? filter (/= Right []) (Map.elems m)
-  let val = New.AddColumn "abc" 5
+  let val = New.AddColumn (Just "abc") 5
   k <- insert val
   val' <- get k
   Just val @=? val'
+
+testMigrateAddUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateAddUnique = do
+  let val = Old.AddUnique 5 "abc"
+  migr (undefined :: Old.AddUnique)
+  insert val
+  --migr (undefined :: New.AddUnique)
+  m <- createMigration $ migrate (undefined :: New.AddUnique)
+  printMigration m
+  executeMigration silentMigrationLogger m
+  assertExc "Uniqueness constraint not enforced" $ insert val
+  return ()
+
+testMigrateDropUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateDropUnique = do
+  let val = Old.AddUnique 5 "abc"
+  migr (undefined :: New.AddUnique)
+  insert val
+  migr (undefined :: Old.AddUnique)
+  insert val
+  return ()
 
 testMigrateAddConstructorToMany :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddConstructorToMany = do
