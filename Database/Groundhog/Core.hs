@@ -21,6 +21,7 @@ module Database.Groundhog.Core
   , Proxy
   , phantomDb
   , ZT (..) -- ZonedTime wrapper
+  , delim
   -- * Constructing expressions
   , Cond(..)
   , ExprRelation(..)
@@ -411,7 +412,7 @@ data Expr v c a where
 
 -- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where
-  -- | Return name of the type. If it is polymorhic, the names of parameter types are separated with \"$\" symbol
+  -- | Return name of the type. If it is polymorhic, the names of parameter types are separated with 'Database.Groundhog.Generic.delim' symbol
   persistName :: a -> String
   -- | Convert a value into something which can be stored in a database column.
   -- Note that for complex datatypes it may insert them to return identifier
@@ -430,3 +431,6 @@ class PersistField a => SinglePersistField a where
 class PersistField a => PurePersistField a where
   toPurePersistValues :: DbDescriptor db => Proxy db -> a -> ([PersistValue] -> [PersistValue])
   fromPurePersistValues :: DbDescriptor db => Proxy db -> [PersistValue] -> (a, [PersistValue])
+
+delim :: Char
+delim = '#'

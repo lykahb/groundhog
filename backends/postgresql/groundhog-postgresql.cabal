@@ -5,7 +5,7 @@ license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        PostgreSQL backend for the groundhog library.
-description:     This package uses HDBC-postgresql.
+description:     This package uses postgresql-simple and postgresql-libpq.
 category:        Database
 stability:       Non-stable
 cabal-version:   >= 1.6
@@ -13,18 +13,19 @@ build-type:      Simple
 
 library
     build-depends:   base                    >= 4         && < 5
-                   , HDBC                    >= 2.2.6     && < 2.4
-                   , HDBC-postgresql         >= 2.2.3.1   && < 2.4
+                   , postgresql-simple       >= 0.2       && < 0.3
+                   , postgresql-libpq        >= 0.6.1     && < 0.9
                    , bytestring              >= 0.9.1     && < 0.10
-                   , transformers            >= 0.2.1     && < 0.3
+                   , transformers            >= 0.2.1     && < 0.4
                    , groundhog               >= 0.1.0     && < 0.2.0
                    , monad-control           >= 0.3       && < 0.4
                    , containers              >= 0.2       && < 0.5
-                   , utf8-string             >= 0.3.4     && < 0.4
+                   , text                    >= 0.8       && < 0.12
                    , pool-conduit            >= 0.1       && < 0.2
                    , time                    >= 1.1
     exposed-modules: Database.Groundhog.Postgresql
-    other-modules:   Database.Groundhog.Generic.Sql.String
                      Database.Groundhog.Postgresql.Base
+    other-modules:   Database.Groundhog.Generic.Sql.String
                      Database.Groundhog.Postgresql.Migration
     ghc-options:     -Wall -fno-warn-unused-do-bind
+    ghc-prof-options: -prof -auto-all

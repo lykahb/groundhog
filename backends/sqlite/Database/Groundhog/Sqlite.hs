@@ -16,7 +16,6 @@ import Database.Groundhog.Generic.Sql.Utf8
 import qualified Database.Sqlite as S
 
 import Control.Arrow ((&&&), (***))
-import Data.Maybe (catMaybes, maybeToList)
 import Control.Monad (liftM, forM, (>=>))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
@@ -28,7 +27,7 @@ import Data.Int (Int64)
 import Data.List (group, groupBy, intercalate, isInfixOf, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, mapMaybe, maybeToList)
 import Data.Monoid
 import Data.Conduit.Pool
 
@@ -146,7 +145,7 @@ migrate' = migrateRecursively migE migL where
           _ -> liftM snd $ migConstr True name $ head constrs
       else do
         maincolumns <- checkTable name
-        let constrTable c = name ++ [defDelim] ++ constrName c
+        let constrTable c = name ++ [delim] ++ constrName c
         res <- mapM (\c -> migConstr False name c) constrs
         case maincolumns of
           Nothing -> do
@@ -171,7 +170,7 @@ migrate' = migrateRecursively migE migL where
             return $ Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show structure]
           Just (Left errs) -> return (Left errs)
   migL (DbList mainName t) = do
-    let valuesName = mainName ++ "$" ++ "values"
+    let valuesName = mainName ++ delim : "values"
     let (valueCols, valueRefs) = mkColumns id "value" t
     let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id INTEGER PRIMARY KEY)"
     let items = ("id INTEGER NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols ++ map sqlReference valueRefs
@@ -200,7 +199,7 @@ migrate' = migrateRecursively migE migL where
 
 migConstr :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstr simple name constr = do
-  let cName = if simple then name else name ++ [defDelim] ++ constrName constr
+  let cName = if simple then name else name ++ [delim] ++ constrName constr
   let (columns, refs) = concat *** concat $ unzip $ map (uncurry $ mkColumns id) $ constrParams constr
   tableStructure <- checkTable cName
   let dels = mkDeletes columns
@@ -242,31 +241,31 @@ migTriggerOnDelete name deletes = do
     Nothing | null deletes -> (False, [])
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
-      then [DropTrigger name]
+      then [DropTrigger name name]
       else if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
         -- this can happen when an ephemeral field was added or removed.
-        else [DropTrigger name, addTrigger])
+        else [DropTrigger name name, addTrigger])
         
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
 migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Sqlite m (Bool, [AlterDB Affinity])
 migTriggerOnUpdate name fieldName del = do
-  let trigName = name ++ "$" ++ fieldName
+  let trigName = name ++ delim : fieldName
   let addTrigger = AddTriggerOnUpdate trigName name fieldName del
   x <- checkTrigger trigName
   return $ case x of
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
-        else [DropTrigger trigName, addTrigger])
+        else [DropTrigger trigName name, addTrigger])
   
 -- on delete removes all ephemeral data
 -- returns column name and delete statement for the referenced table
 mkDeletes :: [Column DbType] -> [(String, String)]
-mkDeletes columns = catMaybes $ map delField columns where
+mkDeletes columns = mapMaybe delField columns where
   delField (Column name _ t _) = fmap delStatement $ ephemeralName t where
-    delStatement ref = (name, "DELETE FROM " ++ ref ++ " WHERE id=old." ++ escape name ++ ";")
+    delStatement ref = (name, "DELETE FROM " ++ escape ref ++ " WHERE id=old." ++ escape name ++ ";")
   ephemeralName (DbMaybe x) = ephemeralName x
   ephemeralName (DbList name _) = Just name
   ephemeralName _ = Nothing
@@ -462,7 +461,7 @@ insert' v = do
         Just _  -> getLastInsertRowId >>= \rowid -> pureFromPersistValue [rowid]
     else do
       let constr = constructors e !! constructorNum
-      let cName = name ++ [defDelim] ++ constrName constr
+      let cName = name ++ [delim] ++ constrName constr
       let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)"
       executeRawCached' query $ take 1 vals
       rowid <- getLastInsertRowId
@@ -523,7 +522,7 @@ insertByAll' v = do
         ifAbsent name constr
       else do
         let constr = constructors e !! constructorNum
-        let cName = name ++ [defDelim] ++ constrName constr
+        let cName = name ++ [delim] ++ constrName constr
         ifAbsent cName constr
 
 replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
@@ -535,7 +534,7 @@ replace' k v = do
   let constructorNum = fromPrim proxy (head vals)
   let constr = constructors e !! constructorNum
 
-  let upds = renderFields (\f -> f <> "=?") $ constrParams constr
+  let upds = renderFields (\f -> escapeS f <> "=?") $ constrParams constr
   let mkQuery tname = "UPDATE " <> escapeS (fromString tname) <> " SET " <> upds <> " WHERE " <> fromString (fromJust $ constrAutoKeyName constr) <> "=?"
 
   if isSimple (constructors e)
@@ -545,7 +544,7 @@ replace' k v = do
       x <- queryRawTyped query [DbInt32] [toPrim proxy k] (id >=> return . fmap (fromPrim proxy . head))
       case x of
         Just discr -> do
-          let cName = name ++ [defDelim] ++ constrName constr
+          let cName = name ++ [delim] ++ constrName constr
 
           if discr == constructorNum
             then executeRawCached' (mkQuery cName) (tail vals ++ [toPrim proxy k])
@@ -553,7 +552,7 @@ replace' k v = do
               let insQuery = insertIntoConstructorTable True cName constr
               executeRawCached' insQuery (toPrim proxy k:tail vals)
 
-              let oldCName = fromString $ name ++ [defDelim] ++ constrName (constructors e !! discr)
+              let oldCName = fromString $ name ++ [delim] ++ constrName (constructors e !! discr)
               let delQuery = "DELETE FROM " <> escapeS oldCName <> " WHERE " <> fromJust (constrId constr) <> "=?"
               executeRawCached' delQuery [toPrim proxy k]
 
@@ -566,7 +565,7 @@ select' (cond :: Cond v c) ords limit offset = start where
   start = if isSimple (constructors e)
     then doSelectQuery (mkQuery name) 0
     else let
-      cName = name ++ [defDelim] ++ constrName constr
+      cName = name ++ [delim] ++ constrName constr
       in doSelectQuery (mkQuery cName) $ constrNum constr
 
   e = entityDef (undefined :: v)
@@ -602,7 +601,7 @@ selectAll' = start where
       in queryRawTyped query types [] $ mapAllRows $ mkEntity 0
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(cNum, constr) -> do
         let fields = fromJust (constrId constr) <> fromChar ',' <> renderFields escapeS (constrParams constr)
-        let cName = fromString $ name ++ [defDelim] ++ constrName constr
+        let cName = fromString $ name ++ [delim] ++ constrName constr
         let query = "SELECT " <> fields <> " FROM " <> escapeS cName
         let types = DbInt64:getConstructorTypes constr
         queryRawTyped query types [] $ mapAllRows $ mkEntity cNum
@@ -633,7 +632,7 @@ get' (k :: Key v BackendSpecific) = do
         Just [discr] -> do
           let constructorNum = fromPrim proxy discr
           let constr = constructors e !! constructorNum
-          let cName = fromString $ name ++ [defDelim] ++ constrName constr
+          let cName = fromString $ name ++ [delim] ++ constrName constr
           let fields = renderFields escapeS (constrParams constr)
           let cQuery = "SELECT " <> fields <> "FROM " <> escapeS cName <> " WHERE " <> fromJust (constrId constr) <> "=?"
           x2 <- queryRawTyped cQuery (getConstructorTypes constr) [toPrim proxy k] id
@@ -670,7 +669,7 @@ update' upds (cond :: Cond v c) = do
       let cond' = renderCond' cond
       let mkQuery tname = "UPDATE " <> escapeS tname <> " SET " <> whereClause where
           whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
-      let tname = fromString $ if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c a)
+      let tname = fromString $ if isSimple (constructors e) then name else name ++ [delim] ++ phantomConstrName (undefined :: c a)
       executeRawCached' (mkQuery tname) (getValues upds' <> maybe mempty getValues cond' $ [])
     Nothing -> return ()
 
@@ -685,7 +684,7 @@ delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValu
     then "DELETE FROM " <> escapeS (fromString name) <> whereClause
     -- the entries in the constructor table are deleted because of the reference on delete cascade
     else "DELETE FROM " <> escapeS (fromString name) <> " WHERE id IN(SELECT " <> fromJust (constrId constr) <> " FROM " <> escapeS cName <> whereClause <> ")" where
-      cName = fromString $ name ++ [defDelim] ++ phantomConstrName (undefined :: c a)
+      cName = fromString $ name ++ [delim] ++ phantomConstrName (undefined :: c a)
 
 deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
              => Key v BackendSpecific -> DbPersist Sqlite m ()
@@ -704,7 +703,7 @@ count' (cond :: Cond v c) = do
   let name = persistName (undefined :: v)
   let tname = fromString $ if isSimple (constructors e)
        then name
-       else name ++ [defDelim] ++ phantomConstrName (undefined :: c a)
+       else name ++ [delim] ++ phantomConstrName (undefined :: c a)
   let query = "SELECT COUNT(*) FROM " <> escapeS tname <> whereClause where
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   x <- queryRawCached' query (maybe [] (flip getValues []) cond') id
@@ -730,7 +729,7 @@ project' p (cond :: Cond v c) ords limit offset = start where
   start = doSelectQuery $ if isSimple (constructors e)
     then mkQuery name
     else let
-      cName = name ++ [defDelim] ++ constrName constr
+      cName = name ++ [delim] ++ constrName constr
       in mkQuery cName
 
   e = entityDef (undefined :: v)
@@ -753,10 +752,10 @@ project' p (cond :: Cond v c) ords limit offset = start where
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
 insertList' l = do
-  let mainName = "List$$" <> fromString (persistName (undefined :: a))
+  let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   executeRawCached' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES") []
   k <- getLastInsertRowId
-  let valuesName = mainName <> "$values"
+  let valuesName = mainName <> delim' <> "values"
   let fields = [("ord", dbType (0 :: Int)), ("value", dbType (undefined :: a))]
   let query = "INSERT INTO " <> escapeS valuesName <> "(id," <> renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields <> ")"
   let go :: Int -> [a] -> DbPersist Sqlite m ()
@@ -770,10 +769,10 @@ insertList' l = do
   
 getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
 getList' k = do
-  let mainName = "List$$" ++ persistName (undefined :: a)
-  let valuesName = mainName ++ "$values"
+  let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
+  let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType (undefined :: a))
-  let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS (fromString valuesName) <> " WHERE id=? ORDER BY ord"
+  let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
   queryRawTyped query (getDbTypes (dbType (undefined :: a)) []) [toPrim proxy k] $ mapAllRows (liftM fst . fromPersistValues)
     
 {-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO PersistValue #-}
@@ -880,10 +879,6 @@ getDbTypes typ acc = case typ of
   DbEntity (Just (EmbeddedDef _ ts, _)) _ -> foldr (getDbTypes . snd) acc ts
   t               -> t:acc
 
-mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
-mapAllRows f pop = go where
-  go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
-
 pFromSql :: S.SQLData -> PersistValue
 pFromSql (S.SQLInteger i) = PersistInt64 i
 pFromSql (S.SQLFloat i)   = PersistDouble i
@@ -919,6 +914,9 @@ triggerPriority = 1
 proxy :: Proxy Sqlite
 proxy = error "Proxy Sqlite"
 
+delim' :: Utf8
+delim' = fromChar delim
+
 toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Sqlite m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
@@ -927,7 +925,7 @@ compareColumns (Column name1 isNull1 aff1 def1) (Column name2 isNull2 type2 def2
   aff1 == dbTypeAffinity type2 && name1 == name2 && isNull1 == isNull2 && def1 == def2
 
 compareUniqs :: UniqueDef -> UniqueDef -> Bool
-compareUniqs (UniqueDef name1 cols1) (UniqueDef name2 cols2) = name1 == name2 && haveSameElems ((==) `on` fst) cols1 cols2
+compareUniqs (UniqueDef _ cols1) (UniqueDef _ cols2) = haveSameElems ((==) `on` fst) cols1 cols2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
@@ -947,7 +945,8 @@ data AlterTable = AddUniqueConstraint String [String]
 data AlterDB typ = AddTable String
                  -- | Table name, create statement, structure of table from DB, structure of table from datatype, alters
                  | AlterTable String String (TableInfo typ) (TableInfo DbType) [AlterTable]
-                 | DropTrigger String
+                 -- | Trigger name, table name
+                 | DropTrigger String String
                  -- | Trigger name, table name, body
                  | AddTriggerOnDelete String String String
                  -- | Trigger name, table name, field name, body
@@ -996,7 +995,7 @@ showAlterDb (AlterTable table createTable (oldId, oldCols, _, _) (newId, newCols
     isSupported (AlterColumn (_, UpdateValue _)) = True
     isSupported _ = False
 showAlterDb (AlterTable t _ _ _ alts) = Right $ map (showAlterTable t) alts
-showAlterDb (DropTrigger name) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
+showAlterDb (DropTrigger name _) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
 showAlterDb (AddTriggerOnDelete trigName tableName body) = Right [(False, triggerPriority,
   "CREATE TRIGGER " ++ escape trigName ++ " DELETE ON " ++ escape tableName ++ " BEGIN " ++ body ++ "END")]
 showAlterDb (AddTriggerOnUpdate trigName tableName fieldName body) = Right [(False, triggerPriority,

@@ -8,7 +8,6 @@ module Database.Groundhog.Generic.Sql
     , renderArith
     , renderOrders
     , renderUpdates
-    , defDelim
     , renderFields
     , renderChain
     , intercalateS
@@ -186,7 +185,7 @@ renderChain :: StringLike s => (s -> s) -> FieldChain -> [s] -> [s]
 renderChain esc (f, prefix) acc = (case prefix of
   ((name, EmbeddedDef False _):fs) -> flattenP esc (goP (fromString name) fs) f acc
   _ -> flatten esc f acc) where
-  goP p ((name, EmbeddedDef False _):fs) = goP (fromString name <> fromChar '$' <> p) fs
+  goP p ((name, EmbeddedDef False _):fs) = goP (fromString name <> fromChar delim <> p) fs
   goP p _ = p
 
 defaultShowPrim :: PersistValue -> String
@@ -235,7 +234,7 @@ flattenP esc prefix (fname, typ) acc = go typ where
     DbEmbedded emb -> handleEmb emb
     DbEntity (Just (emb, _)) _ -> handleEmb emb
     _            -> esc fullName : acc
-  fullName = prefix <> fromChar '$' <> fromString fname
+  fullName = prefix <> fromChar delim <> fromString fname
   handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts
   handleEmb (EmbeddedDef True  ts) = foldr (flatten esc) acc ts
 
@@ -266,6 +265,3 @@ renderUpdates p esc = commasJoinRenders . mapMaybe go where
         _   -> error $ "renderUpdates: expected one column field, found " ++ show (length fs)) where
       guard a = if null fs then Nothing else Just a
       fs = renderField esc field []
-
-defDelim :: Char
-defDelim = '$'

@@ -3,7 +3,6 @@ module Database.Groundhog.Postgresql.Migration (migrate') where
 
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Postgresql.Base
 
 import Control.Arrow ((&&&), (***), second)
@@ -14,7 +13,7 @@ import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int32)
 import Data.List (intercalate, group, groupBy, sort)
-import Data.Maybe (catMaybes, fromJust, fromMaybe, maybeToList)
+import Data.Maybe (mapMaybe, fromJust, fromMaybe, maybeToList)
 
 {- ********************RULES******************** --
 For type with a single constructor, a single table is created.
@@ -63,7 +62,7 @@ migrate' = migrateRecursively migE migL where
           _ -> liftM snd $ migConstr True name $ head constrs
       else do
         maincolumns <- checkTable name
-        let constrTable c = name ++ [defDelim] ++ constrName c
+        let constrTable c = name ++ [delim] ++ constrName c
         res <- mapM (\c -> migConstr False name c) constrs
         case maincolumns of
           Nothing -> do
@@ -88,7 +87,7 @@ migrate' = migrateRecursively migE migL where
             return $ Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show structure]
           Just (Left errs) -> return (Left errs)
   migL (DbList mainName t) = do
-    let valuesName = mainName ++ "$" ++ "values"
+    let valuesName = mainName ++ delim : "values"
     let (valueCols, valueRefs) = mkColumns id "value" t
     let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id SERIAL PRIMARY KEY UNIQUE)"
     let items = ("id INTEGER NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols
@@ -98,7 +97,7 @@ migrate' = migrateRecursively migE migL where
     mainStructure <- checkTable mainName
     valuesStructure <- checkTable valuesName
     let triggerMain = []
-    (_, triggerValues) <- migTriggerOnDelete valuesName $ map snd $ mkDeletes valueCols
+    (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletes valueCols
     return $ case (mainStructure, valuesStructure) of
       (Nothing, Nothing) -> let addReferences = AlterTable valuesName valuesQuery expectedValuesStructure expectedValuesStructure $ map AddReference valueRefs
         in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ [addReferences] ++ triggerMain ++ triggerValues
@@ -129,11 +128,11 @@ showColumn (Column n nu t def) = concat
 
 migConstr :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstr simple name constr = do
-  let cName = if simple then name else name ++ [defDelim] ++ constrName constr
+  let cName = if simple then name else name ++ [delim] ++ constrName constr
   let (columns, refs) = concat *** concat $ unzip $ map (uncurry $ mkColumns id) $ constrParams constr
   tableStructure <- checkTable cName
   let dels = mkDeletes columns
-  (triggerExisted, delTrigger) <- migTriggerOnDelete cName (map snd dels)
+  (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
   updTriggers <- liftM concat $ mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) dels
   
   let mainTableName = if simple then Nothing else Just name
@@ -171,27 +170,95 @@ test=# select p.proname, p.prosrc from pg_catalog.pg_namespace n inner join pg_c
  delete_tbl1 |  begin return a+b; end;
 -}
 
-migFunction :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Bool, [AlterDB DbType])
-migFunction name = do
---  let query = "create or replace function delete_tbl1 (a integer, b integer) returns integer language plpgsql as $$begin return a+b; end;$$;"
---  x <- queryRaw' "SELECT p.proname, p.prosrc FROM pg_catalog.pg_namespace n INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = ?" [toPrim proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-  return undefined
+checkFunction :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe String)
+checkFunction name = do
+  x <- queryRaw' "SELECT p.prosrc FROM pg_catalog.pg_namespace n INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = ?" [toPrim proxy name] id
+  case x of
+    Nothing  -> return Nothing
+    Just src -> return (fst $ fromPurePersistValues proxy src)
+
+checkTrigger :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe String)
+checkTrigger name = do
+  x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_name = ?" [toPrim proxy name] id
+  case x of
+    Nothing  -> return Nothing
+    Just src -> return (fst $ fromPurePersistValues proxy src)
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
-migTriggerOnDelete :: MonadBaseControl IO m => String -> [String] -> DbPersist Postgresql m (Bool, [AlterDB DbType])
-migTriggerOnDelete name deletes = return (False, [])
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB DbType])
+migTriggerOnDelete name deletes = do
+  let funcName = name
+  let trigName = name
+  func <- checkFunction funcName
+  trig <- checkTrigger trigName
+  let funcBody = "BEGIN " ++ concatMap snd deletes ++ "RETURN NEW;END;"
+      addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ escape funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
+      funcMig = case func of
+        Nothing | null deletes -> []
+        Nothing   -> [addFunction]
+        Just body -> if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
+          then [DropFunction funcName]
+          else if body == funcBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropFunction funcName, addFunction]
+
+      trigBody = "EXECUTE PROCEDURE " ++ escape funcName ++ "()"
+      addTrigger = AddTriggerOnDelete trigName name trigBody
+      (trigExisted, trigMig) = case trig of
+        Nothing | null deletes -> (False, [])
+        Nothing   -> (False, [addTrigger])
+        Just body -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
+          then [DropTrigger trigName name]
+          else if body == trigBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropTrigger trigName name, addTrigger])
+  return (trigExisted, funcMig ++ trigMig)
+  
       
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: MonadBaseControl IO m => String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB DbType])
-migTriggerOnUpdate name fieldName del = return (False, [])
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB DbType])
+migTriggerOnUpdate name fieldName del = do
+  let funcName = name ++ delim : fieldName
+  let trigName = name ++ delim : fieldName
+  func <- checkFunction funcName
+  trig <- checkTrigger trigName
+  let funcBody = "BEGIN " ++ del ++ "RETURN NEW;END;"
+      addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ escape funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
+      funcMig = case func of
+        Nothing   -> [addFunction]
+        Just body -> if body == funcBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropFunction funcName, addFunction]
+
+      trigBody = "EXECUTE PROCEDURE " ++ escape funcName ++ "()"
+      addTrigger = AddTriggerOnUpdate trigName name fieldName trigBody
+      (trigExisted, trigMig) = case trig of
+        Nothing   -> (False, [addTrigger])
+        Just body -> (True, if body == trigBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropTrigger trigName name, addTrigger])
+  return (trigExisted, funcMig ++ trigMig)
 
 -- on delete removes all ephemeral data
 -- returns column name and delete statement for the referenced table
+{-mkDeletes :: [Column DbType] -> [(String, String)]
+mkDeletes columns = zipWith delStatement [0..] $ mapMaybe f columns where
+  f col = ephemeralName (cType col) >>= \ephName -> return (col, ephName)
+  delStatement :: Int -> (Column DbType, String) -> (String, String)
+  delStatement i (col, ref) = (cName col, "IF TG_ARGV[" ++ show i ++ "] IS NOT NULL THEN DELETE FROM " ++ escape ref ++ " WHERE id=TG_ARGV[" ++ show i ++ "]; END IF;")
+  ephemeralName (DbMaybe x) = ephemeralName x
+  ephemeralName (DbList name _) = Just name
+  ephemeralName _ = Nothing -}
+  
 mkDeletes :: [Column DbType] -> [(String, String)]
-mkDeletes columns = catMaybes $ map delField columns where
+mkDeletes columns = mapMaybe delField columns where
   delField (Column name _ t _) = fmap delStatement $ ephemeralName t where
-    delStatement ref = (name, "DELETE FROM " ++ ref ++ " WHERE id=old." ++ escape name ++ ";")
+    delStatement ref = (name, "DELETE FROM " ++ escape ref ++ " WHERE id=old." ++ escape name ++ ";")
   ephemeralName (DbMaybe x) = ephemeralName x
   ephemeralName (DbList name _) = Just name
   ephemeralName _ = Nothing
@@ -248,7 +315,7 @@ getColumn tname (column_name, is_nullable, udt_name, d) = case readSqlType udt_n
 
 checkTableReferences :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m [(Maybe String, Reference)]
 checkTableReferences tableName = do
-  let sql = "SELECT c.conname, c.foreign_table, a_child.attname AS child, a_parent.attname AS parent FROM (SELECT r.confrelid::regclass AS foreign_table, r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname FROM pg_catalog.pg_constraint r WHERE r.conrelid = ?::regclass AND r.contype = 'f') AS c INNER JOIN pg_attribute a_parent ON a_parent.attnum = c.confkey AND a_parent.attrelid = c.confrelid INNER JOIN pg_attribute a_child ON a_child.attnum = c.conkey AND a_child.attrelid = c.conrelid ORDER BY c.conname"
+  let sql = "SELECT c.conname, c.foreign_table || '', a_child.attname AS child, a_parent.attname AS parent FROM (SELECT r.confrelid::regclass AS foreign_table, r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname FROM pg_catalog.pg_constraint r WHERE r.conrelid = ?::regclass AND r.contype = 'f') AS c INNER JOIN pg_attribute a_parent ON a_parent.attnum = c.confkey AND a_parent.attrelid = c.confrelid INNER JOIN pg_attribute a_child ON a_child.attnum = c.conkey AND a_child.attrelid = c.conrelid ORDER BY c.conname"
   x <- queryRaw' sql [toPrim proxy $ escape tableName] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   -- (refName, (parentTable, (childColumn, parentColumn)))
   let mkReference xs = (Just refName, (parentTable, map (snd . snd) xs)) where
@@ -270,12 +337,14 @@ data AlterTable = AddUniqueConstraint String [String]
 data AlterDB typ = AddTable String
                  -- | Table name, create statement, structure of table from DB, structure of table from datatype, alters
                  | AlterTable String String (TableInfo typ) (TableInfo DbType) [AlterTable]
-                 | DropTrigger String
+                 -- | Trigger name, table name
+                 | DropTrigger String String
                  -- | Trigger name, table name, body
                  | AddTriggerOnDelete String String String
                  -- | Trigger name, table name, field name, body
                  | AddTriggerOnUpdate String String String String
-                 | AddFunction String
+                 | CreateOrReplaceFunction String
+                 | DropFunction String
   deriving Show
 
 -- from database, from datatype
@@ -324,7 +393,12 @@ migrateColumn (Column name isNull type_ def, Column _ isNull' type_' def') = mod
 showAlterDb :: AlterDB DbType -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
 showAlterDb (AlterTable t _ _ _ alts) = Right $ map (showAlterTable t) alts
-
+showAlterDb (DropTrigger trigName tName) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape trigName ++ " ON " ++ escape tName)]
+showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER DELETE ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
+showAlterDb (AddTriggerOnUpdate trigName tName fName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER UPDATE OF " ++ escape fName ++ " ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
+showAlterDb (CreateOrReplaceFunction s) = Right [(False, functionPriority, s)]
+showAlterDb (DropFunction funcName) = Right [(False, functionPriority, "DROP FUNCTION " ++ escape funcName ++ "()")]
+                 
 showAlterTable :: String -> AlterTable -> (Bool, Int, String)
 showAlterTable table (AlterColumn alt) = showAlterColumn table alt
 showAlterTable table (AddUniqueConstraint cname cols) = (False, defaultPriority, concat
@@ -436,10 +510,11 @@ readSqlType "varchar" = Right $ DbString
 readSqlType "date" = Right $ DbDay
 readSqlType "bool" = Right $ DbBool
 readSqlType "timestamp" = Right $ DbDayTime
-readSqlType "timestampz" = Right $ DbDayTimeZoned
+readSqlType "timestamptz" = Right $ DbDayTimeZoned
 readSqlType "float4" = Right $ DbReal
 readSqlType "float8" = Right $ DbReal
 readSqlType "bytea" = Right $ DbBlob
+readSqlType "time" = Right $ DbTime
 readSqlType a = Left $ "Unknown type: " ++ a
 
 showSqlType :: DbType -> String
@@ -480,6 +555,12 @@ defaultPriority = 0
 
 referencePriority :: Int
 referencePriority = 1
+
+functionPriority :: Int
+functionPriority = 2
+
+triggerPriority :: Int
+triggerPriority = 3
 
 mainTableId :: String
 mainTableId = "id"

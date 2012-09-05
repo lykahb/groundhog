@@ -15,17 +15,15 @@ import Database.Groundhog.Generic.Sql.String
 import Database.Groundhog.Postgresql.Base
 import Database.Groundhog.Postgresql.Migration
 
-import qualified Database.HDBC as H
-import qualified Database.HDBC.PostgreSQL as H
+import qualified Database.PostgreSQL.Simple as PG
 
 import Control.Monad (liftM, forM, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control(MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
+import Data.ByteString.Char8 (pack)
 import Data.Int (Int64)
 import Data.List (intercalate)
-import Data.IORef
-import qualified Data.Map as Map
 import Data.Maybe (fromJust) 
 import Data.Monoid
 import Data.Conduit.Pool
@@ -49,9 +47,9 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgre
   project p cond ords limit offset = project' p cond ords limit offset
   migrate fakeV = migrate' fakeV
 
-  executeRaw False query ps = executeRaw' query ps
+  executeRaw False query ps = executeRaw' (fromString query) ps
   executeRaw True query ps = executeRawCached' (fromString query) ps
-  queryRaw False query ps f = queryRaw' query ps f
+  queryRaw False query ps f = queryRaw' (fromString query) ps f
   queryRaw True query ps f = queryRawCached' (fromString query) ps f
 
   insertList l = insertList' l
@@ -71,7 +69,7 @@ withPostgresqlConn :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> (Postgresql -> m a)
                -> m a
-withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO.close')
+withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO . close')
 
 {-# SPECIALIZE runPostgresqlPool :: DbPersist Postgresql IO a -> Pool Postgresql -> IO a #-}
 runPostgresqlPool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Pool Postgresql -> m a
@@ -80,21 +78,20 @@ runPostgresqlPool f pconn = withResource pconn $ runPostgresqlConn f
 {-# SPECIALIZE runPostgresqlConn :: DbPersist Postgresql IO a -> Postgresql -> IO a #-}
 {-# INLINE runPostgresqlConn #-}
 runPostgresqlConn :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Postgresql -> m a
-runPostgresqlConn f conn@(Postgresql c _) = do
-  x <- onException (runDbPersist f conn) (liftIO $ H.rollback c)
-  liftIO $ H.commit c
+runPostgresqlConn f conn@(Postgresql c) = do
+  liftIO $ PG.begin c
+  x <- onException (runDbPersist f conn) (liftIO $ PG.rollback c)
+  liftIO $ PG.commit c
   return x
 
 open' :: String -> IO Postgresql
 open' s = do
-  conn <- H.connectPostgreSQL s
-  stmt <- H.prepare conn "SET client_min_messages TO WARNING"
-  H.execute stmt []
-  cache <- newIORef Map.empty
-  return $ Postgresql conn cache
+  conn <- PG.connectPostgreSQL $ pack s
+  PG.execute_ conn $ getStatement "SET client_min_messages TO WARNING"
+  return $ Postgresql conn
 
 close' :: Postgresql -> IO ()
-close' (Postgresql conn _) = H.disconnect conn
+close' (Postgresql conn) = PG.close conn
 
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Postgresql IO (AutoKey v) #-}
 {-# INLINE insert' #-}
@@ -110,13 +107,16 @@ insert' v = do
     then do
       let constr = head $ constructors e
       let query = insertIntoConstructorTable False name constr
-      x <- queryRawCached' query (tail vals) id
-      case x of
-        Just xs -> pureFromPersistValue xs
-        Nothing -> pureFromPersistValue []
+      case constrAutoKeyName constr of
+        Nothing -> executeRawCached' query (tail vals) >> pureFromPersistValue []
+        Just _  -> do
+          x <- queryRawCached' query (tail vals) id
+          case x of
+            Just xs -> pureFromPersistValue xs
+            Nothing -> pureFromPersistValue []
     else do
       let constr = constructors e !! constructorNum
-      let cName = name ++ [defDelim] ++ constrName constr
+      let cName = name ++ [delim] ++ constrName constr
       let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)RETURNING(id)"
       rowid <- queryRawCached' query (take 1 vals) getKey
       let cQuery = insertIntoConstructorTable True cName constr
@@ -176,7 +176,7 @@ insertByAll' v = do
         ifAbsent name constr
       else do
         let constr = constructors e !! constructorNum
-        let cName = name ++ [defDelim] ++ constrName constr
+        let cName = name ++ [delim] ++ constrName constr
         ifAbsent cName constr
 
 replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
@@ -188,7 +188,7 @@ replace' k v = do
   let constructorNum = fromPrim proxy (head vals)
   let constr = constructors e !! constructorNum
 
-  let upds = renderFields (\f -> f <> "=?") $ constrParams constr
+  let upds = renderFields (\f -> escapeS f <> "=?") $ constrParams constr
   let mkQuery tname = "UPDATE " <> escapeS (fromString tname) <> " SET " <> upds <> " WHERE " <> fromString (fromJust $ constrAutoKeyName constr) <> "=?"
 
   if isSimple (constructors e)
@@ -198,7 +198,7 @@ replace' k v = do
       x <- queryRawCached' query [toPrim proxy k] (id >=> return . fmap (fromPrim proxy . head))
       case x of
         Just discr -> do
-          let cName = name ++ [defDelim] ++ constrName constr
+          let cName = name ++ [delim] ++ constrName constr
 
           if discr == constructorNum
             then executeRawCached' (mkQuery cName) (tail vals ++ [toPrim proxy k])
@@ -206,7 +206,7 @@ replace' k v = do
               let insQuery = insertIntoConstructorTable True cName constr
               executeRawCached' insQuery (toPrim proxy k:tail vals)
 
-              let oldCName = fromString $ name ++ [defDelim] ++ constrName (constructors e !! discr)
+              let oldCName = fromString $ name ++ [delim] ++ constrName (constructors e !! discr)
               let delQuery = "DELETE FROM " <> escapeS oldCName <> " WHERE " <> fromJust (constrId constr) <> "=?"
               executeRawCached' delQuery [toPrim proxy k]
 
@@ -224,7 +224,7 @@ select' (cond :: Cond v c) ords limit offset = start where
   start = if isSimple (constructors e)
     then doSelectQuery (mkQuery name) 0
     else let
-      cName = name ++ [defDelim] ++ constrName constr
+      cName = name ++ [delim] ++ constrName constr
       in doSelectQuery (mkQuery cName) $ constrNum constr
 
   e = entityDef (undefined :: v)
@@ -253,7 +253,7 @@ selectAll' = start where
       in queryRawCached' query [] $ mapAllRows (mkEntity 0)
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(i, constr) -> do
         let fields = fromJust (constrId constr) <> fromChar ',' <> renderFields escapeS (constrParams constr)
-        let cName = name ++ [defDelim] ++ constrName constr
+        let cName = name ++ [delim] ++ constrName constr
         let query = "SELECT " <> fields <> " FROM " <> escapeS (fromString cName)
         queryRawCached' query [] $ mapAllRows (mkEntity i)
   e = entityDef (undefined :: v)
@@ -282,7 +282,7 @@ get' (k :: Key v BackendSpecific) = do
         Just [discr] -> do
           let constructorNum = fromPrim proxy discr
           let constr = constructors e !! constructorNum
-          let cName = name ++ [defDelim] ++ constrName constr
+          let cName = name ++ [delim] ++ constrName constr
           let fields = renderFields escapeS (constrParams constr)
           let cQuery = "SELECT " <> fields <> " FROM " <> escapeS (fromString cName) <> " WHERE " <> fromJust (constrId constr) <> "=?"
           x2 <- queryRawCached' cQuery [toPrim proxy k] id
@@ -319,7 +319,7 @@ update' upds (cond :: Cond v c) = do
       let cond' = renderCond' cond
       let mkQuery tname = "UPDATE " <> escapeS tname <> " SET " <> whereClause where
           whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
-      let tname = fromString $ if isSimple (constructors e) then name else name ++ [defDelim] ++ phantomConstrName (undefined :: c a)
+      let tname = fromString $ if isSimple (constructors e) then name else name ++ [delim] ++ phantomConstrName (undefined :: c a)
       executeRawCached' (mkQuery tname) (getValues upds' <> maybe mempty getValues cond' $ [])
     Nothing -> return ()
 
@@ -334,7 +334,7 @@ delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValu
     then "DELETE FROM " <> escapeS (fromString name) <> whereClause
     -- the entries in the constructor table are deleted because of the reference on delete cascade
     else "DELETE FROM " <> escapeS (fromString name) <> " WHERE id IN(SELECT " <> fromJust (constrId constr) <> " FROM " <> escapeS cName <> whereClause <> ")" where
-      cName = fromString $ name ++ [defDelim] ++ phantomConstrName (undefined :: c a)
+      cName = fromString $ name ++ [delim] ++ phantomConstrName (undefined :: c a)
 
 deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
              => Key v BackendSpecific -> DbPersist Postgresql m ()
@@ -352,7 +352,7 @@ count' (cond :: Cond v c) = do
   let name = persistName (undefined :: v)
   let tname = fromString $ if isSimple (constructors e)
        then name
-       else name ++ [defDelim] ++ phantomConstrName (undefined :: c a)
+       else name ++ [delim] ++ phantomConstrName (undefined :: c a)
   let query = "SELECT COUNT(*) FROM " <> escapeS tname <> whereClause where
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   x <- queryRawCached' query (maybe [] (flip getValues []) cond') id
@@ -378,7 +378,7 @@ project' p (cond :: Cond v c) ords limit offset = start where
   start = doSelectQuery $ if isSimple (constructors e)
     then mkQuery name
     else let
-      cName = name ++ [defDelim] ++ constrName constr
+      cName = name ++ [delim] ++ constrName constr
       in mkQuery cName
 
   e = entityDef (undefined :: v)
@@ -400,9 +400,9 @@ project' p (cond :: Cond v c) ords limit offset = start where
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' (l :: [a]) = do
-  let mainName = "List$$" <> fromString (persistName (undefined :: a))
+  let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   k <- queryRawCached' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES RETURNING(id)") [] getKey
-  let valuesName = mainName <> "$values"
+  let valuesName = mainName <> delim' <> "values"
   let fields = [("ord", dbType (0 :: Int)), ("value", dbType (undefined :: a))]
   let query = "INSERT INTO " <> escapeS valuesName <> "(id," <> renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields <> ")"
   let go :: Int -> [a] -> DbPersist Postgresql m ()
@@ -416,10 +416,10 @@ insertList' (l :: [a]) = do
   
 getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Postgresql m [a]
 getList' k = do
-  let mainName = "List$$" ++ persistName (undefined :: a)
-  let valuesName = mainName ++ "$values"
+  let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
+  let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType (undefined :: a))
-  let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS (fromString valuesName) <> " WHERE id=? ORDER BY ord"
+  let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
   queryRawCached' query [toPrim proxy k] $ mapAllRows (liftM fst . fromPersistValues)
 
 --TODO: consider removal
@@ -429,44 +429,20 @@ getKey pop = pop >>= \(Just [k]) -> return k
 
 ----------
 
-getStatementCached :: MonadIO m => StringS -> DbPersist Postgresql m H.Statement
-getStatementCached sql = do
-  let sql' = fromStringS sql ""
-  Postgresql conn smap <- DbPersist ask
-  liftIO $ do
-    smap' <- readIORef smap
-    case Map.lookup sql' smap' of
-      Nothing -> do
-        stmt <- H.prepare conn sql'
-        writeIORef smap (Map.insert sql' stmt smap')
-        return stmt
-      Just stmt -> return stmt
-
-executeRaw' :: MonadIO m => String -> [PersistValue] -> DbPersist Postgresql m ()
+executeRaw' :: MonadIO m => StringS -> [PersistValue] -> DbPersist Postgresql m ()
 executeRaw' query vals = do
---  liftIO $ print query
-  stmt <- getStatement query
+  --liftIO $ print $ fromStringS query ""
+  Postgresql conn <- DbPersist ask
+  let stmt = getStatement query
   liftIO $ do
-    H.execute stmt (map pToSql vals)
+    _ <- PG.execute conn stmt (map P vals)
     return ()
 
-{-# SPECIALIZE executeRawCached' :: StringS -> [PersistValue] -> DbPersist Postgresql IO () #-}
 executeRawCached' :: MonadIO m => StringS -> [PersistValue] -> DbPersist Postgresql m ()
-executeRawCached' query vals = do
---  liftIO $ putStrLn (fromStringS query "")
-  stmt <- getStatementCached query
-  liftIO $ do
-    H.execute stmt (map pToSql vals)
-    return ()
+executeRawCached' = executeRaw'
 
 queryRawCached' :: (MonadBaseControl IO m, MonadIO m) => StringS -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
-queryRawCached' query vals f = do
---  liftIO $ putStrLn (fromStringS query "")
-  stmt <- getStatementCached query
-  liftIO $ H.execute stmt (map pToSql vals)
-  f $ liftIO $ do
-    x <- H.fetchRow stmt
-    return $ fmap (map pFromSql) x
+queryRawCached' = queryRaw'
 
 renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> Maybe (RenderS StringS)
 renderCond' = renderCond proxy escapeS renderEquals renderNotEquals where
@@ -475,6 +451,9 @@ renderCond' = renderCond proxy escapeS renderEquals renderNotEquals where
 
 escapeS :: StringS -> StringS
 escapeS a = let q = fromChar '"' in q <> a <> q
+
+delim' :: StringS
+delim' = fromChar delim
 
 toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues

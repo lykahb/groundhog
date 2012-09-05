@@ -41,12 +41,13 @@ module Database.Groundhog.Generic
   , replaceOne
   , matchElements
   , haveSameElems
+  , mapAllRows
   ) where
 
 import Database.Groundhog.Core
 
 import Control.Arrow ((***))
-import Control.Monad (liftM, forM_)
+import Control.Monad (liftM, forM_, (>=>))
 import Control.Monad.Trans.State (StateT (..), gets, modify)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
@@ -162,7 +163,7 @@ type Reference = (String, [(String, String)])
 mkColumns :: (DbType -> typ) -> String -> DbType -> ([Column typ], [Reference])
 mkColumns mkType columnName dbtype = go "" (columnName, dbtype) where
   go prefix (fname, typ) = (case typ of
-    DbEmbedded (EmbeddedDef False ts) -> concatMap' (go $ prefix ++ fname ++ "$") ts
+    DbEmbedded (EmbeddedDef False ts) -> concatMap' (go $ prefix ++ fname ++ [delim]) ts
     DbEmbedded (EmbeddedDef True  ts) -> concatMap' (go "") ts
     DbMaybe a      -> case go prefix (fname, a) of
       ([c], refs) -> ([c {cNull = True}], refs)
@@ -303,3 +304,7 @@ haveSameElems :: Show a => (a -> b -> Bool) -> [a] -> [b] -> Bool
 haveSameElems p xs ys = case matchElements p xs ys of
   ([], [], _) -> True
   _           -> False
+
+mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
+mapAllRows f pop = go where
+  go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)

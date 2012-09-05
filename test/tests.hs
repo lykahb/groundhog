@@ -97,7 +97,10 @@ main = do
               ]
 
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
-migr v = runMigration silentMigrationLogger (migrate v)
+migr v = do
+  runMigration silentMigrationLogger (migrate v)
+  m <- createMigration $ migrate v
+  [] @=? filter (/= Right []) (Map.elems m)
 
 mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> (m () -> IO ()) -> Test
 mkTestSuite label run = testGroup label
@@ -127,13 +130,13 @@ mkTestSuite label run = testGroup label
   , testCase "testLongNames" $ run testLongNames
   , testCase "testReference" $ run testReference
   , testCase "testMaybeReference" $ run testMaybeReference
-  , testCase "testDoubleMigration" $ run testDoubleMigration
   , testCase "testUniqueKey" $ run testUniqueKey
   , testCase "testProjection" $ run testProjection
   , testCase "testKeyNormalization" $ run testKeyNormalization
   , testCase "testAutoKeyField" $ run testAutoKeyField
   , testCase "testTime" $ run testTime
   ]
+--  [testCase "testPersistSettings" $ run testPersistSettings]
 
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
 sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
@@ -146,7 +149,7 @@ expected @=? actual = liftIO $ expected H.@=? actual
 testOrphanConstructors :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testOrphanConstructors = do
   migr (undefined :: Multi String)
-  executeRaw False "drop table Multi$String" []
+  executeRaw False "drop table \"Multi#String\"" []
   assertExc "Migration must fail in presence of orhpan constructor tables" $ migr (undefined :: Multi String)
 
 testNumber :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -232,20 +235,20 @@ testCond = do
   let rend :: forall v c s . (PersistEntity v, Constructor c, StringLike s) => Cond v c -> Maybe (RenderS s)
       rend = renderCond proxy id (\a b -> a <> fromString "=" <> b) (\a b -> a <> fromString "<>" <> b)
   let (===) :: forall v c a. (PersistEntity v, Constructor c, PrimitivePersistField a) => (String, [a]) -> Cond v c -> m ()
-      (query, vals) === cond = let Just (RenderS q v) = rend cond in (query, map (toPrim proxy) vals) @=? (q, v [])
+      (query, vals) === cond = let Just (RenderS q v) = rend cond in (updateDelim query, map (toPrim proxy) vals) @=? (q, v [])
 
   -- should cover all cases of renderCond comparison rendering
   ("int=?", [4 :: Int]) === (IntField ==. (4 :: Int))
   ("int=int", [] :: [Int]) === (IntField ==. IntField)
   ("int=(int+?)*?", [1, 2 :: Int]) === (IntField ==. (toArith IntField + 1) * 2)
 
-  ("single$val0=? AND single$val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def"))
-  ("single$val0=single$val1", [] :: [Int]) === (SingleField ~> Tuple2_0Selector ==. SingleField ~> Tuple2_1Selector :: Cond (Single (Int, Int)) SingleConstructor)
-  ("single$val1=single$val0*(?+single$val0)", [5 :: Int]) === (SingleField ~> Tuple2_1Selector ==. toArith (SingleField ~> Tuple2_0Selector) * (5 + toArith (SingleField ~> Tuple2_0Selector)) :: Cond (Single (Int, Int)) SingleConstructor)
+  ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def"))
+  ("single#val0=single#val1", [] :: [Int]) === (SingleField ~> Tuple2_0Selector ==. SingleField ~> Tuple2_1Selector :: Cond (Single (Int, Int)) SingleConstructor)
+  ("single#val1=single#val0*(?+single#val0)", [5 :: Int]) === (SingleField ~> Tuple2_1Selector ==. toArith (SingleField ~> Tuple2_0Selector) * (5 + toArith (SingleField ~> Tuple2_0Selector)) :: Cond (Single (Int, Int)) SingleConstructor)
 
   ("?=? AND ?=?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int) &&. SingleField ==. ()) -- SingleField ==. () is required to replace Any with a PersistEntity instance
   ("?<? OR ?<?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int) &&. SingleField ==. ())
-  ("?=single$val0 AND ?=single$val1", [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
+  ("?=single#val0 AND ?=single#val1", [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
   ("?=single+?*?", [1, 2, 3 :: Int]) === ((1 :: Int) ==. toArith SingleField + 2 * 3)
 
   ("?-single=?", [1, 2 :: Int]) === (1 - toArith SingleField ==. (2 :: Int))
@@ -258,8 +261,8 @@ testCond = do
   ("single=? AND (single=single OR single<>single)", [0 :: Int]) === (SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField /=. SingleField))
   
   -- test empty conditions
-  ("single$val0=? AND single$val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
-  ("single$val0=? AND single$val1=?", ["abc", "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
+  ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
+  ("single#val0=? AND single#val1=?", ["abc", "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
   
 
 testCount :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -341,17 +344,17 @@ testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
   proxy <- phantomDb
   k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
-  Just [listKey] <- queryRaw False "select \"single$val1\" from \"Single$Tuple2$$String$List$$List$$String\" where id=?" [toPrim proxy k] firstRow
-  listsInsideListKeys <- queryRaw False "select value from \"List$$List$$String$values\" where id=?" [listKey] $ mapAllRows return
+  Just [listKey] <- queryRaw False "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrim proxy k] firstRow
+  listsInsideListKeys <- queryRaw False "select value from \"List##List##String#values\" where id=?" [listKey] $ mapAllRows return
   deleteByKey k
   -- test if the main list table and the associated values were deleted
-  listMain <- queryRaw False "select * from \"List$$List$$String\" where id=?" [listKey] firstRow
+  listMain <- queryRaw False "select * from \"List##List##String\" where id=?" [listKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from \"List$$List$$String$values\" where id=?" [listKey] firstRow
+  listValues <- queryRaw False "select * from \"List##List##String#values\" where id=?" [listKey] firstRow
   Nothing @=? listValues
   -- test if the ephemeral values associated with the list were deleted
   forM_ listsInsideListKeys $ \listsInsideListKey -> do
-    sublist <- queryRaw False "select * from \"List$$String\" where id=?" listsInsideListKey firstRow
+    sublist <- queryRaw False "select * from \"List##String\" where id=?" listsInsideListKey firstRow
     Nothing @=? sublist
 
 testListTriggersOnUpdate :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -359,17 +362,17 @@ testListTriggersOnUpdate = do
   migr (undefined :: Single (String, [[String]]))
   proxy <- phantomDb
   k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
-  Just [listKey] <- queryRaw False "select \"single$val1\" from \"Single$Tuple2$$String$List$$List$$String\" where id=?" [toPrim proxy k] firstRow
-  listsInsideListKeys <- queryRaw False "select value from \"List$$List$$String$values\" where id=?" [listKey] $ mapAllRows return
+  Just [listKey] <- queryRaw False "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrim proxy k] firstRow
+  listsInsideListKeys <- queryRaw False "select value from \"List##List##String#values\" where id=?" [listKey] $ mapAllRows return
   replace k (Single ("", []) :: Single (String, [[String]]))
   -- test if the main list table and the associated values were deleted
-  listMain <- queryRaw False "select * from \"List$$List$$String\" where id=?" [listKey] firstRow
+  listMain <- queryRaw False "select * from \"List##List##String\" where id=?" [listKey] firstRow
   Nothing @=? listMain
-  listValues <- queryRaw False "select * from \"List$$List$$String$values\" where id=?" [listKey] firstRow
+  listValues <- queryRaw False "select * from \"List##List##String#values\" where id=?" [listKey] firstRow
   Nothing @=? listValues
   -- test if the ephemeral values associated with the list were deleted
   forM_ listsInsideListKeys $ \listsInsideListKey -> do
-    sublist <- queryRaw False "select * from \"List$$String\" where id=?" listsInsideListKey firstRow
+    sublist <- queryRaw False "select * from \"List##String\" where id=?" listsInsideListKey firstRow
     Nothing @=? sublist
 
 testDelete :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -378,9 +381,9 @@ testDelete = do
   proxy <- phantomDb
   k <- insert $ Second "abc"
   delete $ SecondField ==. "abc"
-  main <- queryRaw True "SELECT * FROM \"Multi$String\" WHERE id=?" [toPrim proxy k] firstRow
+  main <- queryRaw True "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrim proxy k] firstRow
   Nothing @=? main
-  constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id=?" [toPrim proxy k] firstRow
+  constr <- queryRaw True "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrim proxy k] firstRow
   Nothing @=? constr
 
 testDeleteByKey :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -389,9 +392,9 @@ testDeleteByKey = do
   proxy <- phantomDb
   k <- insert $ Second "abc"
   deleteByKey k
-  main <- queryRaw True "SELECT * FROM \"Multi$String\" WHERE id=?" [toPrim proxy k] firstRow
+  main <- queryRaw True "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrim proxy k] firstRow
   Nothing @=? main
-  constr <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id=?" [toPrim proxy k] firstRow
+  constr <- queryRaw True "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrim proxy k] firstRow
   Nothing @=? constr
 
 testReplaceMulti :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -400,7 +403,7 @@ testReplaceMulti = do
   proxy <- phantomDb
   -- we need Single to test that referenced value cam be replaced
   k <- insert $ Single (Second "abc")
-  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Multi$String\" WHERE id=?" [toPrim proxy k] firstRow
+  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrim proxy k] firstRow
   let valueKey = fromPrim proxy valueKey'
 
   replace valueKey (Second "def")
@@ -410,7 +413,7 @@ testReplaceMulti = do
   replace valueKey (First 5)
   replaced <- get valueKey
   Just (First 5) @=? replaced
-  oldConstructor <- queryRaw True "SELECT * FROM \"Multi$String$Second\" WHERE id=?" [toPrim proxy valueKey] firstRow
+  oldConstructor <- queryRaw True "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrim proxy valueKey] firstRow
   Nothing @=? oldConstructor
 
 testReplaceSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -420,7 +423,7 @@ testReplaceSingle = do
   migr val
   proxy <- phantomDb
   k <- insert val
-  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Single$String\" WHERE id=?" [toPrim proxy k] firstRow
+  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrim proxy k] firstRow
   let valueKey = fromPrim proxy valueKey'
   
   replace valueKey (Single "def")
@@ -443,10 +446,7 @@ testMigrateAddUnique = do
   let val = Old.AddUnique 5 "abc"
   migr (undefined :: Old.AddUnique)
   insert val
-  --migr (undefined :: New.AddUnique)
-  m <- createMigration $ migrate (undefined :: New.AddUnique)
-  printMigration m
-  executeMigration silentMigrationLogger m
+  migr (undefined :: New.AddUnique)
   assertExc "Uniqueness constraint not enforced" $ insert val
   return ()
 
@@ -473,25 +473,6 @@ testMigrateAddConstructorToMany = do
   val0 <- get k0
   Just (New.AddConstructorToMany0 5) @=? val0
 
-testDoubleMigration :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-testDoubleMigration = do
-  let val1 = Single ([""], 0 :: Int)
-  migr val1
-  m1 <- createMigration (migrate val1)
-  [] @=? filter (/= Right []) (Map.elems m1)
-
-  let val2 = Single [("", Single "")]
-  migr val2
-  m2 <- createMigration (migrate val2)
-  executeMigration silentMigrationLogger m2
-  [] @=? filter (/= Right []) (Map.elems m2)
-
-  let val3 = Second ("", [""])
-  migr val3
-  m3 <- createMigration (migrate val3)
-  [] @=? filter (/= Right []) (Map.elems m3)
-  return ()
-
 testLongNames :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testLongNames = do
   let val = Single [(Single [Single ""], 0 :: Int, [""], (), [""])]
@@ -513,7 +494,7 @@ testReference = do
   migr (undefined :: Single (Single String))
   proxy <- phantomDb
   k <- insert $ Single (Single "abc")
-  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Single$String\" WHERE id=?" [toPrim proxy k] firstRow
+  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrim proxy k] firstRow
   assertExc "Foreign key must prevent deletion" $ deleteByKey (fromPrim proxy valueKey' :: Key (Single String) BackendSpecific)
 
 testMaybeReference :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -521,7 +502,7 @@ testMaybeReference = do
   migr (undefined :: Single (Maybe (Single String)))
   proxy <- phantomDb
   k <- insert $ Single (Just (Single "abc"))
-  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single$Maybe$Single$String\" WHERE id=?" [toPrim proxy k] firstRow
+  Just [valueKey'] <- queryRaw True "SELECT \"single\" FROM \"Single#Maybe#Single#String\" WHERE id=?" [toPrim proxy k] firstRow
   assertExc "Foreign key must prevent deletion" $ deleteByKey (fromPrim proxy valueKey' :: Key (Single String) BackendSpecific)
 
 testUniqueKey :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -615,8 +596,12 @@ clean :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 clean = do
   executeRaw True "drop schema public cascade" []
   executeRaw True "create schema public" []
+  executeRaw True "alter schema public owner to test" []
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()
 assertExc err m = do
   happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\(e :: SomeException) -> runInIO $ return True)
   unless happened $ liftIO (H.assertFailure err)
+  
+updateDelim :: String -> String
+updateDelim = map (\c -> if c == '$' then delim else c)

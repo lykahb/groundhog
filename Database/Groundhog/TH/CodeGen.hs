@@ -37,10 +37,10 @@ mkEmbeddedPersistFieldInstance def = do
   persistName' <- do
     v <- newName "v"
     let mkLambda t = [|undefined :: $(forallT (thEmbeddedTypeParams def) (cxt []) [t| $(return embedded) -> $(return t) |]) |]
-    let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
+    let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
     let fullEmbeddedName = case null types of
          True  -> [| $(stringE $ dbEmbeddedName def) |]
-         False -> [| $(stringE $ dbEmbeddedName def) ++ "$" ++ $(paramNames) |]
+         False -> [| $(stringE $ dbEmbeddedName def) ++ [delim] ++ $(paramNames) |]
     let body = normalB $ fullEmbeddedName
     let pat = if null types then wildP else varP v
     funD 'persistName $ [ clause [pat] body [] ]
@@ -186,7 +186,7 @@ mkAutoKeyPersistFieldInstance def = case thAutoKey def of
     
     persistName' <- do
       a <- newName "a"
-      let body = [| "Key$" ++ persistName ((undefined :: Key v u -> v) $(varE a)) |]
+      let body = [| "Key" ++ [delim] ++ persistName ((undefined :: Key v u -> v) $(varE a)) |]
       funD 'persistName [clause [varP a] (normalB body) []]
     toPersistValues' <- funD 'toPersistValues [clause [] (normalB [| primToPersistValue |]) []]
     fromPersistValues' <- funD 'fromPersistValues [clause [] (normalB [| primFromPersistValue |]) []]
@@ -449,10 +449,10 @@ mkPersistEntityInstance def = do
             Just f -> f
             Nothing -> error $ "Field name " ++ show fName ++ " declared in unique not found"
     
-    let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
+    let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
     let fullEntityName = case null types of
          True  -> [| $(stringE $ dbEntityName def) |]
-         False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
+         False -> [| $(stringE $ dbEntityName def) ++ [delim] ++ $(paramNames) |]
 
     let body = normalB [| EntityDef $fullEntityName $typeParams' $constrs |]
     let pat = if null $ thTypeParams def then wildP else varP v
@@ -534,10 +534,10 @@ mkEntityPersistFieldInstance def = do
     v <- newName "v"
     let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
     
-    let paramNames = foldr1 (\p xs -> [| $p ++ "$" ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
+    let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
     let fullEntityName = case null types of
          True  -> [| $(stringE $ dbEntityName def) |]
-         False -> [| $(stringE $ dbEntityName def) ++ "$" ++ $(paramNames) |]
+         False -> [| $(stringE $ dbEntityName def) ++ [delim] ++ $(paramNames) |]
     let body = normalB $ fullEntityName
     let pat = if null types then wildP else varP v
     funD 'persistName $ [ clause [pat] body [] ]

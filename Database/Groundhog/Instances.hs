@@ -370,7 +370,7 @@ instance PersistField ZonedTime where
 -- instance (PersistField a, NeverNull a) => PersistField (Maybe a) where -- OK
 -- instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where -- HANGS
 instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
-  persistName a = "Maybe$" ++ persistName ((undefined :: Maybe a -> a) a)
+  persistName a = "Maybe" ++ delim : persistName ((undefined :: Maybe a -> a) a)
   toPersistValues Nothing = return (PersistNull:)
   toPersistValues (Just a) = toPersistValues a
   fromPersistValues [] = fail "fromPersistValues Maybe: empty list"
@@ -379,20 +379,20 @@ instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
   dbType a = DbMaybe $ dbType ((undefined :: Maybe a -> a) a)
 
 instance (PersistField a) => PersistField [a] where
-  persistName a = "List$$" ++ persistName ((undefined :: [] a -> a) a)
+  persistName a = "List" ++ delim : delim : persistName ((undefined :: [] a -> a) a)
   toPersistValues l = insertList l >>= toPersistValues
   fromPersistValues [] = fail "fromPersistValues []: empty list"
   fromPersistValues (x:xs) = phantomDb >>= \p -> getList (fromPrim p x) >>= \l -> return (l, xs)
   dbType a = DbList (persistName a) $ dbType ((undefined :: [] a -> a) a)
 
 instance PersistField () where
-  persistName _ = "Unit$"
+  persistName _ = "Unit" ++ [delim]
   toPersistValues _ = return id
   fromPersistValues xs = return ((), xs)
   dbType _ = DbEmbedded $ EmbeddedDef False []
 
 instance (PersistField a, PersistField b) => PersistField (a, b) where
-  persistName a = "Tuple2$$" ++ persistName ((undefined :: (a, b) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b) -> b) a)
+  persistName a = "Tuple2" ++ delim : delim : persistName ((undefined :: (a, b) -> a) a) ++ delim : persistName ((undefined :: (a, b) -> b) a)
   toPersistValues (a, b) = do
     a' <- toPersistValues a
     b' <- toPersistValues b
@@ -404,7 +404,7 @@ instance (PersistField a, PersistField b) => PersistField (a, b) where
   dbType a = DbEmbedded $ EmbeddedDef False [("val0", dbType ((undefined :: (a, b) -> a) a)), ("val1", dbType ((undefined :: (a, b) -> b) a))]
   
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
-  persistName a = "Tuple3$$" ++ persistName ((undefined :: (a, b, c) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b, c) -> b) a) ++ "$" ++ persistName ((undefined :: (a, b, c) -> c) a)
+  persistName a = "Tuple3" ++ delim : delim : persistName ((undefined :: (a, b, c) -> a) a) ++ delim : persistName ((undefined :: (a, b, c) -> b) a) ++ delim : persistName ((undefined :: (a, b, c) -> c) a)
   toPersistValues (a, b, c) = do
     a' <- toPersistValues a
     b' <- toPersistValues b
@@ -418,7 +418,7 @@ instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b,
   dbType a = DbEmbedded $ EmbeddedDef False [("val0", dbType ((undefined :: (a, b, c) -> a) a)), ("val1", dbType ((undefined :: (a, b, c) -> b) a)), ("val2", dbType ((undefined :: (a, b, c) -> c) a))]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
-  persistName a = "Tuple4$$" ++ persistName ((undefined :: (a, b, c, d) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d) -> b) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d) -> c) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d) -> d) a)
+  persistName a = "Tuple4" ++ delim : delim : persistName ((undefined :: (a, b, c, d) -> a) a) ++ delim : persistName ((undefined :: (a, b, c, d) -> b) a) ++ delim : persistName ((undefined :: (a, b, c, d) -> c) a) ++ delim : persistName ((undefined :: (a, b, c, d) -> d) a)
   toPersistValues (a, b, c, d) = do
     a' <- toPersistValues a
     b' <- toPersistValues b
@@ -434,7 +434,7 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d) => Per
   dbType a = DbEmbedded $ EmbeddedDef False [("val0", dbType ((undefined :: (a, b, c, d) -> a) a)), ("val1", dbType ((undefined :: (a, b, c, d) -> b) a)), ("val2", dbType ((undefined :: (a, b, c, d) -> c) a)), ("val3", dbType ((undefined :: (a, b, c, d) -> d) a))]
   
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
-  persistName a = "Tuple5$$" ++ persistName ((undefined :: (a, b, c, d, e) -> a) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> b) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> c) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> d) a) ++ "$" ++ persistName ((undefined :: (a, b, c, d, e) -> e) a)
+  persistName a = "Tuple5" ++ delim : delim : persistName ((undefined :: (a, b, c, d, e) -> a) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> b) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> c) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> d) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> e) a)
   toPersistValues (a, b, c, d, e) = do
     a' <- toPersistValues a
     b' <- toPersistValues b
@@ -452,7 +452,7 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d, Persis
   dbType a = DbEmbedded $ EmbeddedDef False [("val0", dbType ((undefined :: (a, b, c, d, e) -> a) a)), ("val1", dbType ((undefined :: (a, b, c, d, e) -> b) a)), ("val2", dbType ((undefined :: (a, b, c, d, e) -> c) a)), ("val3", dbType ((undefined :: (a, b, c, d, e) -> d) a)), ("val4", dbType ((undefined :: (a, b, c, d, e) -> e) a))]
 
 instance (DbDescriptor db, PersistEntity v) => PersistField (KeyForBackend db v) where
-  persistName a = "KeyForBackend$" ++ persistName ((undefined :: KeyForBackend db v -> v) a)
+  persistName a = "KeyForBackend" ++ delim : persistName ((undefined :: KeyForBackend db v -> v) a)
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
   dbType a = dbType ((undefined :: KeyForBackend db v -> v) a)
