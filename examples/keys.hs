@@ -23,9 +23,13 @@ definitions:
             fields: [artistName]
 |]
 
-data Album  = Album  { albumName :: String, artist :: Artist, collaborator :: Maybe (Key Artist (Unique ArtistName)) } deriving (Eq, Show)
--- We cannot use regular deriving because when it works, the Key Eq and Show instances are not created yet
-data Track  = Track  { trackName :: String, album :: Key Album BackendSpecific }
+data Album  = Album  { albumName :: String} deriving (Eq, Show)
+-- many-to-many relation
+data ArtistAlbum = ArtistAlbum {artist :: Key Artist (Unique ArtistName), album :: Key Album BackendSpecific }
+deriving instance Eq ArtistAlbum
+deriving instance Show ArtistAlbum
+-- We cannot use regular deriving because when it works, the Key Eq and Show instances for (Key Album BackendSpecific) are not created yet
+data Track  = Track  { albumTrack :: Key Album BackendSpecific, trackName :: String }
 deriving instance Eq Track
 deriving instance Show Track
 
@@ -33,29 +37,35 @@ mkPersist suffixNamingStyle [groundhog|
 definitions:
   - entity: Album
   - entity: Track
+  # keys of many-to-many relation form a unique key
+  - entity: ArtistAlbum
+    autoKey: null
+    keys:
+      - name: ArtistAlbumKey
+        default: true
+    constructors:
+      - name: ArtistAlbum
+        uniques:
+          - name: ArtistAlbumKey
+            fields: [artist, album]
 |]
 
 main :: IO ()
 main = withSqliteConn ":memory:" $ runSqliteConn $ do
-  let john = Artist "John Lennon"
-      george = Artist "George Harrison"
-      imagineAlbum = Album "Imagine" john (Just $ extractUnique george)
-  runMigration defaultMigrationLogger $ migrate (undefined :: Track)
-  insert george
-  albumKey <- insert imagineAlbum
-  let track = Track "Imagine" albumKey
-  insert track
-  liftIO $ print track
-  return ()
-  {-
-  
-  runMigration defaultMigrationLogger $ migrate john
-  mapM_ insert [john, jane]
-  -- get phones of the users. Only the required fields are fetched. Function project supports both regular and subfields
-  phones <- project (PhoneNumberField ~> Tuple2_1Selector) (() ==. ()) [Asc AutoKeyField] 0 0
-  liftIO $ print phones
-  -- we can also use 'project' as a replacement for 'select' with extended options.
-  -- the special datatype 'AutoKeyField' projects to the entity autokey, unique key phantoms project to keys, and the constructor phantoms project to the data itself
-  withIds <- project (AutoKeyField, Unique_name, UserConstructor) (() ==. ()) [] 0 0
-  liftIO $ print withIds
--}
+  let artists = [Artist "John Lennon", Artist "George Harrison"]
+      imagineAlbum = Album "Imagine"
+  runMigration defaultMigrationLogger $ do
+    migrate (undefined :: ArtistAlbum)
+    migrate (undefined :: Track)
+  mapM_ insert artists
+
+  imagineKey <- insert imagineAlbum
+  let tracks = map (Track imagineKey) ["Imagine", "Crippled Inside", "Jealous Guy", "It's So Hard", "I Don't Want to Be a Soldier, Mama, I Don't Want to Die", "Gimme Some Truth", "Oh My Love", "How Do You Sleep?", "How?", "Oh Yoko!"]
+  mapM_ insert tracks
+  mapM_ (\artist -> insert $ ArtistAlbum (extractUnique artist) imagineKey) artists
+  -- print first 3 tracks from any album with John Lennon
+  [albumKey'] <- project AlbumField (ArtistField ==. ArtistNameKey "John Lennon") [] 1 0
+  -- order by primary key
+  tracks' <- select (AlbumTrackField ==. albumKey') [Asc AutoKeyField] 3 0
+  liftIO $ print tracks'
+
