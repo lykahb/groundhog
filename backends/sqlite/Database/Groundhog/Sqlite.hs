@@ -11,6 +11,7 @@ module Database.Groundhog.Sqlite
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Migration
 import Database.Groundhog.Generic.Sql.Utf8
 
 import qualified Database.Sqlite as S
@@ -23,7 +24,7 @@ import Control.Monad.Trans.Reader (ask)
 import qualified Data.ByteString as BS
 import Data.Char (toUpper)
 import Data.Function (on)
-import Data.Int (Int64)
+import Data.Int (Int32, Int64)
 import Data.List (group, groupBy, intercalate, isInfixOf, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
@@ -35,7 +36,7 @@ import Data.Conduit.Pool
 data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
 
 instance DbDescriptor Sqlite where
-  type AutoKeyType Sqlite = Int64
+  type AutoKeyType Sqlite = Int32
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
@@ -176,11 +177,11 @@ migrate' = migrateRecursively migE migL where
     let items = ("id INTEGER NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols ++ map sqlReference valueRefs
     let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " items ++ ")"
     let expectedMainStructure = (Just "id", [], [], [])
-    let expectedValuesStructure = (Nothing, Column "id" False (dbType (0 :: Int64)) Nothing : Column "ord" False (dbType (0 :: Int64)) Nothing : valueCols, [], map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
+    let expectedValuesStructure = (Nothing, Column "id" False (dbType (0 :: Int32)) Nothing : Column "ord" False (dbType (0 :: Int32)) Nothing : valueCols, [], map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
     mainStructure <- checkTable mainName
     valuesStructure <- checkTable valuesName
     let triggerMain = []
-    (_, triggerValues) <- migTriggerOnDelete valuesName $ map snd $ mkDeletes valueCols
+    (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletes valueCols
     return $ case (mainStructure, valuesStructure) of
       (Nothing, Nothing) -> let addReferences = []
         in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ addReferences ++ triggerMain ++ triggerValues
@@ -200,10 +201,11 @@ migrate' = migrateRecursively migE migL where
 migConstr :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> ConstructorDef -> DbPersist Sqlite m (Bool, SingleMigration)
 migConstr simple name constr = do
   let cName = if simple then name else name ++ [delim] ++ constrName constr
-  let (columns, refs) = concat *** concat $ unzip $ map (uncurry $ mkColumns id) $ constrParams constr
+  let mkColumns' xs = concat *** concat $ unzip $ map (uncurry $ mkColumns id) xs
+  let (columns, refs) = mkColumns' $ constrParams constr
   tableStructure <- checkTable cName
   let dels = mkDeletes columns
-  (triggerExisted, delTrigger) <- migTriggerOnDelete cName (map snd dels)
+  (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
   updTriggers <- liftM concat $ mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) dels
   
   let mainTableName = if simple then Nothing else Just name
@@ -212,7 +214,7 @@ migConstr simple name constr = do
       mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
       autoKey = fmap (\x -> escape x ++ " INTEGER PRIMARY KEY" ++ mainRef) $ constrAutoKeyName constr
   
-      uniques = constrUniques constr
+      uniques = map (\(UniqueDef uName cols) -> UniqueDef' uName (map colName $ fst $ mkColumns' cols)) $ constrUniques constr
       -- refs instead of refs' because the reference to the main table id is hardcoded in mainRef
       items = maybeToList autoKey ++ map showColumn columns ++ map sqlUnique uniques ++ map sqlReference refs
       addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ intercalate ", " items ++ ")"
@@ -233,9 +235,9 @@ migConstr simple name constr = do
     else Left errs)
 
 -- it handles only delete operations. So far when list replace is not allowed, it is ok
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [String] -> DbPersist Sqlite m (Bool, [AlterDB Affinity])
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB Affinity])
 migTriggerOnDelete name deletes = do
-  let addTrigger = AddTriggerOnDelete name name (concat deletes)
+  let addTrigger = AddTriggerOnDelete name name (concatMap snd deletes)
   x <- checkTrigger name
   return $ case x of
     Nothing | null deletes -> (False, [])
@@ -285,9 +287,6 @@ checkSqliteMaster vtype name = do
       err               -> throwErr $ "column sql is not string: " ++ show err
     Just xs -> throwErr $ "requested 1 column, returned " ++ show xs
 
--- | primary key name, columns, uniques, and references wtih constraint names
-type TableInfo typ = (Maybe String, [Column typ], [UniqueDef], [(Maybe String, Reference)])
-
 checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe (Either [String] (TableInfo Affinity)))
 checkTable tableName = do
   let fromName = escapeS . fromString
@@ -302,10 +301,10 @@ checkTable tableName = do
       indexList <- queryRaw' ("pragma index_list(" <> fromName tableName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
-        let mkUnique :: [(Int, Int, String)] -> UniqueDef
-            mkUnique us = UniqueDef
+        let mkUnique :: [(Int, Int, String)] -> UniqueDef'
+            mkUnique us = UniqueDef'
               ""
-              (map (\(_, _, columnName) -> (columnName, DbString)) us)
+              (map (\(_, _, columnName) -> columnName) us)
         queryRaw' ("pragma index_info(" <> fromName name <> ")") [] $ liftM mkUnique . mapAllRows (return . fst . fromPurePersistValues proxy)
       foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tableName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       (foreigns :: [(Maybe String, Reference)]) <- do
@@ -326,7 +325,7 @@ checkTable tableName = do
             Right u -> (Nothing, u:uniques)
       return $ Right (primaryKey, columns, uniques', foreigns)
 
-checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Either (Maybe String) UniqueDef)
+checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Either (Maybe String) UniqueDef')
 checkPrimaryKey tableName = do
   tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tableName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   let rawColumns :: [(Int, (String, String, Int, Maybe String, Int))]
@@ -334,7 +333,7 @@ checkPrimaryKey tableName = do
   return $ case rawColumns of
     [] -> Left Nothing
     [(_, (name, _, _, _, _))] -> Left (Just name)
-    us -> Right $ UniqueDef "" (map (\(_, (name, _, _, _, _)) -> (name, DbString)) us)
+    us -> Right $ UniqueDef' "" (map (\(_, (name, _, _, _, _)) -> name) us)
     
 -- from database, from datatype
 getAlters :: TableInfo Affinity
@@ -351,10 +350,10 @@ getAlters (oldId, oldColumns, oldUniques, oldRefs) (newId, newColumns, newUnique
       _ -> []
     (oldOnlyRefs, newOnlyRefs, _) = matchElements compareRefs oldRefs newRefs
 
-    colAlters = map (\x -> (cName x, Drop)) oldOnlyColumns ++ map (\x -> (cName x, Add x)) newOnlyColumns ++ concatMap migrateColumn matchedColumns ++ primaryKeyAlters
+    colAlters = map (\x -> (colName x, Drop)) oldOnlyColumns ++ map (\x -> (colName x, Add x)) newOnlyColumns ++ concatMap migrateColumn matchedColumns ++ primaryKeyAlters
     tableAlters = 
-         map (\(UniqueDef name _) -> DropConstraint name) oldOnlyUniques
-      ++ map (\(UniqueDef name cols) -> AddUniqueConstraint name (map fst cols)) newOnlyUniques
+         map (\(UniqueDef' name _) -> DropConstraint name) oldOnlyUniques
+      ++ map (\(UniqueDef' name cols) -> AddUniqueConstraint name cols) newOnlyUniques
       ++ concatMap migrateUniq matchedUniques
       ++ map (DropReference . fromMaybe (error "getAlters: old reference does not have name") . fst) oldOnlyRefs
       ++ map (AddReference . snd) newOnlyRefs
@@ -432,12 +431,12 @@ sqlReference (tname, columns) = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ esca
   (our, foreign) = f *** f $ unzip columns
   f = intercalate ", " . map escape
 
-sqlUnique :: UniqueDef -> String
-sqlUnique (UniqueDef cname cols) = concat
+sqlUnique :: UniqueDef' -> String
+sqlUnique (UniqueDef' name cols) = concat
     [ "CONSTRAINT "
-    , escape cname
+    , escape name
     , " UNIQUE ("
-    , intercalate "," $ map (escape . fst) cols
+    , intercalate "," $ map escape cols
     , ")"
     ]
 
@@ -480,7 +479,7 @@ insertBy' u v = do
   
   let ifAbsent tname constr = do
       let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawTyped query [DbInt64] (uniques []) id
+      x <- queryRawTyped query [DbInt32] (uniques []) id
       case x of
         Nothing  -> liftM Right $ insert v
         Just [k] -> liftM (Left . fst) $ fromPersistValues [k]
@@ -492,7 +491,7 @@ insertBy' u v = do
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> Utf8
 insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" where
   fields = case constrAutoKeyName c of
-    Just idName | withId -> (idName, dbType (0 :: Int64)):constrParams c
+    Just idName | withId -> (idName, dbType (0 :: Int32)):constrParams c
     _                    -> constrParams c
   fieldNames   = renderFields escapeS fields
   placeholders = renderFields (const $ fromChar '?') fields
@@ -509,7 +508,7 @@ insertByAll' v = do
 
   let ifAbsent tname constr = do
       let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawTyped query [DbInt64] (concatMap snd uniques) id
+      x <- queryRawTyped query [DbInt32] (concatMap snd uniques) id
       case x of
         Nothing  -> liftM Right $ insert v
         Just [k] -> liftM (Left . fst) $ fromPersistValues [k]
@@ -597,13 +596,13 @@ selectAll' = start where
       constr = head $ constructors e
       fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId constr) $ renderFields escapeS (constrParams constr)
       query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name)
-      types = maybe id (const $ (DbInt64:)) (constrId constr) $ getConstructorTypes constr
+      types = maybe id (const $ (DbInt32:)) (constrId constr) $ getConstructorTypes constr
       in queryRawTyped query types [] $ mapAllRows $ mkEntity 0
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(cNum, constr) -> do
         let fields = fromJust (constrId constr) <> fromChar ',' <> renderFields escapeS (constrParams constr)
         let cName = fromString $ name ++ [delim] ++ constrName constr
         let query = "SELECT " <> fields <> " FROM " <> escapeS cName
-        let types = DbInt64:getConstructorTypes constr
+        let types = DbInt32:getConstructorTypes constr
         queryRawTyped query types [] $ mapAllRows $ mkEntity cNum
 
   e = entityDef (undefined :: v)
@@ -627,7 +626,7 @@ get' (k :: Key v BackendSpecific) = do
         Nothing -> return Nothing
     else do
       let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawTyped query [DbInt64] [toPrim proxy k] id
+      x <- queryRawTyped query [DbInt32] [toPrim proxy k] id
       case x of
         Just [discr] -> do
           let constructorNum = fromPrim proxy discr
@@ -717,7 +716,7 @@ countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersi
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
   let query = "SELECT COUNT(*) FROM " <> escapeS (fromString name)
-  x <- queryRawTyped query [DbInt64] [] id
+  x <- queryRawTyped query [DbInt32] [] id
   case x of
     Just [num] -> return $ fromPrim proxy num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -924,40 +923,18 @@ compareColumns :: Column Affinity -> Column DbType -> Bool
 compareColumns (Column name1 isNull1 aff1 def1) (Column name2 isNull2 type2 def2) =
   aff1 == dbTypeAffinity type2 && name1 == name2 && isNull1 == isNull2 && def1 == def2
 
-compareUniqs :: UniqueDef -> UniqueDef -> Bool
-compareUniqs (UniqueDef _ cols1) (UniqueDef _ cols2) = haveSameElems ((==) `on` fst) cols1 cols2
+compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
+compareUniqs (UniqueDef' _ cols1) (UniqueDef' _ cols2) = haveSameElems (==) cols1 cols2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
-data AlterColumn = Type DbType | IsNull | NotNull | Add (Column DbType) | Drop | AddPrimaryKey
-                 | Default String | NoDefault | UpdateValue String deriving Show
-
-type AlterColumn' = (String, AlterColumn)
-
-data AlterTable = AddUniqueConstraint String [String]
-                | DropConstraint String
-                | AddReference Reference
-                | DropReference String
-                | AlterColumn AlterColumn' deriving Show
-
-data AlterDB typ = AddTable String
-                 -- | Table name, create statement, structure of table from DB, structure of table from datatype, alters
-                 | AlterTable String String (TableInfo typ) (TableInfo DbType) [AlterTable]
-                 -- | Trigger name, table name
-                 | DropTrigger String String
-                 -- | Trigger name, table name, body
-                 | AddTriggerOnDelete String String String
-                 -- | Trigger name, table name, field name, body
-                 | AddTriggerOnUpdate String String String String
-  deriving Show
-             
 -- from database, from datatype
-migrateUniq :: (UniqueDef, UniqueDef) -> [AlterTable]
-migrateUniq (UniqueDef name cols, UniqueDef name' cols') = if sort (map fst cols) == sort (map fst cols')
+migrateUniq :: (UniqueDef', UniqueDef') -> [AlterTable]
+migrateUniq (UniqueDef' name cols, UniqueDef' name' cols') = if haveSameElems (==) cols cols'
   then []
-  else [DropConstraint name, AddUniqueConstraint name' $ map fst cols']
+  else [DropConstraint name, AddUniqueConstraint name' cols']
 
 -- from database, from datatype
 migrateColumn :: (Column Affinity, Column DbType) -> [AlterColumn']
@@ -989,8 +966,8 @@ showAlterDb (AlterTable table createTable (oldId, oldCols, _, _) (newId, newCols
     tableTmp = table ++ "_backup"
     copy (from, fromCols) (to, toCols) = "INSERT INTO " ++ escape to ++ "(" ++ toCols ++ ") SELECT " ++ fromCols ++ " FROM " ++ escape from
     (oldOnlyColumns, _, commonColumns) = matchElements compareColumns oldCols newCols
-    columnsTmp = intercalate "," $ map escape $ maybeToList (newId >> oldId) ++ map (cName . snd) commonColumns
-    columnsNew = intercalate "," $ map escape $ maybeToList (oldId >> newId) ++ map (cName . snd) commonColumns
+    columnsTmp = intercalate "," $ map escape $ maybeToList (newId >> oldId) ++ map (colName . snd) commonColumns
+    columnsNew = intercalate "," $ map escape $ maybeToList (oldId >> newId) ++ map (colName . snd) commonColumns
     isSupported (AlterColumn (_, Add _)) = True
     isSupported (AlterColumn (_, UpdateValue _)) = True
     isSupported _ = False
@@ -1000,6 +977,7 @@ showAlterDb (AddTriggerOnDelete trigName tableName body) = Right [(False, trigge
   "CREATE TRIGGER " ++ escape trigName ++ " DELETE ON " ++ escape tableName ++ " BEGIN " ++ body ++ "END")]
 showAlterDb (AddTriggerOnUpdate trigName tableName fieldName body) = Right [(False, triggerPriority,
   "CREATE TRIGGER " ++ escape trigName ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape tableName ++ " BEGIN " ++ body ++ "END")]
+showAlterDb alt = error $ "showAlterDb: does not support " ++ show alt
 
 showAlterTable :: String -> AlterTable -> (Bool, Int, String)
 showAlterTable table (AlterColumn alt) = showAlterColumn table alt

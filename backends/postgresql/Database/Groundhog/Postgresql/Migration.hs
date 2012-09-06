@@ -3,16 +3,17 @@ module Database.Groundhog.Postgresql.Migration (migrate') where
 
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Migration
 import Database.Groundhog.Postgresql.Base
 
-import Control.Arrow ((&&&), (***), second)
+import Control.Arrow ((&&&), (***))
 import Control.Monad (liftM)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int32)
-import Data.List (intercalate, group, groupBy, sort)
+import Data.List (intercalate, group, groupBy)
 import Data.Maybe (mapMaybe, fromJust, fromMaybe, maybeToList)
 
 {- ********************RULES******************** --
@@ -56,7 +57,7 @@ migrate' = migrateRecursively migE migL where
         x <- checkTable name
         -- check whether the table was created for multiple constructors before
         case x of
-          Just (Right (_, columns, _, _)) | columns == mainTableColumns -> do
+          Just (Right (_, columns, _, _)) | haveSameElems compareColumns columns mainTableColumns -> do
             return $ Left ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
           Just (Left errs) -> return (Left errs)
           _ -> liftM snd $ migConstr True name $ head constrs
@@ -67,10 +68,10 @@ migrate' = migrateRecursively migE migL where
         case maincolumns of
           Nothing -> do
             -- no constructor tables can exist if there is no main data table
-            let orphans = filter fst res
+            let orphans = filter (fst . fst) $ zip res constrs
             return $ if null orphans
               then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
-              else Left $ foldl (\l (_, c) -> ("Orphan constructor table found: " ++ constrTable c):l) [] $ filter (fst.fst) $ zip res constrs
+              else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
           Just (Right (Just _, columns, [], [])) -> do
             if haveSameElems compareColumns columns mainTableColumns
               then do
@@ -99,13 +100,13 @@ migrate' = migrateRecursively migE migL where
     let triggerMain = []
     (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletes valueCols
     return $ case (mainStructure, valuesStructure) of
-      (Nothing, Nothing) -> let addReferences = AlterTable valuesName valuesQuery expectedValuesStructure expectedValuesStructure $ map AddReference valueRefs
-        in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ [addReferences] ++ triggerMain ++ triggerValues
+      (Nothing, Nothing) -> let addReferences = [AlterTable valuesName valuesQuery expectedValuesStructure expectedValuesStructure $ map AddReference valueRefs]
+        in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ addReferences ++ triggerMain ++ triggerValues
       (Just (Right mainStructure'), Just (Right valuesStructure')) -> let
         f name a@(id1, cols1, uniqs1, refs1) b@(id2, cols2, uniqs2, refs2) = if id1 == id2 && haveSameElems compareColumns cols1 cols2 && haveSameElems compareUniqs uniqs1 uniqs2 && haveSameElems compareRefs refs1 refs2
           then []
-          else ["List table " ++ name ++ " error. Expected: " ++ show a ++ ". Found: " ++ show b]
-        errors = f mainName expectedMainStructure mainStructure' ++ f valuesName expectedValuesStructure valuesStructure'
+          else ["List table " ++ name ++ " error. Expected: " ++ show b ++ ". Found: " ++ show a]
+        errors = f mainName mainStructure' expectedMainStructure ++ f valuesName valuesStructure' expectedValuesStructure
         in if null errors then Right [] else Left errors
       (Just (Left errs1), Just (Left errs2)) -> Left $ errs1 ++ errs2
       (Just (Left errs), Just _) -> Left errs
@@ -129,7 +130,8 @@ showColumn (Column n nu t def) = concat
 migConstr :: (MonadBaseControl IO m, MonadIO m) => Bool -> String -> ConstructorDef -> DbPersist Postgresql m (Bool, SingleMigration)
 migConstr simple name constr = do
   let cName = if simple then name else name ++ [delim] ++ constrName constr
-  let (columns, refs) = concat *** concat $ unzip $ map (uncurry $ mkColumns id) $ constrParams constr
+  let mkColumns' xs = concat *** concat $ unzip $ map (uncurry $ mkColumns id) xs
+  let (columns, refs) = mkColumns' $ constrParams constr
   tableStructure <- checkTable cName
   let dels = mkDeletes columns
   (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
@@ -141,7 +143,7 @@ migConstr simple name constr = do
       mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
       autoKey = fmap (\x -> escape x ++ " SERIAL PRIMARY KEY UNIQUE" ++ mainRef) $ constrAutoKeyName constr
   
-      uniques = constrUniques constr
+      uniques = map (\(UniqueDef uName cols) -> UniqueDef' uName (map colName $ fst $ mkColumns' cols)) $ constrUniques constr
       -- refs instead of refs' because the reference to the main table id is hardcoded in mainRef
       items = maybeToList autoKey ++ map showColumn columns
       addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ intercalate ", " items ++ ")"
@@ -149,7 +151,7 @@ migConstr simple name constr = do
       expectedTableStructure = (constrAutoKeyName constr, columns, uniques, map (\r -> (Nothing, r)) refs')
       (migErrs, constrExisted, mig) = case tableStructure of
         Nothing  -> let
-          rest = AlterTable cName addTable expectedTableStructure expectedTableStructure $ map (\(UniqueDef uName fields) -> AddUniqueConstraint uName (map fst fields)) uniques ++ map AddReference refs
+          rest = AlterTable cName addTable expectedTableStructure expectedTableStructure $ map (\(UniqueDef' uName fields) -> AddUniqueConstraint uName fields) uniques ++ map AddReference refs
           in ([], False, [AddTable addTable, rest])
         Just (Right oldTableStructure) -> let
           alters = getAlters oldTableStructure expectedTableStructure
@@ -263,9 +265,6 @@ mkDeletes columns = mapMaybe delField columns where
   ephemeralName (DbList name _) = Just name
   ephemeralName _ = Nothing
 
--- | primary key name, columns, uniques, and references wtih constraint names
-type TableInfo typ = (Maybe String, [Column typ], [UniqueDef], [(Maybe String, Reference)])
-
 checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] (TableInfo DbType)))
 checkTable name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrim proxy name] id
@@ -275,38 +274,27 @@ checkTable name = do
       cols <- queryRaw' "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default FROM information_schema.columns c WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?) ORDER BY c.ordinal_position" [toPrim proxy name, toPrim proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
       let (col_errs, cols') = partitionEithers cols
       
-      let helperU (con, (col, typ)) = case readSqlType typ of
-            Left s -> Left s
-            Right typ' -> Right (con, (col, typ'))
-      rawUniqs <- queryRaw' "SELECT u.constraint_name, u.column_name, c.udt_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrim proxy name] (mapAllRows $ return . helperU . fst . fromPurePersistValues proxy)
-      let (uniq_errs, uniqRows) = partitionEithers rawUniqs
-      let mkUniq us = UniqueDef (fst $ head us) (map snd us)
+      uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrim proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      let mkUniq us = UniqueDef' (fst $ head us) (map snd us)
       let uniqs' = map mkUniq $ groupBy ((==) `on` fst) uniqRows
       references <- checkTableReferences name
       primaryKeyResult <- checkPrimaryKey name
-      let (primary_errs, primaryKey, uniqs'') = case primaryKeyResult of
-            Left errs -> (errs, Nothing, uniqs')
-            Right (Left primaryKeyName) -> ([], primaryKeyName, uniqs')
-            Right (Right u) -> ([], Nothing, u:uniqs')
-      return $ Just $ case col_errs ++ uniq_errs ++ primary_errs of
+      let (primaryKey, uniqs'') = case primaryKeyResult of
+            (Left primaryKeyName) -> (primaryKeyName, uniqs')
+            (Right u) -> (Nothing, u:uniqs')
+      return $ Just $ case col_errs of
         []   -> Right (primaryKey, cols', uniqs'', references)
         errs -> Left errs
     Nothing -> return Nothing
 
-checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Either [String] (Either (Maybe String) UniqueDef))
+checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
 checkPrimaryKey name = do
-  let helperU (con, (col, typ)) = case readSqlType typ of
-        Left s -> Left s
-        Right typ' -> Right (con, (col, typ'))
-  rawUniqs <- queryRaw' "SELECT u.constraint_name, u.column_name, c.udt_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?" [toPrim proxy name] (mapAllRows $ return . helperU . fst . fromPurePersistValues proxy)
-  let (uniq_errs, uniqRows) = partitionEithers rawUniqs
-  let mkUniq us = UniqueDef (fst $ head us) (map snd us)
-  return $ case uniq_errs of
-    [] -> Right $ case uniqRows of
-      [] -> Left Nothing
-      [(_, (primaryKeyName, _))] -> Left $ Just primaryKeyName
-      us -> Right $ mkUniq us
-    errs -> Left errs
+  uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?" [toPrim proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  let mkUniq us = UniqueDef' (fst $ head us) (map snd us)
+  return $ case uniqRows of
+    [] -> Left Nothing
+    [(_, primaryKeyName)] -> Left $ Just primaryKeyName
+    us -> Right $ mkUniq us
 
 getColumn :: String -> (String, String, String, Maybe String) -> Either String (Column DbType)
 getColumn tname (column_name, is_nullable, udt_name, d) = case readSqlType udt_name of
@@ -323,30 +311,6 @@ checkTableReferences tableName = do
       references = map mkReference $ groupBy ((==) `on` fst) x
   return references
 
-data AlterColumn = Type DbType | IsNull | NotNull | Add (Column DbType) | Drop | AddPrimaryKey
-                 | Default String | NoDefault | UpdateValue String deriving Show
-
-type AlterColumn' = (String, AlterColumn)
-
-data AlterTable = AddUniqueConstraint String [String]
-                | DropConstraint String
-                | AddReference Reference
-                | DropReference String
-                | AlterColumn AlterColumn' deriving Show
-
-data AlterDB typ = AddTable String
-                 -- | Table name, create statement, structure of table from DB, structure of table from datatype, alters
-                 | AlterTable String String (TableInfo typ) (TableInfo DbType) [AlterTable]
-                 -- | Trigger name, table name
-                 | DropTrigger String String
-                 -- | Trigger name, table name, body
-                 | AddTriggerOnDelete String String String
-                 -- | Trigger name, table name, field name, body
-                 | AddTriggerOnUpdate String String String String
-                 | CreateOrReplaceFunction String
-                 | DropFunction String
-  deriving Show
-
 -- from database, from datatype
 getAlters :: TableInfo DbType
           -> TableInfo DbType
@@ -362,19 +326,19 @@ getAlters (oldId, oldColumns, oldUniques, oldRefs) (newId, newColumns, newUnique
       _ -> []
     (oldOnlyRefs, newOnlyRefs, _) = matchElements compareRefs oldRefs newRefs
 
-    colAlters = map (\x -> (cName x, Drop)) oldOnlyColumns ++ map (\x -> (cName x, Add x)) newOnlyColumns ++ concatMap migrateColumn commonColumns ++ primaryKeyAlters
+    colAlters = map (\x -> (colName x, Drop)) oldOnlyColumns ++ map (\x -> (colName x, Add x)) newOnlyColumns ++ concatMap migrateColumn commonColumns ++ primaryKeyAlters
     tableAlters = 
-         map (\(UniqueDef name _) -> DropConstraint name) oldOnlyUniques
-      ++ map (\(UniqueDef name cols) -> AddUniqueConstraint name (map fst cols)) newOnlyUniques
+         map (\(UniqueDef' name _) -> DropConstraint name) oldOnlyUniques
+      ++ map (\(UniqueDef' name cols) -> AddUniqueConstraint name cols) newOnlyUniques
       ++ concatMap migrateUniq commonUniques
       ++ map (DropReference . fromMaybe (error "getAlters: old reference does not have name") . fst) oldOnlyRefs
       ++ map (AddReference . snd) newOnlyRefs
     
 -- from database, from datatype
-migrateUniq :: (UniqueDef, UniqueDef) -> [AlterTable]
-migrateUniq (UniqueDef name cols, UniqueDef name' cols') = if sort (map fst cols) == sort (map fst cols')
+migrateUniq :: (UniqueDef', UniqueDef') -> [AlterTable]
+migrateUniq (UniqueDef' name cols, UniqueDef' name' cols') = if haveSameElems (==) cols cols'
   then []
-  else [DropConstraint name, AddUniqueConstraint name' $ map fst cols']
+  else [DropConstraint name, AddUniqueConstraint name' cols']
 
 -- from database, from datatype
 migrateColumn :: (Column DbType, Column DbType) -> [AlterColumn']
@@ -535,10 +499,10 @@ showSqlType t = error $ "showSqlType: DbType does not have corresponding databas
 
 compareColumns :: Column DbType -> Column DbType -> Bool
 compareColumns = ((==) `on` f) where
-  f col = col {cType = simplifyType (cType col)}
+  f col = col {colType = simplifyType (colType col)}
 
-compareUniqs :: UniqueDef -> UniqueDef -> Bool
-compareUniqs (UniqueDef name1 cols1) (UniqueDef name2 cols2) = name1 == name2 && haveSameElems ((==) `on` second simplifyType) cols1 cols2
+compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
+compareUniqs (UniqueDef' name1 cols1) (UniqueDef' name2 cols2) = name1 == name2 && haveSameElems (==) cols1 cols2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where

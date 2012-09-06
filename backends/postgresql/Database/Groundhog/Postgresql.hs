@@ -10,7 +10,7 @@ module Database.Groundhog.Postgresql
 
 import Database.Groundhog
 import Database.Groundhog.Core
-import Database.Groundhog.Generic hiding (cName)
+import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql.String
 import Database.Groundhog.Postgresql.Base
 import Database.Groundhog.Postgresql.Migration
@@ -22,7 +22,7 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control(MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.ByteString.Char8 (pack)
-import Data.Int (Int64)
+import Data.Int (Int32, Int64)
 import Data.List (intercalate)
 import Data.Maybe (fromJust) 
 import Data.Monoid
@@ -145,7 +145,7 @@ insertBy' u v = do
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> StringS
 insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning where
   (fields, returning) = case constrAutoKeyName c of
-    Just idName | withId    -> ((idName, dbType (0 :: Int64)):constrParams c, mempty)
+    Just idName | withId    -> ((idName, dbType (0 :: Int32)):constrParams c, mempty)
                 | otherwise -> (constrParams c, "RETURNING(" <> escapeS (fromString idName) <> ")")
     _                       -> (constrParams c, mempty)
   fieldNames   = renderFields escapeS fields

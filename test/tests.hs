@@ -30,7 +30,7 @@ data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
 data Settable = Settable {settable1 :: String, settable2 :: String, settableTuple :: (Int, (String, Int))} deriving (Eq, Show)
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String) BackendSpecific, refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String) BackendSpecific)}
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
-data UniqueKeySample a = UniqueKeySample { uniqueKey1 :: String, uniqueKey2 :: Int, uniqueVal :: a } deriving (Eq, Show)
+data UniqueKeySample = UniqueKeySample { uniqueKey1 :: String, uniqueKey2 :: Int, uniqueKey3 :: String } deriving (Eq, Show)
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
 deriving instance Show Keys
@@ -77,13 +77,29 @@ mkPersist suffixNamingStyle [groundhog|
 - entity: UniqueKeySample
   autoKey: null
   keys:
-    - name: unique_key
+    - name: unique_key_one_column
+    - name: unique_key_two_columns
       default: true
   constructors:
     - name: UniqueKeySample
       uniques:
-        - name: unique_key
-          fields: [uniqueKey1, uniqueKey2]
+        - name: unique_key_one_column
+          fields: [uniqueKey1]
+        - name: unique_key_two_columns
+          fields: [uniqueKey2, uniqueKey3]
+|]
+
+data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
+
+mkPersist suffixNamingStyle [groundhog|
+- entity: HoldsUniqueKey
+  keys:
+    - name: foreignUniqueKey
+  constructors:
+  - name: HoldsUniqueKey
+    uniques:
+      - name: foreignUniqueKey
+        fields: [foreignUniqueKey]
 |]
 
 main :: IO ()
@@ -131,12 +147,13 @@ mkTestSuite label run = testGroup label
   , testCase "testReference" $ run testReference
   , testCase "testMaybeReference" $ run testMaybeReference
   , testCase "testUniqueKey" $ run testUniqueKey
+  , testCase "testForeignKeyUnique" $ run testForeignKeyUnique
   , testCase "testProjection" $ run testProjection
   , testCase "testKeyNormalization" $ run testKeyNormalization
   , testCase "testAutoKeyField" $ run testAutoKeyField
   , testCase "testTime" $ run testTime
   ]
---  [testCase "testPersistSettings" $ run testPersistSettings]
+--  [testCase "testForeignKeyUnique" $ run testForeignKeyUnique]
 
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
 sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
@@ -513,8 +530,17 @@ testUniqueKey = do
   k <- insert val
   val1 <- get k
   Just val @=? val1
-  val2 <- select (Unique_key ==. Unique_keyKey "abc" 5) [] 0 0
+  val2 <- select (Unique_key_two_columns ==. Unique_key_two_columnsKey 5 "def") [] 0 0
   [uVal] @=? val2
+
+testForeignKeyUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testForeignKeyUnique = do
+  let uVal = UniqueKeySample "abc" 5 "def"
+  let val = HoldsUniqueKey (extractUnique uVal)
+  migr val
+  insert uVal
+  insert val
+  return ()
 
 testProjection :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testProjection = do
@@ -526,7 +552,7 @@ testProjection = do
   let uVal = UniqueKeySample "abc" 5 "def"
   migr uVal
   insert uVal
-  result2 <- project Unique_key ("" ==. "") [] 0 0
+  result2 <- project Unique_key_two_columns ("" ==. "") [] 0 0
   [extractUnique uVal] @=? result2
 
 testKeyNormalization :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -564,8 +590,8 @@ testTime = do
   utcTime <- liftIO Time.getCurrentTime
   let dayTime = Time.timeToTimeOfDay $ Time.utctDayTime utcTime
   let day = Time.utctDay utcTime
-  zonedTime <- liftIO Time.getZonedTime
-  liftIO $ print zonedTime
+  timeZone <- liftIO Time.getCurrentTimeZone
+  let zonedTime = Time.utcToZonedTime (timeZone {Time.timeZoneName = ""}) utcTime
   let val = Single (utcTime, dayTime, day, zonedTime)
   migr val
   k <- insert val
