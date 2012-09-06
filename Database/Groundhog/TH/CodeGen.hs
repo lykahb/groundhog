@@ -27,7 +27,7 @@ import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Monad (liftM, liftM2, forM, foldM, filterM, replicateM)
-import Data.List (nub)
+import Data.List (findIndex, nub)
 
 mkEmbeddedPersistFieldInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedPersistFieldInstance def = do
@@ -134,19 +134,19 @@ mkPurePersistFieldInstance dataType cName fDefs context = do
     funD 'toPurePersistValues [clause [varP proxy, pat] (normalB body) []]
 
   fromPurePersistValues' <- let
-    goField xs vars result failure = do
+    goField xs vars result failure proxy = do
       (fields, rest) <- spanM (liftM not . isPrim . snd) vars
       xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
-      let f oldXs newXs (fname, _) = valD (conP '(,) [varP fname, varP newXs]) (normalB [| fromPurePersistValues $(varE oldXs) |]) []
+      let f oldXs newXs (fname, _) = valD (conP '(,) [varP fname, varP newXs]) (normalB [| fromPurePersistValues $(varE proxy) $(varE oldXs) |]) []
       let stmts = zipWith3 f xss (tail xss) fields
-      (isFailureUsed, expr) <- goPrim (last xss) rest result failure
+      (isFailureUsed, expr) <- goPrim (last xss) rest result failure proxy
       return (isFailureUsed, letE stmts expr)
-    goPrim xs vars result failure = do
+    goPrim xs vars result failure proxy = do
       xs' <- newName "xs"
       (prim, rest) <- spanM (isPrim . snd) vars
       (isFailureUsed, body') <- case rest of
         [] -> return (False, [| ($result, $(varE xs')) |])
-        _  -> goField xs' rest result failure
+        _  -> goField xs' rest result failure proxy
       let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
       return $ if not (null prim)
          then (True, caseE (varE xs) [m, failure])
@@ -160,7 +160,7 @@ mkPurePersistFieldInstance dataType cName fDefs context = do
       vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) fDefs
       let failure = match wildP (normalB $ varE failureName) []
       let result = foldl (\a f -> appE a $ mkArg proxy f) (conE cName) vars
-      (isFailureUsed, start) <- goPrim xs vars result failure
+      (isFailureUsed, start) <- goPrim xs vars result failure proxy
       let failureFunc = funD failureName [clause [] failureBody []]
       let locals = if isFailureUsed then [failureFunc] else []
       funD 'fromPurePersistValues [clause [varP proxy, varP xs] (normalB start) locals]
@@ -221,7 +221,7 @@ mkUniqueKeysIsUniqueInstances :: THEntityDef -> Q [Dec]
 mkUniqueKeysIsUniqueInstances def = do
   let entity = foldl AppT (ConT (dataName def)) $ map extractType $ thTypeParams def
   let constr = head $ thConstructors def
-  forM (zip [0 :: Int ..] $ thUniqueKeys def) $ \(uNum, unique) -> do
+  forM (thUniqueKeys def) $ \unique -> do
     uniqKeyType <- [t| Key $(return entity) (Unique $(conT $ mkName $ thUniqueKeyPhantomName unique)) |]
     uniqueConstr' <- do
       typ <- conT $ mkName $ thPhantomConstrName constr
@@ -232,7 +232,10 @@ mkUniqueKeysIsUniqueInstances def = do
       let pat = conP (thConstrName constr) $ map mkFieldPat $ thConstrFields constr
       let body = foldl (\expr f -> [| $expr $(varE $ snd f) |]) (conE $ mkName $ thUniqueKeyConstrName unique) uniqueFields
       funD 'extractUnique [clause [pat] (normalB body) []]
-    uniqueNum' <- funD 'uniqueNum [clause [wildP] (normalB [| uNum |]) []]
+    uniqueNum' <- do
+      let index = findIndex (\u -> thUniqueKeyName unique == psUniqueName u) $ thConstrUniques constr
+      let uNum = maybe (error $ "mkUniqueKeysIsUniqueInstances: cannot find unique definition for unique key " ++ thUniqueKeyName unique) id index
+      funD 'uniqueNum [clause [wildP] (normalB [| uNum |]) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     return $ InstanceD context (AppT (ConT ''IsUniqueKey) uniqKeyType) [uniqueConstr', extractUnique', uniqueNum']
 
