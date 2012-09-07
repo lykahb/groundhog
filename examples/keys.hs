@@ -7,7 +7,7 @@ import Database.Groundhog.Sqlite
 -- artistName is a unique key
 data Artist = Artist { artistName :: String } deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 definitions:
   - entity: Artist
     autoKey:
@@ -33,7 +33,7 @@ data Track  = Track  { albumTrack :: Key Album BackendSpecific, trackName :: Str
 deriving instance Eq Track
 deriving instance Show Track
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 definitions:
   - entity: Album
   - entity: Track

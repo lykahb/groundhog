@@ -19,7 +19,7 @@ data SomeData = SomeData {
 
 data Bullshit a = Bullshit (a, Int) a Int
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 - entity: Bullshit
 - entity: SomeData
 |]

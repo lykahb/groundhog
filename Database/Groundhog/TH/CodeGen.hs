@@ -19,6 +19,7 @@ module Database.Groundhog.TH.CodeGen
   , mkEntitySinglePersistFieldInstance
   , mkPersistEntityInstance
   , mkEntityNeverNullInstance
+  , mkMigrateFunction
   ) where
   
 import Database.Groundhog.Core
@@ -26,8 +27,8 @@ import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
-import Control.Monad (liftM, liftM2, forM, foldM, filterM, replicateM)
-import Data.List (findIndex, nub)
+import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
+import Data.List (findIndex, nub, partition)
 
 mkEmbeddedPersistFieldInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedPersistFieldInstance def = do
@@ -599,6 +600,15 @@ mkEntityNeverNullInstance def = do
   return $ if isOne
     then [InstanceD context (AppT (ConT ''NeverNull) entity) []]
     else []
+
+mkMigrateFunction :: String -> [THEntityDef] -> Q [Dec]
+mkMigrateFunction name defs = do
+  let (normal, polymorhpic) = partition (null . thTypeParams) defs
+  forM_ polymorhpic $ \def -> report False $ "Datatype " ++ show (dataName def) ++ " will not be migrated automatically by function " ++ name ++ " because it has type parameters"
+  let body = doE $ map (\def -> noBindS [| migrate (undefined :: $(conT $ dataName def)) |]) normal
+  sig <- sigD (mkName name) [t| PersistBackend m => Migration m |]
+  func <- funD (mkName name) [clause [] (normalB body) []]
+  return [sig, func]
 
 isDefaultKeyOneColumn :: THEntityDef -> Q Bool
 isDefaultKeyOneColumn def = either (const $ return True) checkUnique $ getDefaultKey def where

@@ -13,7 +13,7 @@
 --          | Service {serviceName :: String, deliveryAddress :: String, servicePrice :: Int}
 --     deriving Show
 --
---'mkPersist' suffixNamingStyle [groundhog|
+--'mkPersist' defaultCodegenConfig [groundhog|
 -- - entity: Customer
 --   constructors:
 --     - name: Customer

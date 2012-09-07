@@ -6,7 +6,7 @@ import Database.Groundhog.Sqlite
 data Company = Company {name :: String, producedSkynetAndTerminator :: (Bool, Bool), headquarter :: Address, dataCentre :: Address, salesOffice :: Address} deriving (Eq, Show)
 data Address = Address {city :: String, zipCode :: String, street :: String} deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 definitions:
   - entity: Company
     constructors:

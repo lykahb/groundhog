@@ -6,19 +6,22 @@ import Database.Groundhog.Sqlite
 data Customer a = Customer {customerName :: String, remark :: a} deriving Show
 data Product = Product {productName :: String, quantity :: Int, customer :: Customer String} deriving Show
 
-mkPersist suffixNamingStyle [groundhog|
+-- Code generator will derive the necessary instances and generate other boilerplate code for the entities defined below.
+-- It will also create function migrateAll that migrates schema for all non-polymorphic entities 
+mkPersist (defaultCodegenConfig {migrationFunction = Just "migrateAll"}) [groundhog|
 - entity: Customer
   constructors:
     - name: Customer
-      constraints:
+      uniques:
         - name: NameConstraint
           fields: [customerName]
 - entity: Product
 |]
 
 main = withSqliteConn ":memory:" $ runSqliteConn $ do
-  -- Customer is also migrated because Product references it
-  runMigration defaultMigrationLogger $ migrate (undefined :: Product)
+  -- Customer is also migrated because Product references it.
+  -- It is possible to migrate schema for given type, e.g. migrate (undefined :: Customer String), or run migrateAll
+  runMigration defaultMigrationLogger migrateAll
   let john = Customer "John Doe" "Phone: 01234567"
   johnKey <- insert john
   -- John is inserted only once because of the name constraint

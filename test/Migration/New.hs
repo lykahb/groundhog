@@ -9,7 +9,7 @@ data AddConstructorToMany = AddConstructorToMany0 {addConstructorToMany0 :: Int}
                           | AddConstructorToMany1 {addConstructorToMany1 :: Int}
                           | AddConstructorToMany2 {addConstructorToMany2 :: String} deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 - entity: AddColumn
 - entity: AddUnique
   constructors:

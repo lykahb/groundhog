@@ -8,7 +8,9 @@ module Database.Groundhog.TH
     mkPersist
   , groundhog
   , groundhogFile
-  -- * Naming styles
+  -- * Settings for code generation
+  , CodegenConfig(..)
+  , defaultCodegenConfig
   -- $namingStylesDoc
   , NamingStyle(..)
   , suffixNamingStyle
@@ -25,9 +27,20 @@ import Language.Haskell.TH.Quote
 import Control.Monad (forM, forM_, when, unless, liftM2)
 import Data.ByteString.Char8 (pack)
 import Data.Char (toUpper, toLower, isSpace)
+import Data.Either (lefts)
 import Data.List (nub, (\\))
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Yaml (decodeEither)
+
+data CodegenConfig = CodegenConfig {
+    -- | Naming style that is applied for all definitions
+    namingStyle :: NamingStyle
+    -- | Codegenerator will create a function with this name that will run 'migrate' for each non-polymorphic entity in definition
+  , migrationFunction :: Maybe String
+}
+
+defaultCodegenConfig :: CodegenConfig
+defaultCodegenConfig = CodegenConfig suffixNamingStyle Nothing
 
 -- $namingStylesDoc
 -- When describing a datatype you can omit the most of the declarations. 
@@ -150,22 +163,24 @@ conciseNamingStyle = suffixNamingStyle {
 -- Particularly, it creates GADT 'Field' data instance for referring to the fields in expressions and phantom types for data constructors.
 -- The default names of auxiliary datatypes and names used in database are generated using the naming style and can be changed via configuration.
 -- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'. 
-mkPersist :: NamingStyle -> PersistSettings -> Q [Dec]
-mkPersist style (PersistSettings defs) = do
+mkPersist :: CodegenConfig -> PersistDefinitions -> Q [Dec]
+mkPersist CodegenConfig{..} (PersistDefinitions defs) = do
   let duplicates = notUniqueBy id $ map (either psDataName psEmbeddedName) defs
   unless (null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
-  decs <- forM defs $ \def -> do
+  defs' <- forM defs $ \def -> do
     let name = mkName $ either psDataName psEmbeddedName def
     info <- reify name
-    case info of
+    return $ case info of
       TyConI x -> case x of
         d@DataD{}  -> case def of
-          Left  ent -> mkEntityDecs   $ either error id $ validateEntity $ applyEntitySettings style ent $ mkTHEntityDefWith style d
-          Right emb -> mkEmbeddedDecs $ either error id $ validateEmbedded $ applyEmbeddedSettings emb $ mkTHEmbeddedDefWith style d
+          Left  ent -> either error Left $ validateEntity $ applyEntitySettings namingStyle ent $ mkTHEntityDefWith namingStyle d
+          Right emb -> either error Right $ validateEmbedded $ applyEmbeddedSettings emb $ mkTHEmbeddedDefWith namingStyle d
         NewtypeD{} -> error "Newtypes are not supported"
         _ -> error $ "Unknown declaration type: " ++ show name ++ " " ++ show x
       _        -> error $ "Only datatypes can be processed: " ++ show name
-  return $ concat decs
+  decs <- mapM (either mkEntityDecs mkEmbeddedDecs) defs'
+  migrateFunc <- maybe (return []) (\name -> mkMigrateFunction name (lefts defs')) migrationFunction
+  return $ migrateFunc ++ concat decs
 
 applyEntitySettings :: NamingStyle -> PSEntityDef -> THEntityDef -> THEntityDef
 applyEntitySettings style settings def@(THEntityDef{..}) =
@@ -421,7 +436,7 @@ firstLetter f s = f (head s):tail s
 
 -- | Converts quasiquoted settings into the datatype used by mkPersist.
 groundhog :: QuasiQuoter
-groundhog = QuasiQuoter { quoteExp  = parseSettings
+groundhog = QuasiQuoter { quoteExp  = parseDefinitions
                         , quotePat  = error "groundhog: pattern quasiquoter"
                         , quoteType = error "groundhog: type quasiquoter"
                         , quoteDec  = error "groundhog: declaration quasiquoter"
@@ -433,9 +448,9 @@ groundhog = QuasiQuoter { quoteExp  = parseSettings
 groundhogFile :: QuasiQuoter
 groundhogFile = quoteFile groundhog
 
-parseSettings :: String -> Q Exp
-parseSettings s = either fail lift result where
-  result = decodeEither $ pack s :: Either String PersistSettings
+parseDefinitions :: String -> Q Exp
+parseDefinitions s = either fail lift result where
+  result = decodeEither $ pack s :: Either String PersistDefinitions
 
 mkEntityDecs :: THEntityDef -> Q [Dec]
 mkEntityDecs def = do

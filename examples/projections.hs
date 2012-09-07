@@ -7,7 +7,7 @@ import Database.Groundhog.Sqlite
 
 data User = User {name :: String, phoneNumber :: (String, String), bigAvatar :: ByteString} deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 definitions:
   - entity: User
     keys:

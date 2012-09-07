@@ -2,7 +2,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Database.Groundhog.TH.Settings
-  ( PersistSettings(..)
+  ( PersistDefinitions(..)
   , THEntityDef(..)
   , THEmbeddedDef(..)
   , THConstructorDef(..)
@@ -26,7 +26,7 @@ import Control.Applicative
 import Control.Monad (mzero)
 import Data.Yaml
 
-data PersistSettings = PersistSettings {definitions :: [Either PSEntityDef PSEmbeddedDef]} deriving Show
+data PersistDefinitions = PersistDefinitions {definitions :: [Either PSEntityDef PSEmbeddedDef]} deriving Show
 
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
@@ -129,8 +129,8 @@ data PSAutoKeyDef = PSAutoKeyDef {
   , psAutoKeyIsDef :: Maybe Bool
 } deriving Show
 
-instance Lift PersistSettings where
-  lift (PersistSettings {..}) = [| PersistSettings $(lift definitions) |]
+instance Lift PersistDefinitions where
+  lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift definitions) |]
 
 instance Lift PSEntityDef where
   lift (PSEntityDef {..}) = [| PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors) |]
@@ -156,7 +156,7 @@ instance Lift PSUniqueKeyDef where
 instance Lift PSAutoKeyDef where
   lift (PSAutoKeyDef {..}) = [| PSAutoKeyDef $(lift psAutoKeyConstrName) $(lift psAutoKeyIsDef) |]
 
-instance FromJSON PersistSettings where
+instance FromJSON PersistDefinitions where
   {- it allows omitting parts of the settings file. All these forms are possible:
         definitions:
           - entity:name
@@ -165,7 +165,7 @@ instance FromJSON PersistSettings where
         ---
           entity: name
   -}
-  parseJSON value = PersistSettings <$> case value of
+  parseJSON value = PersistDefinitions <$> case value of
     Object v -> do
       defs <- v .:? "definitions"
       case defs of

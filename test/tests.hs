@@ -36,7 +36,7 @@ data UniqueKeySample = UniqueKeySample { uniqueKey1 :: String, uniqueKey2 :: Int
 deriving instance Eq Keys
 deriving instance Show Keys
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 - entity: Number
 - entity: MaybeContext
 - entity: Single
@@ -92,7 +92,7 @@ mkPersist suffixNamingStyle [groundhog|
 
 data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 - entity: HoldsUniqueKey
   keys:
     - name: foreignUniqueKey

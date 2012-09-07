@@ -6,7 +6,7 @@ import Database.Groundhog.Postgresql
 
 data Person = Person {name :: String, age :: Int, height :: Int} deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 - entity: Person
 |]
 

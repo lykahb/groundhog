@@ -8,7 +8,7 @@ data AddUnique = AddUnique {column1 :: Int, column2 :: String} deriving (Eq, Sho
 data AddConstructorToMany = AddConstructorToMany1 {addConstructorToMany1 :: Int}
                           | AddConstructorToMany2 {addConstructorToMany2 :: String} deriving (Eq, Show)
 
-mkPersist suffixNamingStyle [groundhog|
+mkPersist defaultCodegenConfig [groundhog|
 - entity: AddColumn
 - entity: AddUnique
 - entity: AddConstructorToMany
