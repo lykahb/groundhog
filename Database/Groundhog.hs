@@ -55,6 +55,9 @@ import Database.Groundhog.Core as G
   , Selector(..)
   , AutoKeyField(..)
   , (~>)
+  , limitTo
+  , offsetBy
+  , orderBy
   , toArith)
 import Database.Groundhog.Expression as G
 import Database.Groundhog.Generic as G

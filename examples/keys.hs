@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances, StandaloneDeriving #-}
 import Control.Monad
-import Control.Monad.IO.Class(liftIO)
+import Control.Monad.IO.Class (liftIO)
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 
@@ -64,8 +64,8 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   mapM_ insert tracks
   mapM_ (\artist -> insert $ ArtistAlbum (extractUnique artist) imagineKey) artists
   -- print first 3 tracks from any album with John Lennon
-  [albumKey'] <- project AlbumField (ArtistField ==. ArtistNameKey "John Lennon") [] 1 0
+  [albumKey'] <- project AlbumField $ (ArtistField ==. ArtistNameKey "John Lennon") `limitTo` 1
   -- order by primary key
-  tracks' <- select (AlbumTrackField ==. albumKey') [Asc AutoKeyField] 3 0
+  tracks' <- select $ (AlbumTrackField ==. albumKey') `orderBy` [Asc AutoKeyField] `limitTo` 3
   liftIO $ print tracks'
 

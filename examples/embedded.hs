@@ -48,7 +48,7 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   runMigration defaultMigrationLogger $ migrate company
   k <- insert company
   -- compare embedded data fields as a whole and compare their subfields individually
-  select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) [] 0 0 >>= liftIO . print
+  select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) >>= liftIO . print
   -- after the Cyberdyne headquarter was destroyed by John Connor and T-800, the Skynet development was continued by Cyber Research Systems affiliated with Pentagon
   let newAddress = Address "Washington" "20301" "1400 Defense Pentagon"
   -- compare fields with an embedded value as a whole and update embedded field with a value
@@ -57,4 +57,4 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   update [DataCentreField =. HeadquarterField, SalesOfficeField =. HeadquarterField] (NameField ==. "Cyber Research Systems" &&. HeadquarterField ==. newAddress)
   -- eventually the skynet was developed. To access the elements of tuple we use predefined selectors. In Tuple2_0Selector 2 is arity of the tuple, 0 is number of element in it
   update [ProducedSkynetAndTerminatorField ~> Tuple2_0Selector =. True] (AutoKeyField ==. k)
-  select (HeadquarterField ~> ZipCodeSelector ==. "20301") [] 0 0 >>= liftIO . print
+  select (HeadquarterField ~> ZipCodeSelector ==. "20301") >>= liftIO . print

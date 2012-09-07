@@ -8,6 +8,7 @@ import Control.Monad (replicateM_, liftM, forM_, (>=>), unless)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Database.Groundhog.Core
+import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
@@ -153,7 +154,7 @@ mkTestSuite label run = testGroup label
   , testCase "testAutoKeyField" $ run testAutoKeyField
   , testCase "testTime" $ run testTime
   ]
---  [testCase "testForeignKeyUnique" $ run testForeignKeyUnique]
+--  [testCase "testSelect" $ run testSelect]
 
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
 sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
@@ -190,7 +191,7 @@ testPersistSettings = do
   let func = firstRow >=> T.sequence . fmap (liftM fst . fromEntityPersistValues)
   (settable' :: Maybe Settable) <- queryRaw False query [toPrim proxy k] func
   Just settable @=? settable'
-  vals <- select (Settable1Fld ==. "abc" &&. SettableTupleField ~> Tuple2_0Selector ==. (1 :: Int) &&. SettableTupleField ~> Tuple2_1Selector ~> Tuple2_0Selector ==. "qqq") [] 0 0
+  vals <- select $ Settable1Fld ==. "abc" &&. SettableTupleField ~> Tuple2_0Selector ==. (1 :: Int) &&. SettableTupleField ~> Tuple2_1Selector ~> Tuple2_0Selector ==. "qqq"
   [settable] @=? vals
   assertExc "Uniqueness constraint not enforced" $ insert settable
 
@@ -201,7 +202,7 @@ testEmbedded = do
   k1 <- insert val1
   val1' <- get k1
   Just val1 @=? val1'
-  vals <- select (SingleField ~> Embedded1Selector ==. "abc" &&. SingleField ~> Embedded2Selector ==. (5, 6) &&. SingleField ~> Embedded2Selector ~> Tuple2_0Selector ==. (5 :: Int)) [] 0 0
+  vals <- select $ SingleField ~> Embedded1Selector ==. "abc" &&. SingleField ~> Embedded2Selector ==. (5, 6) &&. SingleField ~> Embedded2Selector ~> Tuple2_0Selector ==. (5 :: Int)
   [val1] @=? vals
   let val2 = Single (EmbeddedSample "abc" (5, 6), "def")
   migr val2
@@ -237,13 +238,13 @@ testSelect = do
   k1 <- insert val1
   k2 <- insert val2
   k3 <- insert val3
-  vals1 <- select (SingleField ~> Tuple2_0Selector >. (5 :: Int)) [Asc (SingleField ~> Tuple2_1Selector)] 0 1
+  vals1 <- select $ (SingleField ~> Tuple2_0Selector >. (5 :: Int)) `orderBy` [Asc (SingleField ~> Tuple2_1Selector)] `offsetBy` 1
   [val3] @=? vals1
-  vals2 <- select (SingleField ~> Tuple2_0Selector >. (5 :: Int)) [Asc (SingleField ~> Tuple2_1Selector)] 1 0
+  vals2 <- select $ (SingleField ~> Tuple2_0Selector >. (5 :: Int)) `orderBy` [Asc (SingleField ~> Tuple2_1Selector)] `limitTo` 1
   [val2] @=? vals2
-  vals3 <- select (SingleField >=. (6 :: Int, "something") &&. SingleField ~> Tuple2_1Selector <. "ghc") [] 1 0
+  vals3 <- select $ (SingleField >=. (6 :: Int, "something") &&. SingleField ~> Tuple2_1Selector <. "ghc") `limitTo` 1
   [val2] @=? vals3
-  vals4 <- select (toArith (SingleField ~> Tuple2_0Selector) + 1 >. (10 :: Int)) [] 0 0
+  vals4 <- select $ toArith (SingleField ~> Tuple2_0Selector) + 1 >. (10 :: Int)
   [val3] @=? vals4
 
 testCond :: forall m . (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -319,17 +320,17 @@ testComparison = do
   migr val1
   k1 <- insert val1
   k2 <- insert val2
-  result1 <- select (SingleField ==. (1 :: Int)) [] 0 0
+  result1 <- select $ SingleField ==. (1 :: Int)
   [val1] @=? result1
-  result2 <- select (SingleField /=. (1 :: Int)) [] 0 0
+  result2 <- select $ SingleField /=. (1 :: Int)
   [val2] @=? result2
-  result3 <- select (SingleField <.  (2 :: Int)) [] 0 0
+  result3 <- select $ SingleField <.  (2 :: Int)
   [val1] @=? result3
-  result4 <- select (SingleField >. (1 :: Int)) [] 0 0
+  result4 <- select $ SingleField >. (1 :: Int)
   [val2] @=? result4
-  result5 <- select (SingleField >=. (2 :: Int)) [] 0 0
+  result5 <- select $ SingleField >=. (2 :: Int)
   [val2] @=? result5
-  result6 <- select (SingleField <=. (1 :: Int)) [] 0 0
+  result6 <- select $ SingleField <=. (1 :: Int)
   [val1] @=? result6
 
 testEncoding :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -530,7 +531,7 @@ testUniqueKey = do
   k <- insert val
   val1 <- get k
   Just val @=? val1
-  val2 <- select (Unique_key_two_columns ==. Unique_key_two_columnsKey 5 "def") [] 0 0
+  val2 <- select (Unique_key_two_columns ==. Unique_key_two_columnsKey 5 "def")
   [uVal] @=? val2
 
 testForeignKeyUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -547,12 +548,12 @@ testProjection = do
   let val = Single ("abc", 5 :: Int)
   migr val
   k <- insert val
-  result <- project (AutoKeyField, SingleConstructor, SingleField, SingleField ~> Tuple2_1Selector) ("" ==. "") [] 0 0
+  result <- project (AutoKeyField, SingleConstructor, SingleField, SingleField ~> Tuple2_1Selector) ("" ==. "")
   [(k, val, ("abc", 5 :: Int), 5 :: Int)] @=? result
   let uVal = UniqueKeySample "abc" 5 "def"
   migr uVal
   insert uVal
-  result2 <- project Unique_key_two_columns ("" ==. "") [] 0 0
+  result2 <- project Unique_key_two_columns ("" ==. "")
   [extractUnique uVal] @=? result2
 
 testKeyNormalization :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
@@ -570,7 +571,7 @@ testAutoKeyField = do
   let val = Single "abc"
   migr val
   k <- insert val
-  result <- select (AutoKeyField `asTypeOf` (undefined :: f v SingleConstructor) ==. k) [] 0 0
+  result <- select $ AutoKeyField `asTypeOf` (undefined :: f v SingleConstructor) ==. k
   [val] @=? result
 
 -- This test must just compile
@@ -579,7 +580,7 @@ testKeys = do
   migr (undefined :: Keys)
   k <- insert $ Single ""
   let cond = RefDirectField ==. k ||. RefKeyField ==. k ||. RefDirectMaybeField ==. Just k ||. RefKeyMaybeField ==. Just k
-  select cond [] 0 0
+  select cond
   return ()
 
 instance Eq Time.ZonedTime where
@@ -602,10 +603,6 @@ testTime = do
 
 firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
 firstRow = id
-
-mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
-mapAllRows f pop = go where
-  go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
   
 createTruncateTables :: String
 createTruncateTables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN VARCHAR) RETURNS void AS $$\

@@ -38,6 +38,7 @@ module Database.Groundhog.Generic
   , matchElements
   , haveSameElems
   , mapAllRows
+  , phantomDb
   ) where
 
 import Database.Groundhog.Core
@@ -239,3 +240,7 @@ haveSameElems p xs ys = case matchElements p xs ys of
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where
   go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
+
+
+phantomDb :: PersistBackend m => m (Proxy (PhantomDb m))
+phantomDb = return $ error "phantomDb"

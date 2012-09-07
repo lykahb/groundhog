@@ -5,7 +5,7 @@ module Database.Groundhog.Instances (Selector(..)) where
 import Control.Monad (liftM)
 
 import Database.Groundhog.Core
-import Database.Groundhog.Generic (failMessage, primToPersistValue, primFromPersistValue)
+import Database.Groundhog.Generic (failMessage, primToPersistValue, primFromPersistValue, phantomDb)
 
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T

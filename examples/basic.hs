@@ -27,8 +27,8 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   insert $ Product "Melon" 6 (Customer "Jack Smith" "Don't let him pay by check")
   -- bonus melon for all large melon orders. The values used in expressions should have known type, so literal 5 is annotated.
   update [QuantityField =. toArith QuantityField + 1] (ProductNameField ==. "Melon" &&. QuantityField >. (5 :: Int))
-  productsForJohn <- select (CustomerField ==. johnKey) [] 0 0
+  productsForJohn <- select $ CustomerField ==. johnKey
   liftIO $ putStrLn $ "Products for John: " ++ show productsForJohn
   -- check bonus
-  melon <- select (ProductNameField ==. "Melon") [Desc QuantityField] 0 0
+  melon <- select $ (ProductNameField ==. "Melon") `orderBy` [Desc QuantityField]
   liftIO $ putStrLn $ "Melon orders: " ++ show melon

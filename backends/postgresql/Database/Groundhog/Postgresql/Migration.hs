@@ -297,7 +297,7 @@ checkPrimaryKey name = do
     us -> Right $ mkUniq us
 
 getColumn :: String -> (String, String, String, Maybe String) -> Either String (Column DbType)
-getColumn tname (column_name, is_nullable, udt_name, d) = case readSqlType udt_name of
+getColumn _ (column_name, is_nullable, udt_name, d) = case readSqlType udt_name of
       Left s -> Left s
       Right t -> Right $ Column column_name (is_nullable == "YES") t d
 

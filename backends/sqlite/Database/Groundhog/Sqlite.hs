@@ -45,7 +45,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   insertBy u v = insertBy' u v
   insertByAll v = insertByAll' v
   replace k v = replace' k v
-  select cond ords limit offset = select' cond ords limit offset
+  select options = select' options
   selectAll = selectAll'
   get k = get' k
   getBy k = getBy' k
@@ -54,7 +54,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   deleteByKey k = deleteByKey' k
   count cond = count' cond
   countAll fakeV = countAll' fakeV
-  project p cond ords limit offset = project' p cond ords limit offset
+  project p options = project' p options
   migrate fakeV = migrate' fakeV
 
   executeRaw False query ps = executeRaw' (fromString query) ps
@@ -559,8 +559,10 @@ replace' k v = do
               executeRawCached' updateDiscrQuery [head vals, toPrim proxy k]
         Nothing -> return ()
 
-select' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> [Order v c] -> Int -> Int -> DbPersist Sqlite m [v]
-select' (cond :: Cond v c) ords limit offset = start where
+select' :: forall m v c opts . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, HasSelectOptions opts v c)
+        => opts -> DbPersist Sqlite m [v]
+select' options = start where
+  SelectOptions cond limit offset ords = getSelectOptions options
   start = if isSimple (constructors e)
     then doSelectQuery (mkQuery name) 0
     else let
@@ -571,9 +573,9 @@ select' (cond :: Cond v c) ords limit offset = start where
   orders = renderOrders escapeS ords
   name = persistName (undefined :: v)
   (lim, limps) = case (limit, offset) of
-        (0, 0) -> ("", [])
-        (0, o) -> (" LIMIT -1 OFFSET ?", [toPrim proxy o])
-        (l, 0) -> (" LIMIT ?", [toPrim proxy l])
+        (Nothing, Nothing) -> ("", [])
+        (Nothing, o) -> (" LIMIT -1 OFFSET ?", [toPrim proxy o])
+        (l, Nothing) -> (" LIMIT ?", [toPrim proxy l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim proxy l, toPrim proxy o])
   cond' = renderCond' cond
   fields = renderFields escapeS (constrParams constr)
@@ -722,9 +724,10 @@ countAll' (_ :: v) = do
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
-project' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, Projection a (RestrictionHolder v c) a')
-         => a -> Cond v c -> [Order v c] -> Int -> Int -> DbPersist Sqlite m [a']
-project' p (cond :: Cond v c) ords limit offset = start where
+project' :: forall m v c p opts a' . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, Projection p (RestrictionHolder v c) a', HasSelectOptions opts v c)
+         => p -> opts -> DbPersist Sqlite m [a']
+project' p options = start where
+  SelectOptions cond limit offset ords = getSelectOptions options
   start = doSelectQuery $ if isSimple (constructors e)
     then mkQuery name
     else let
@@ -735,9 +738,9 @@ project' p (cond :: Cond v c) ords limit offset = start where
   orders = renderOrders escapeS ords
   name = persistName (undefined :: v)
   (lim, limps) = case (limit, offset) of
-        (0, 0) -> ("", [])
-        (0, o) -> (" LIMIT -1 OFFSET ?", [toPrim proxy o])
-        (l, 0) -> (" LIMIT ?", [toPrim proxy l])
+        (Nothing, Nothing) -> ("", [])
+        (Nothing, o) -> (" LIMIT -1 OFFSET ?", [toPrim proxy o])
+        (l, Nothing) -> (" LIMIT ?", [toPrim proxy l])
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrim proxy l, toPrim proxy o])
   cond' = renderCond' cond
   chains = projectionFieldChains p []

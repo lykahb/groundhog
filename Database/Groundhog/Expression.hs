@@ -75,9 +75,6 @@ instance (TypeEq (DefaultKey a) (Key a u) isDef,
          => NormalizeValue' (Key a u) r
 instance r ~ (HTrue, a) => NormalizeValue' a r
 
-data HFalse
-data HTrue
-
 class TypeEq x y b | x y -> b
 instance (b ~ HFalse) => TypeEq x y b	 
 instance TypeEq x x HTrue

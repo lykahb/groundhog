@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances, OverloadedStrings #-}
 import Control.Monad
-import Control.Monad.IO.Class(liftIO)
+import Control.Monad.IO.Class (liftIO)
 import Data.ByteString
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
@@ -26,9 +26,9 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   runMigration defaultMigrationLogger $ migrate jack
   mapM_ insert [jack, jill]
   -- get phones of the users. Only the required fields are fetched. Function project supports both regular and subfields
-  phones <- project (PhoneNumberField ~> Tuple2_1Selector) (() ==. ()) [Asc AutoKeyField] 0 0
+  phones <- project (PhoneNumberField ~> Tuple2_1Selector) $ (() ==. ()) `orderBy` [Asc AutoKeyField]
   liftIO $ print phones
   -- we can also use 'project' as a replacement for 'select' with extended options.
   -- the special datatype 'AutoKeyField' projects to the entity autokey, unique key phantoms project to keys, and the constructor phantoms project to the data itself
-  withIds <- project (AutoKeyField, Unique_name, UserConstructor) (() ==. ()) [] 0 0
+  withIds <- project (AutoKeyField, Unique_name, UserConstructor) (() ==. ())
   liftIO $ print withIds
