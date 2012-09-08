@@ -137,7 +137,7 @@ insertBy' u v = do
       x <- queryRawCached' query (uniques []) id
       case x of
         Nothing  -> liftM Right $ insert v
-        Just [k] -> liftM (Left . fst) $ fromPersistValues [k]
+        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
         Just xs  -> fail $ "unexpected query result: " ++ show xs
   let constr = head $ constructors e
   ifAbsent name constr
@@ -166,7 +166,7 @@ insertByAll' v = do
       x <- queryRawCached' query (concatMap snd uniques) id
       case x of
         Nothing  -> liftM Right $ insert v
-        Just [k] -> liftM (Left . fst) $ fromPersistValues [k]
+        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
         Just xs  -> fail $ "unexpected query result: " ++ show xs
   if null uniques
     then liftM Right $ insert v
