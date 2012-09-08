@@ -58,8 +58,8 @@ instance (PersistField a', PersistField b', PersistField c', PersistField d', Pe
   selectorNum Tuple5_4Selector = 4
   
 instance PrimitivePersistField a => SinglePersistField a where
-  toSinglePersistValue a = phantomDb >>= \p -> return (toPrim p a)
-  fromSinglePersistValue a = phantomDb >>= \p -> return (fromPrim p a)
+  toSinglePersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a)
+  fromSinglePersistValue a = phantomDb >>= \p -> return (fromPrimitivePersistValue p a)
 
 instance (SinglePersistField a, NeverNull a) => SinglePersistField (Maybe a) where
   toSinglePersistValue Nothing = return PersistNull
@@ -68,14 +68,14 @@ instance (SinglePersistField a, NeverNull a) => SinglePersistField (Maybe a) whe
   fromSinglePersistValue a = liftM Just $ fromSinglePersistValue a
 
 instance PrimitivePersistField a => PurePersistField a where
-  toPurePersistValues p a = (toPrim p a:)
-  fromPurePersistValues p (x:xs) = (fromPrim p x, xs)
+  toPurePersistValues p a = (toPrimitivePersistValue p a:)
+  fromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
   fromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
 
 instance (PrimitivePersistField a, NeverNull a) => PurePersistField (Maybe a) where
-  toPurePersistValues p a = (maybe PersistNull (toPrim p) a:)
+  toPurePersistValues p a = (maybe PersistNull (toPrimitivePersistValue p) a:)
   fromPurePersistValues _ (PersistNull:xs) = (Nothing, xs)
-  fromPurePersistValues p (x:xs) = (fromPrim p x, xs)
+  fromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
   fromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
 
 instance PurePersistField () where
@@ -128,112 +128,112 @@ instance Numeric Word64
 instance Numeric Double
 
 instance PrimitivePersistField String where
-  toPrim _ s = PersistString s
-  fromPrim _ (PersistString s) = s
-  fromPrim _ (PersistByteString bs) = T.unpack $ T.decodeUtf8With T.lenientDecode bs
-  fromPrim _ (PersistInt64 i) = show i
-  fromPrim _ (PersistDouble d) = show d
-  fromPrim _ (PersistDay d) = show d
-  fromPrim _ (PersistTimeOfDay d) = show d
-  fromPrim _ (PersistUTCTime d) = show d
-  fromPrim _ (PersistZonedTime z) = show z
-  fromPrim _ (PersistBool b) = show b
-  fromPrim _ PersistNull = error "Unexpected NULL"
+  toPrimitivePersistValue _ s = PersistString s
+  fromPrimitivePersistValue _ (PersistString s) = s
+  fromPrimitivePersistValue _ (PersistByteString bs) = T.unpack $ T.decodeUtf8With T.lenientDecode bs
+  fromPrimitivePersistValue _ (PersistInt64 i) = show i
+  fromPrimitivePersistValue _ (PersistDouble d) = show d
+  fromPrimitivePersistValue _ (PersistDay d) = show d
+  fromPrimitivePersistValue _ (PersistTimeOfDay d) = show d
+  fromPrimitivePersistValue _ (PersistUTCTime d) = show d
+  fromPrimitivePersistValue _ (PersistZonedTime z) = show z
+  fromPrimitivePersistValue _ (PersistBool b) = show b
+  fromPrimitivePersistValue _ PersistNull = error "Unexpected NULL"
 
 instance PrimitivePersistField T.Text where
-  toPrim _ a = PersistString (T.unpack a)
-  fromPrim _ (PersistByteString bs) = T.decodeUtf8With T.lenientDecode bs
-  fromPrim p x = T.pack $ fromPrim p x
+  toPrimitivePersistValue _ a = PersistString (T.unpack a)
+  fromPrimitivePersistValue _ (PersistByteString bs) = T.decodeUtf8With T.lenientDecode bs
+  fromPrimitivePersistValue p x = T.pack $ fromPrimitivePersistValue p x
 
 instance PrimitivePersistField ByteString where
-  toPrim _ s = PersistByteString s
-  fromPrim _ (PersistByteString a) = a
-  fromPrim p x = T.encodeUtf8 . T.pack $ fromPrim p x
+  toPrimitivePersistValue _ s = PersistByteString s
+  fromPrimitivePersistValue _ (PersistByteString a) = a
+  fromPrimitivePersistValue p x = T.encodeUtf8 . T.pack $ fromPrimitivePersistValue p x
 
 instance PrimitivePersistField Int where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int8 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int16 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int32 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int64 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word8 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word16 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word32 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word64 where
-  toPrim _ a = PersistInt64 (fromIntegral a)
-  fromPrim _ (PersistInt64 a) = fromIntegral a
-  fromPrim _ x = readHelper x ("Expected Integer, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Double where
-  toPrim _ a = PersistDouble a
-  fromPrim _ (PersistDouble a) = a
-  fromPrim _ x = readHelper x ("Expected Double, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistDouble a
+  fromPrimitivePersistValue _ (PersistDouble a) = a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Double, received: " ++ show x)
 
 instance PrimitivePersistField Bool where
-  toPrim _ a = PersistBool a
-  fromPrim _ (PersistBool a) = a
-  fromPrim _ (PersistInt64 i) = i /= 0
-  fromPrim _ x = error $ "Expected Bool, received: " ++ show x
+  toPrimitivePersistValue _ a = PersistBool a
+  fromPrimitivePersistValue _ (PersistBool a) = a
+  fromPrimitivePersistValue _ (PersistInt64 i) = i /= 0
+  fromPrimitivePersistValue _ x = error $ "Expected Bool, received: " ++ show x
 
 instance PrimitivePersistField Day where
-  toPrim _ a = PersistDay a
-  fromPrim _ (PersistDay a) = a
-  fromPrim _ x = readHelper x ("Expected Day, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistDay a
+  fromPrimitivePersistValue _ (PersistDay a) = a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected Day, received: " ++ show x)
 
 instance PrimitivePersistField TimeOfDay where
-  toPrim _ a = PersistTimeOfDay a
-  fromPrim _ (PersistTimeOfDay a) = a
-  fromPrim _ x = readHelper x ("Expected TimeOfDay, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistTimeOfDay a
+  fromPrimitivePersistValue _ (PersistTimeOfDay a) = a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected TimeOfDay, received: " ++ show x)
 
 instance PrimitivePersistField UTCTime where
-  toPrim _ a = PersistUTCTime a
-  fromPrim _ (PersistUTCTime a) = a
-  fromPrim _ x = readHelper x ("Expected UTCTime, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistUTCTime a
+  fromPrimitivePersistValue _ (PersistUTCTime a) = a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected UTCTime, received: " ++ show x)
 
 instance PrimitivePersistField ZonedTime where
-  toPrim _ a = PersistZonedTime (ZT a)
-  fromPrim _ (PersistZonedTime (ZT a)) = a
-  fromPrim _ x = readHelper x ("Expected ZonedTime, received: " ++ show x)
+  toPrimitivePersistValue _ a = PersistZonedTime (ZT a)
+  fromPrimitivePersistValue _ (PersistZonedTime (ZT a)) = a
+  fromPrimitivePersistValue _ x = readHelper x ("Expected ZonedTime, received: " ++ show x)
 
 instance (PrimitivePersistField a, NeverNull a) => PrimitivePersistField (Maybe a) where
-  toPrim p a = maybe PersistNull (toPrim p) a
-  fromPrim _ PersistNull = Nothing
-  fromPrim p x = Just $ fromPrim p x
+  toPrimitivePersistValue p a = maybe PersistNull (toPrimitivePersistValue p) a
+  fromPrimitivePersistValue _ PersistNull = Nothing
+  fromPrimitivePersistValue p x = Just $ fromPrimitivePersistValue p x
 
 instance (DbDescriptor db, PersistEntity v) => PrimitivePersistField (KeyForBackend db v) where
-  toPrim p (KeyForBackend a) = toPrim p a
-  fromPrim p x = KeyForBackend (fromPrim p x)
+  toPrimitivePersistValue p (KeyForBackend a) = toPrimitivePersistValue p a
+  fromPrimitivePersistValue p x = KeyForBackend (fromPrimitivePersistValue p x)
 
 instance NeverNull String
 instance NeverNull T.Text
@@ -382,7 +382,7 @@ instance (PersistField a) => PersistField [a] where
   persistName a = "List" ++ delim : delim : persistName ((undefined :: [] a -> a) a)
   toPersistValues l = insertList l >>= toPersistValues
   fromPersistValues [] = fail "fromPersistValues []: empty list"
-  fromPersistValues (x:xs) = phantomDb >>= \p -> getList (fromPrim p x) >>= \l -> return (l, xs)
+  fromPersistValues (x:xs) = phantomDb >>= \p -> getList (fromPrimitivePersistValue p x) >>= \l -> return (l, xs)
   dbType a = DbList (persistName a) $ dbType ((undefined :: [] a -> a) a)
 
 instance PersistField () where

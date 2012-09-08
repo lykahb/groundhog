@@ -53,12 +53,12 @@ mkEmbeddedPersistFieldInstance def = do
     let pat = conP (embeddedConstructorName def) $ map (varP . fst) vars
     proxy <- newName "p"
     (lastPrims, fields) <- spanM (isPrim . snd) $ reverse vars
-    let lastPrims' = map (\(x, _) -> [| toPrim $(varE proxy) $(varE x) |]) $ reverse $ lastPrims
+    let lastPrims' = map (\(x, _) -> [| toPrimitivePersistValue $(varE proxy) $(varE x) |]) $ reverse $ lastPrims
     let body = if null fields
         then [| return $ ($(listE lastPrims')++) |]
         else do
           let go (m, f) (fname, t) = isPrim t >>= \isP -> if isP
-              then return (m, [| (toPrim $(varE proxy) $(varE fname):) |]:f)
+              then return (m, [| (toPrimitivePersistValue $(varE proxy) $(varE fname):) |]:f)
               else newName "x" >>= \x -> return (bindS (varP x) [| toPersistValues $(varE fname) |]:m, varE x:f)
           (stmts, func) <- foldM go ([], []) fields        -- foldM puts reversed fields in normal order
           doE $ stmts ++ [noBindS [| return $ $(foldr1 (\a b -> [|$a . $b|]) func) . ($(listE lastPrims')++) |]]
@@ -113,7 +113,7 @@ mkFromPersistValues failureName values constrName fieldDefs = let
       return $ if not (null rest || null prim)
          then (True, caseE (varE xs) [m, failure])
          else (isFailureUsed, caseE (varE xs) [m])
-    mkArg proxy (fname, t) = isPrim t >>= \isP -> (if isP then [| fromPrim $(varE proxy) $(varE fname) |] else (varE fname))
+    mkArg proxy (fname, t) = isPrim t >>= \isP -> (if isP then [| fromPrimitivePersistValue $(varE proxy) $(varE fname) |] else (varE fname))
     in do
       proxy <- newName "p"
       vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) fieldDefs
@@ -130,7 +130,7 @@ mkPurePersistFieldInstance dataType cName fDefs context = do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, fieldType f)) fDefs
     proxy <- newName "p"
     let pat = conP cName $ map (varP . fst) vars
-    let result = map (\(v, t) -> isPrim t >>= \isP -> if isP then [| (toPrim $(varE proxy) $(varE v):) |] else [| toPurePersistValues $(varE proxy) $(varE v) |]) vars
+    let result = map (\(v, t) -> isPrim t >>= \isP -> if isP then [| (toPrimitivePersistValue $(varE proxy) $(varE v):) |] else [| toPurePersistValues $(varE proxy) $(varE v) |]) vars
     let body = foldr1 (\a b -> [|$a . $b|]) result
     funD 'toPurePersistValues [clause [varP proxy, pat] (normalB body) []]
 
@@ -152,7 +152,7 @@ mkPurePersistFieldInstance dataType cName fDefs context = do
       return $ if not (null prim)
          then (True, caseE (varE xs) [m, failure])
          else (isFailureUsed, caseE (varE xs) [m])
-    mkArg proxy (fname, t) = isPrim t >>= \isP -> (if isP then [| fromPrim $(varE proxy) $(varE fname) |] else (varE fname))
+    mkArg proxy (fname, t) = isPrim t >>= \isP -> (if isP then [| fromPrimitivePersistValue $(varE proxy) $(varE fname) |] else (varE fname))
     in do
       xs <- newName "xs"
       let failureBody = normalB [| (\a -> error (failMessage a $(varE xs)) `asTypeOf` (a, [])) undefined |]
@@ -210,9 +210,9 @@ mkAutoKeyPrimitivePersistFieldInstance def = case thAutoKey def of
     toPrim' <- do
       proxy <- newName "p"
       x <- newName "x"
-      let body = [| toPrim $(varE proxy) $ ((fromPrim :: DbDescriptor db => Proxy db -> PersistValue -> AutoKeyType db) $(varE proxy)) $(varE x) |]
-      funD 'toPrim [clause [varP proxy, conP conName [varP x]] (normalB body) []]
-    fromPrim' <- funD 'fromPrim [clause [wildP] (normalB $ conE conName) []]
+      let body = [| toPrimitivePersistValue $(varE proxy) $ ((fromPrimitivePersistValue :: DbDescriptor db => Proxy db -> PersistValue -> AutoKeyType db) $(varE proxy)) $(varE x) |]
+      funD 'toPrimitivePersistValue [clause [varP proxy, conP conName [varP x]] (normalB body) []]
+    fromPrim' <- funD 'fromPrimitivePersistValue [clause [wildP] (normalB $ conE conName) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [toPrim', fromPrim']
     return [InstanceD context (AppT (ConT ''PrimitivePersistField) keyType) decs]
@@ -290,8 +290,8 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
         proxy <- newName "p"
         x <- newName "x"
         toPrim' <- do
-          funD 'toPrim [clause [varP proxy, conP conName [varP x]] (normalB [| toPrim $(varE proxy) $(varE x) |]) []]
-        fromPrim' <- funD 'fromPrim [clause [varP proxy, varP x] (normalB [| $(conE conName) (fromPrim $(varE proxy) $(varE x)) |]) []]
+          funD 'toPrimitivePersistValue [clause [varP proxy, conP conName [varP x]] (normalB [| toPrimitivePersistValue $(varE proxy) $(varE x) |]) []]
+        fromPrim' <- funD 'fromPrimitivePersistValue [clause [varP proxy, varP x] (normalB [| $(conE conName) (fromPrimitivePersistValue $(varE proxy) $(varE x)) |]) []]
         let decs = [toPrim', fromPrim']
         return [InstanceD context (AppT (ConT ''PrimitivePersistField) uniqKeyType) decs]
       else mkPurePersistFieldInstance uniqKeyType conName (thUniqueKeyFields unique) context
@@ -467,15 +467,15 @@ mkPersistEntityInstance def = do
     let pat = conP (thConstrName c) $ map (varP . fst) vars
     proxy <- newName "p"
     (lastPrims, fields) <- spanM (isPrim . snd) $ reverse vars
-    let lastPrims' = map (\(x, _) -> [| toPrim $(varE proxy) $(varE x) |]) $ reverse $ lastPrims
+    let lastPrims' = map (\(x, _) -> [| toPrimitivePersistValue $(varE proxy) $(varE x) |]) $ reverse $ lastPrims
     let body = if null fields
-        then [| return $ ($(listE $ [|toPrim $(varE proxy) (cNum :: Int)|]:lastPrims')++) |]
+        then [| return $ ($(listE $ [|toPrimitivePersistValue $(varE proxy) (cNum :: Int)|]:lastPrims')++) |]
         else do
           let go (m, f) (fname, t) = isPrim t >>= \isP -> if isP
-              then return (m, [| (toPrim $(varE proxy) $(varE fname):) |]:f)
+              then return (m, [| (toPrimitivePersistValue $(varE proxy) $(varE fname):) |]:f)
               else newName "x" >>= \x -> return (bindS (varP x) [| toPersistValues $(varE fname) |]:m, varE x:f)
           (stmts, func) <- foldM go ([], []) fields        -- foldM puts reversed fields in normal order
-          doE $ stmts ++ [noBindS [| return $ (toPrim $(varE proxy) (cNum :: Int):) . $(foldr1 (\a b -> [|$a . $b|]) func) . ($(listE lastPrims')++) |]]
+          doE $ stmts ++ [noBindS [| return $ (toPrimitivePersistValue $(varE proxy) (cNum :: Int):) . $(foldr1 (\a b -> [|$a . $b|]) func) . ($(listE lastPrims')++) |]]
     let body' = [| phantomDb >>= $(lamE [varP proxy] body) |]
     clause [pat] (normalB body') []
 
@@ -503,7 +503,7 @@ mkPersistEntityInstance def = do
       let allConstrainedFields = concatMap psUniqueFields $ thConstrUniques cdef
       names <- mapM (\name -> newName name >>= \name' -> return (name, name `elem` allConstrainedFields, name')) $ map fieldName $ thConstrFields cdef
       proxy <- newName "p"
-      let body = normalB $ [| (cNum, $(listE $ map (\(PSUniqueDef cname fnames) -> [|(cname, $(listE $ map (\fname -> [| toPrim $(varE proxy) $(varE $ getFieldName fname) |] ) fnames )) |] ) $ thConstrUniques cdef)) |]
+      let body = normalB $ [| (cNum, $(listE $ map (\(PSUniqueDef cname fnames) -> [|(cname, $(listE $ map (\fname -> [| toPrimitivePersistValue $(varE proxy) $(varE $ getFieldName fname) |] ) fnames )) |] ) $ thConstrUniques cdef)) |]
           getFieldName name = case filter (\(a, _, _) -> a == name) names of
             [(_, _, name')] -> name'
             []  -> error $ "Database field name " ++ show name ++ " declared in constraint not found"

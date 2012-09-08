@@ -30,8 +30,8 @@ module Database.Groundhog.Core
   , (~>)
   , toArith
   , FieldLike(..)
-  , SubField (..)
-  , AutoKeyField (..)
+  , SubField(..)
+  , AutoKeyField(..)
   , FieldChain
   , NeverNull
   , Numeric
@@ -434,12 +434,7 @@ class Numeric a
 -- Maybe this class can be removed when support for inner Maybe's appears.
 class NeverNull a
 
--- | Datatypes which can be converted directly to 'PersistValue'. The no-value parameter @DbDescriptor db => Proxy db@ allows conversion depend the database details while keeping it pure.
-class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a where
-  toPrim :: DbDescriptor db => Proxy db -> a -> PersistValue
-  fromPrim :: DbDescriptor db => Proxy db -> PersistValue -> a
-
--- | Used to uniformly represent fields, literals and arithmetic expressions.
+-- | Used to uniformly represent fields, constants and arithmetic expressions.
 -- A value should be converted to 'Expr' for usage in expressions
 data Expr v c a where
   ExprField :: (PersistEntity v, FieldLike f (RestrictionHolder v c) a') => f -> Expr v c f
@@ -467,6 +462,11 @@ class PersistField a => SinglePersistField a where
 class PersistField a => PurePersistField a where
   toPurePersistValues :: DbDescriptor db => Proxy db -> a -> ([PersistValue] -> [PersistValue])
   fromPurePersistValues :: DbDescriptor db => Proxy db -> [PersistValue] -> (a, [PersistValue])
+
+-- | Datatypes which can be converted directly to 'PersistValue'. The no-value parameter @DbDescriptor db => Proxy db@ allows conversion depend the database details while keeping it pure.
+class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a where
+  toPrimitivePersistValue :: DbDescriptor db => Proxy db -> a -> PersistValue
+  fromPrimitivePersistValue :: DbDescriptor db => Proxy db -> PersistValue -> a
 
 delim :: Char
 delim = '#'

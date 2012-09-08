@@ -168,10 +168,10 @@ applyEmbeddedDbTypeSettings settings typ = (case typ of
                        | otherwise = fmap (\(defs', result) -> (def:defs', result)) $ find name defs
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
-primToPersistValue a = phantomDb >>= \p -> return (toPrim p a:)
+primToPersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a:)
 
 primFromPersistValue :: (PersistBackend m, PrimitivePersistField a) => [PersistValue] -> m (a, [PersistValue])
-primFromPersistValue (x:xs) = phantomDb >>= \p -> return (fromPrim p x, xs)
+primFromPersistValue (x:xs) = phantomDb >>= \p -> return (fromPrimitivePersistValue p x, xs)
 primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
 
 pureToPersistValue :: (PersistBackend m, PurePersistField a) => a -> m ([PersistValue] -> [PersistValue])
@@ -193,7 +193,7 @@ toSinglePersistValueUnique u v = insertBy u v >> toSinglePersistValue (extractUn
 
 fromSinglePersistValueUnique :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)), PrimitivePersistField (Key v (Unique u)))
                              => u (UniqueMarker v) -> PersistValue -> m v
-fromSinglePersistValueUnique _ x = phantomDb >>= \proxy -> getBy (fromPrim proxy x :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show x) return
+fromSinglePersistValueUnique _ x = phantomDb >>= \proxy -> getBy (fromPrimitivePersistValue proxy x :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show x) return
 
 toPersistValuesUnique :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
                       => u (UniqueMarker v) -> v -> m ([PersistValue] -> [PersistValue])
@@ -209,7 +209,7 @@ toSinglePersistValueAutoKey a = insertByAll a >>= toSinglePersistValue . either 
 
 fromSinglePersistValueAutoKey :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
                               => PersistValue -> m v
-fromSinglePersistValueAutoKey x = phantomDb >>= \p -> get (fromPrim p x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) return
+fromSinglePersistValueAutoKey x = phantomDb >>= \p -> get (fromPrimitivePersistValue p x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) return
 
 replaceOne :: (Eq c, Show c) => String -> (a -> c) -> (b -> c) -> (a -> b -> b) -> a -> [b] -> [b]
 replaceOne what getter1 getter2 apply a bs = case length (filter ((getter1 a ==) . getter2) bs) of

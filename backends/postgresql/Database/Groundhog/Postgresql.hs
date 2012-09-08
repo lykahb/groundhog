@@ -101,7 +101,7 @@ insert' v = do
   vals <- toEntityPersistValues' v
   let e = entityDef v
   let name = persistName v
-  let constructorNum = fromPrim proxy (head vals)
+  let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   liftM fst $ if isSimple (constructors e)
     then do
@@ -185,38 +185,38 @@ replace' k v = do
   vals <- toEntityPersistValues' v
   let e = entityDef v
   let name = persistName v
-  let constructorNum = fromPrim proxy (head vals)
+  let constructorNum = fromPrimitivePersistValue proxy (head vals)
   let constr = constructors e !! constructorNum
 
   let upds = renderFields (\f -> escapeS f <> "=?") $ constrParams constr
   let mkQuery tname = "UPDATE " <> escapeS (fromString tname) <> " SET " <> upds <> " WHERE " <> fromString (fromJust $ constrAutoKeyName constr) <> "=?"
 
   if isSimple (constructors e)
-    then executeRawCached' (mkQuery name) (tail vals ++ [toPrim proxy k])
+    then executeRawCached' (mkQuery name) (tail vals ++ [toPrimitivePersistValue proxy k])
     else do
       let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawCached' query [toPrim proxy k] (id >=> return . fmap (fromPrim proxy . head))
+      x <- queryRawCached' query [toPrimitivePersistValue proxy k] (id >=> return . fmap (fromPrimitivePersistValue proxy . head))
       case x of
         Just discr -> do
           let cName = name ++ [delim] ++ constrName constr
 
           if discr == constructorNum
-            then executeRawCached' (mkQuery cName) (tail vals ++ [toPrim proxy k])
+            then executeRawCached' (mkQuery cName) (tail vals ++ [toPrimitivePersistValue proxy k])
             else do
               let insQuery = insertIntoConstructorTable True cName constr
-              executeRawCached' insQuery (toPrim proxy k:tail vals)
+              executeRawCached' insQuery (toPrimitivePersistValue proxy k:tail vals)
 
               let oldCName = fromString $ name ++ [delim] ++ constrName (constructors e !! discr)
               let delQuery = "DELETE FROM " <> escapeS oldCName <> " WHERE " <> fromJust (constrId constr) <> "=?"
-              executeRawCached' delQuery [toPrim proxy k]
+              executeRawCached' delQuery [toPrimitivePersistValue proxy k]
 
               let updateDiscrQuery = "UPDATE " <> escapeS (fromString name) <> " SET discr=? WHERE id=?"
-              executeRawCached' updateDiscrQuery [head vals, toPrim proxy k]
+              executeRawCached' updateDiscrQuery [head vals, toPrimitivePersistValue proxy k]
         Nothing -> return ()
 
 -- | receives constructor number and row of values from the constructor table
 mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (AutoKey v, v)
-mkEntity i xs = fromEntityPersistValues (toPrim proxy i:xs') >>= \(v, _) -> return (k, v) where
+mkEntity i xs = fromEntityPersistValues (toPrimitivePersistValue proxy i:xs') >>= \(v, _) -> return (k, v) where
   (k, xs') = fromPurePersistValues proxy xs
 
 select' :: forall m v c opts . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, HasSelectOptions opts v c)
@@ -234,14 +234,14 @@ select' options = start where
   name = persistName (undefined :: v)
   (lim, limps) = case (limit, offset) of
         (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" OFFSET ?", [toPrim proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrim proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrim proxy l, toPrim proxy o])
+        (Nothing, o) -> (" OFFSET ?", [toPrimitivePersistValue proxy o])
+        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
+        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
   cond' = renderCond' cond
   fields = renderFields escapeS (constrParams constr)
   mkQuery tname = "SELECT " <> fields <> " FROM " <> fromString (escape tname) <> whereClause <> orders <> lim
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery query cNum = queryRawCached' query binds $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrim proxy cNum:)
+  doSelectQuery query cNum = queryRawCached' query binds $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
   binds = maybe id getValues cond' $ limps
   constr = constructors e !! phantomConstrNum (undefined :: c a)
 
@@ -273,21 +273,21 @@ get' (k :: Key v BackendSpecific) = do
       let constr = head $ constructors e
       let fields = renderFields escapeS (constrParams constr)
       let query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name) <> " WHERE " <> fromJust (constrId constr) <> "=?"
-      x <- queryRawCached' query [toPrim proxy k] id
+      x <- queryRawCached' query [toPrimitivePersistValue proxy k] id
       case x of
         Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
         Nothing -> return Nothing
     else do
       let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawCached' query [toPrim proxy k] id
+      x <- queryRawCached' query [toPrimitivePersistValue proxy k] id
       case x of
         Just [discr] -> do
-          let constructorNum = fromPrim proxy discr
+          let constructorNum = fromPrimitivePersistValue proxy discr
           let constr = constructors e !! constructorNum
           let cName = name ++ [delim] ++ constrName constr
           let fields = renderFields escapeS (constrParams constr)
           let cQuery = "SELECT " <> fields <> " FROM " <> escapeS (fromString cName) <> " WHERE " <> fromJust (constrId constr) <> "=?"
-          x2 <- queryRawCached' cQuery [toPrim proxy k] id
+          x2 <- queryRawCached' cQuery [toPrimitivePersistValue proxy k] id
           case x2 of
             Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ discr:xs
             Nothing -> fail "Missing entry in constructor table"
@@ -340,7 +340,7 @@ delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValu
 
 deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
              => Key v BackendSpecific -> DbPersist Postgresql m ()
-deleteByKey' k = executeRawCached' query [toPrim proxy k] where
+deleteByKey' k = executeRawCached' query [toPrimitivePersistValue proxy k] where
   e = entityDef ((undefined :: Key v u -> v) k)
   constr = head $ constructors e
   name = fromString (persistName $ (undefined :: Key v u -> v) k)
@@ -359,7 +359,7 @@ count' (cond :: Cond v c) = do
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   x <- queryRawCached' query (maybe [] (flip getValues []) cond') id
   case x of
-    Just [num] -> return $ fromPrim proxy num
+    Just [num] -> return $ fromPrimitivePersistValue proxy num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
@@ -370,7 +370,7 @@ countAll' (_ :: v) = do
   let query = "SELECT COUNT(*) FROM " <> escapeS (fromString name)
   x <- queryRawCached' query [] id
   case x of
-    Just [num] -> return $ fromPrim proxy num
+    Just [num] -> return $ fromPrimitivePersistValue proxy num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
@@ -389,9 +389,9 @@ project' p options = start where
   name = persistName (undefined :: v)
   (lim, limps) = case (limit, offset) of
         (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" OFFSET ?", [toPrim proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrim proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrim proxy l, toPrim proxy o])
+        (Nothing, o) -> (" OFFSET ?", [toPrimitivePersistValue proxy o])
+        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
+        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
   cond' = renderCond' cond
   chains = projectionFieldChains p []
   fields = intercalateS (fromChar ',') $ foldr (renderChain escapeS) [] chains
@@ -411,11 +411,11 @@ insertList' (l :: [a]) = do
   let go :: Int -> [a] -> DbPersist Postgresql m ()
       go n (x:xs) = do
        x' <- toPersistValues x
-       executeRawCached' query $ (k:) . (toPrim proxy n:) . x' $ []
+       executeRawCached' query $ (k:) . (toPrimitivePersistValue proxy n:) . x' $ []
        go (n + 1) xs
       go _ [] = return ()
   go 0 l
-  return $ fromPrim proxy k
+  return $ fromPrimitivePersistValue proxy k
   
 getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Postgresql m [a]
 getList' k = do
@@ -423,7 +423,7 @@ getList' k = do
   let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRawCached' query [toPrim proxy k] $ mapAllRows (liftM fst . fromPersistValues)
+  queryRawCached' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
 
 --TODO: consider removal
 {-# SPECIALIZE getKey :: RowPopper (DbPersist Postgresql IO) -> DbPersist Postgresql IO PersistValue #-}
