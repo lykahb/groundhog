@@ -32,7 +32,7 @@ import Control.Monad.Trans.Reader (ask)
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B8
-import Data.Int (Int32)
+import Data.Int (Int64)
 import Data.IORef
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -42,7 +42,7 @@ import Data.Time.LocalTime (localTimeToUTC, utc)
 newtype Postgresql = Postgresql PG.Connection
 
 instance DbDescriptor Postgresql where
-  type AutoKeyType Postgresql = Int32
+  type AutoKeyType Postgresql = Int64
 
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String

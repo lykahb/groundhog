@@ -12,7 +12,6 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Either (partitionEithers)
 import Data.Function (on)
-import Data.Int (Int32)
 import Data.List (intercalate, group, groupBy)
 import Data.Maybe (mapMaybe, fromJust, fromMaybe, maybeToList)
 
@@ -77,7 +76,7 @@ migrate' = migrateRecursively migE migL where
               then do
                 -- the datatype had also many constructors before
                 -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
-                let updateDiscriminators = Right . go 0 . map (head &&& length) . group $ map fst $ res where
+                let updateDiscriminators = Right . go 0 . map (head &&& length) . group . map fst $ res where
                     go acc ((False, n):(True, n2):xs) = (False, defaultPriority, "UPDATE " ++ escape name ++ " SET discr = discr + " ++ show n ++ " WHERE discr >= " ++ show acc) : go (acc + n + n2) xs
                     go acc ((True, n):xs) = go (acc + n) xs
                     go _ _ = []
@@ -91,10 +90,10 @@ migrate' = migrateRecursively migE migL where
     let valuesName = mainName ++ delim : "values"
     let (valueCols, valueRefs) = mkColumns id "value" t
     let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id SERIAL PRIMARY KEY UNIQUE)"
-    let items = ("id INTEGER NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols
+    let items = ("id INT8 NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols
     let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " items ++ ")"
     let expectedMainStructure = (Just "id", [], [], [])
-    let expectedValuesStructure = (Nothing, Column "id" False (dbType (0 :: Int32)) Nothing : Column "ord" False (dbType (0 :: Int32)) Nothing : valueCols, [], map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
+    let expectedValuesStructure = (Nothing, Column "id" False DbInt64 Nothing : Column "ord" False DbInt32 Nothing : valueCols, [], map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
     mainStructure <- checkTable mainName
     valuesStructure <- checkTable valuesName
     let triggerMain = []
@@ -493,8 +492,8 @@ showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
 showSqlType DbBlob = "BYTEA"
 showSqlType (DbMaybe t) = showSqlType t
-showSqlType (DbList _ _) = "INTEGER"
-showSqlType (DbEntity Nothing _) = "INTEGER"
+showSqlType (DbList _ _) = showSqlType DbInt64
+showSqlType (DbEntity Nothing _) = showSqlType DbInt64
 showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
 compareColumns :: Column DbType -> Column DbType -> Bool
@@ -508,10 +507,10 @@ compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
--- | Converts complex datatypes that reference other data to id type DbInt32. Does not handle DbTuple
+-- | Converts complex datatypes that reference other data to id type DbInt64. Does not handle DbEmbedded
 simplifyType :: DbType -> DbType
-simplifyType (DbEntity Nothing _) = DbInt32
-simplifyType (DbList _ _) = DbInt32
+simplifyType (DbEntity Nothing _) = DbInt64
+simplifyType (DbList _ _) = DbInt64
 simplifyType x = x
 
 defaultPriority :: Int

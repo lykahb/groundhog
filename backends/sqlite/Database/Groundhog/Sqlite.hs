@@ -24,7 +24,7 @@ import Control.Monad.Trans.Reader (ask)
 import qualified Data.ByteString as BS
 import Data.Char (toUpper)
 import Data.Function (on)
-import Data.Int (Int32, Int64)
+import Data.Int (Int64)
 import Data.List (group, groupBy, intercalate, isInfixOf, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
@@ -36,7 +36,7 @@ import Data.Conduit.Pool
 data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
 
 instance DbDescriptor Sqlite where
-  type AutoKeyType Sqlite = Int32
+  type AutoKeyType Sqlite = Int64
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
@@ -177,7 +177,7 @@ migrate' = migrateRecursively migE migL where
     let items = ("id INTEGER NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols ++ map sqlReference valueRefs
     let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " items ++ ")"
     let expectedMainStructure = (Just "id", [], [], [])
-    let expectedValuesStructure = (Nothing, Column "id" False (dbType (0 :: Int32)) Nothing : Column "ord" False (dbType (0 :: Int32)) Nothing : valueCols, [], map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
+    let expectedValuesStructure = (Nothing, Column "id" False DbInt64 Nothing : Column "ord" False DbInt32 Nothing : valueCols, [], map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
     mainStructure <- checkTable mainName
     valuesStructure <- checkTable valuesName
     let triggerMain = []
@@ -388,8 +388,8 @@ showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbDayTimeZoned = "TIMESTAMP"
 showSqlType DbBlob = "BLOB"
 showSqlType (DbMaybe t) = showSqlType t
-showSqlType (DbList _ _) = "INTEGER"
-showSqlType (DbEntity Nothing _) = "INTEGER"
+showSqlType (DbList _ _) = showSqlType DbInt64
+showSqlType (DbEntity Nothing _) = showSqlType DbInt64
 showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
 data Affinity = TEXT | NUMERIC | INTEGER | REAL | NONE deriving (Eq, Show)
@@ -479,7 +479,7 @@ insertBy' u v = do
   
   let ifAbsent tname constr = do
       let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawTyped query [DbInt32] (uniques []) id
+      x <- queryRawTyped query [DbInt64] (uniques []) id
       case x of
         Nothing  -> liftM Right $ insert v
         Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
@@ -491,7 +491,7 @@ insertBy' u v = do
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> Utf8
 insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" where
   fields = case constrAutoKeyName c of
-    Just idName | withId -> (idName, dbType (0 :: Int32)):constrParams c
+    Just idName | withId -> (idName, dbType (0 :: Int64)):constrParams c
     _                    -> constrParams c
   fieldNames   = renderFields escapeS fields
   placeholders = renderFields (const $ fromChar '?') fields
@@ -508,7 +508,7 @@ insertByAll' v = do
 
   let ifAbsent tname constr = do
       let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawTyped query [DbInt32] (concatMap snd uniques) id
+      x <- queryRawTyped query [DbInt64] (concatMap snd uniques) id
       case x of
         Nothing  -> liftM Right $ insert v
         Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
@@ -598,13 +598,13 @@ selectAll' = start where
       constr = head $ constructors e
       fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId constr) $ renderFields escapeS (constrParams constr)
       query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name)
-      types = maybe id (const $ (DbInt32:)) (constrId constr) $ getConstructorTypes constr
+      types = maybe id (const $ (DbInt64:)) (constrId constr) $ getConstructorTypes constr
       in queryRawTyped query types [] $ mapAllRows $ mkEntity 0
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(cNum, constr) -> do
         let fields = fromJust (constrId constr) <> fromChar ',' <> renderFields escapeS (constrParams constr)
         let cName = fromString $ name ++ [delim] ++ constrName constr
         let query = "SELECT " <> fields <> " FROM " <> escapeS cName
-        let types = DbInt32:getConstructorTypes constr
+        let types = DbInt64:getConstructorTypes constr
         queryRawTyped query types [] $ mapAllRows $ mkEntity cNum
 
   e = entityDef (undefined :: v)
@@ -718,7 +718,7 @@ countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersi
 countAll' (_ :: v) = do
   let name = persistName (undefined :: v)
   let query = "SELECT COUNT(*) FROM " <> escapeS (fromString name)
-  x <- queryRawTyped query [DbInt32] [] id
+  x <- queryRawTyped query [DbInt64] [] id
   case x of
     Just [num] -> return $ fromPrimitivePersistValue proxy num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
