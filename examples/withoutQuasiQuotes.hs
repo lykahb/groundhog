@@ -6,7 +6,7 @@ import Database.Groundhog.Sqlite
 
 data Table = Create {select :: String, update :: Int, fubar :: String} deriving (Eq, Show)
 
-mkPersist defaultCodegenConfig $ PersistSettings [
+mkPersist defaultCodegenConfig $ PersistDefinitions [
   Left $ PSEntityDef "Table" Nothing Nothing Nothing $ Just [
     PSConstructorDef "Create" Nothing Nothing Nothing (Just [
         PSFieldDef "select" (Just "SELECT") Nothing Nothing
