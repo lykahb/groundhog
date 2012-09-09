@@ -27,6 +27,7 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   -- John is inserted only once because of the name constraint
   insert $ Product "Apples" 5 john
   insert $ Product "Melon" 2 john
+  -- Groundhog prevents SQL injections. Quotes and other special symbols are safe.
   insert $ Product "Melon" 6 (Customer "Jack Smith" "Don't let him pay by check")
   -- bonus melon for all large melon orders. The values used in expressions should have known type, so literal 5 is annotated.
   update [QuantityField =. toArith QuantityField + 1] (ProductNameField ==. "Melon" &&. QuantityField >. (5 :: Int))
