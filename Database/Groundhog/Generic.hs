@@ -39,6 +39,7 @@ module Database.Groundhog.Generic
   , haveSameElems
   , mapAllRows
   , phantomDb
+  , isSimple
   ) where
 
 import Database.Groundhog.Core
@@ -244,3 +245,7 @@ mapAllRows f pop = go where
 
 phantomDb :: PersistBackend m => m (Proxy (PhantomDb m))
 phantomDb = return $ error "phantomDb"
+
+isSimple :: [ConstructorDef] -> Bool
+isSimple [_] = True
+isSimple _   = False

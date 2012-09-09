@@ -4,7 +4,6 @@ module Database.Groundhog.Postgresql.Base
     ( Postgresql (..)
     , P (..)
     , escape
-    , isSimple
     , getStatement
     , queryRaw'
     , proxy
@@ -47,10 +46,6 @@ instance DbDescriptor Postgresql where
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String
 escape s = '\"' : s ++ "\""
-
-isSimple :: [a] -> Bool
-isSimple [_] = True
-isSimple _   = False
   
 getStatement :: StringS -> PG.Query
 getStatement sql = PG.Query $ T.encodeUtf8 $ T.pack $ fromStringS sql ""
