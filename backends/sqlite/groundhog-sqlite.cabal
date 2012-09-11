@@ -30,7 +30,6 @@ library
                      Database.Groundhog.Sqlite
     other-modules:   Database.Groundhog.Generic.Sql.Utf8
     ghc-options:     -Wall -fno-warn-unused-do-bind
-    ghc-prof-options:   -prof -auto-all
     if flag(systemlib)
         extra-libraries: sqlite3
     else

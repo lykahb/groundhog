@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, RecordWildCards, Rank2Types #-}
 module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
@@ -14,11 +14,12 @@ import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
 import Database.Groundhog.Generic.Sql.Utf8
+import qualified Database.Groundhog.Generic.PersistBackendHelpers as H
 
 import qualified Database.Sqlite as S
 
 import Control.Arrow ((***))
-import Control.Monad (liftM, forM, (>=>))
+import Control.Monad (liftM, forM)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Reader (ask)
@@ -29,9 +30,10 @@ import Data.Int (Int64)
 import Data.List (groupBy, intercalate, isInfixOf, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
-import Data.Maybe (fromJust, maybeToList)
-import Data.Monoid
+import Data.Maybe (maybeToList)
 import Data.Conduit.Pool
+
+import GHC.Exts (inline)
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
@@ -43,19 +45,19 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
   type PhantomDb (DbPersist Sqlite m) = Sqlite
   insert v = insert' v
-  insertBy u v = insertBy' u v
-  insertByAll v = insertByAll' v
-  replace k v = replace' k v
-  select options = select' options
-  selectAll = selectAll'
-  get k = get' k
-  getBy k = getBy' k
-  update upds cond = update' upds cond
-  delete cond = delete' cond
-  deleteByKey k = deleteByKey' k
-  count cond = count' cond
-  countAll fakeV = countAll' fakeV
-  project p options = project' p options
+  insertBy u v = H.insertBy escapeS queryRawTyped u v
+  insertByAll v = H.insertByAll escapeS queryRawTyped v
+  replace k v = H.replace escapeS queryRawTyped executeRawCached' insertIntoConstructorTable k v
+  select options = H.select escapeS queryRawTyped "LIMIT -1" renderCond' options -- select' options
+  selectAll = H.selectAll escapeS queryRawTyped
+  get k = inline $ H.get escapeS queryRawTyped k
+  getBy k = H.getBy escapeS queryRawTyped k
+  update upds cond = H.update escapeS executeRawCached' renderCond' upds cond
+  delete cond = H.delete escapeS executeRawCached' renderCond' cond
+  deleteByKey k = H.deleteByKey escapeS executeRawCached' k
+  count cond = H.count escapeS queryRawTyped renderCond' cond
+  countAll fakeV = H.countAll escapeS queryRawTyped fakeV
+  project p options = H.project escapeS queryRawTyped "LIMIT -1" renderCond' p options
   migrate fakeV = migrate' fakeV
 
   executeRaw False query ps = executeRaw' (fromString query) ps
@@ -65,6 +67,8 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
 
   insertList l = insertList' l
   getList k = getList' k
+
+--{-# SPECIALIZE INLINE H.get :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a) -> Key v BackendSpecific -> DbPersist Sqlite m (Maybe v) #-}
 
 --{-# SPECIALIZE withSqlitePool :: String -> Int -> (Pool Sqlite -> IO a) -> IO a #-}
 withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
@@ -331,25 +335,6 @@ insert' v = do
       executeRawCached' cQuery $ rowid:(tail vals)
       pureFromPersistValue [rowid]
 
-insertBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
-          => u (UniqueMarker v) -> v -> DbPersist Sqlite m (Either (AutoKey v) (AutoKey v))
-insertBy' u v = do
-  let e = entityDef v
-  let name = persistName v
-  uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
-  let fields = foldr (renderChain escapeS) [] $ projectionFieldChains u []
-  let cond = intercalateS " AND " $ map (<> "=?") fields
-  
-  let ifAbsent tname constr = do
-      let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawTyped query [DbInt64] (uniques []) id
-      case x of
-        Nothing  -> liftM Right $ insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
-        Just xs  -> fail $ "unexpected query result: " ++ show xs
-  let constr = head $ constructors e
-  ifAbsent name constr
-
 -- TODO: In Sqlite we can insert null to the id column. If so, id will be generated automatically. Check performance change from this.
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> Utf8
 insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" where
@@ -358,262 +343,6 @@ insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromStrin
     _                    -> constrParams c
   fieldNames   = renderFields escapeS fields
   placeholders = renderFields (const $ fromChar '?') fields
-
-{-# SPECIALIZE insertByAll' :: PersistEntity v => v -> DbPersist Sqlite IO (Either (AutoKey v) (AutoKey v)) #-}
-insertByAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Sqlite m (Either (AutoKey v) (AutoKey v))
-insertByAll' v = do
-  let e = entityDef v
-  let name = persistName v
-
-  let (constructorNum, uniques) = getUniques proxy v
-  let uniqueDefs = constrUniques $ constructors e !! constructorNum
-  let cond = fromString $ intercalate " OR " $ map (intercalate " AND " . map (\(fname, _) -> escape fname ++ "=?")) $ map (\(UniqueDef _ fields) -> fields) uniqueDefs
-
-  let ifAbsent tname constr = do
-      let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawTyped query [DbInt64] (concatMap snd uniques) id
-      case x of
-        Nothing  -> liftM Right $ insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
-        Just xs  -> fail $ "unexpected query result: " ++ show xs
-  if null uniques
-    then liftM Right $ insert v
-    else if isSimple (constructors e)
-      then do
-        let constr = head $ constructors e
-        ifAbsent name constr
-      else do
-        let constr = constructors e !! constructorNum
-        let cName = name ++ [delim] ++ constrName constr
-        ifAbsent cName constr
-
-replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-         => Key v BackendSpecific -> v -> DbPersist Sqlite m ()
-replace' k v = do
-  vals <- toEntityPersistValues' v
-  let e = entityDef v
-  let name = persistName v
-  let constructorNum = fromPrimitivePersistValue proxy (head vals)
-  let constr = constructors e !! constructorNum
-
-  let upds = renderFields (\f -> escapeS f <> "=?") $ constrParams constr
-  let mkQuery tname = "UPDATE " <> escapeS (fromString tname) <> " SET " <> upds <> " WHERE " <> fromString (fromJust $ constrAutoKeyName constr) <> "=?"
-
-  if isSimple (constructors e)
-    then executeRawCached' (mkQuery name) (tail vals ++ [toPrimitivePersistValue proxy k])
-    else do
-      let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawTyped query [DbInt32] [toPrimitivePersistValue proxy k] (id >=> return . fmap (fromPrimitivePersistValue proxy . head))
-      case x of
-        Just discr -> do
-          let cName = name ++ [delim] ++ constrName constr
-
-          if discr == constructorNum
-            then executeRawCached' (mkQuery cName) (tail vals ++ [toPrimitivePersistValue proxy k])
-            else do
-              let insQuery = insertIntoConstructorTable True cName constr
-              executeRawCached' insQuery (toPrimitivePersistValue proxy k:tail vals)
-
-              let oldCName = fromString $ name ++ [delim] ++ constrName (constructors e !! discr)
-              let delQuery = "DELETE FROM " <> escapeS oldCName <> " WHERE " <> fromJust (constrId constr) <> "=?"
-              executeRawCached' delQuery [toPrimitivePersistValue proxy k]
-
-              let updateDiscrQuery = "UPDATE " <> escapeS (fromString name) <> " SET discr=? WHERE id=?"
-              executeRawCached' updateDiscrQuery [head vals, toPrimitivePersistValue proxy k]
-        Nothing -> return ()
-
-select' :: forall m v c opts . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, HasSelectOptions opts v c)
-        => opts -> DbPersist Sqlite m [v]
-select' options = start where
-  SelectOptions cond limit offset ords = getSelectOptions options
-  start = if isSimple (constructors e)
-    then doSelectQuery (mkQuery name) 0
-    else let
-      cName = name ++ [delim] ++ constrName constr
-      in doSelectQuery (mkQuery cName) $ constrNum constr
-
-  e = entityDef (undefined :: v)
-  orders = renderOrders escapeS ords
-  name = persistName (undefined :: v)
-  (lim, limps) = case (limit, offset) of
-        (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" LIMIT -1 OFFSET ?", [toPrimitivePersistValue proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
-  cond' = renderCond' cond
-  fields = renderFields escapeS (constrParams constr)
-  mkQuery tname = "SELECT " <> fields <> " FROM " <> escapeS (fromString tname) <> whereClause <> orders <> lim
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery query cNum = queryRawTyped query types binds $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
-  binds = maybe id getValues cond' $ limps
-  constr = constructors e !! phantomConstrNum (undefined :: c a)
-  types = getConstructorTypes constr
-
--- | receives constructor number and row of values from the constructor table
-mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (AutoKey v, v)
-mkEntity i xs = fromEntityPersistValues (toPrimitivePersistValue proxy i:xs') >>= \(v, _) -> return (k, v) where
-  (k, xs') = fromPurePersistValues proxy xs
-
-selectAll' :: forall m v . (MonadBaseControl IO m, MonadIO m, PersistEntity v) => DbPersist Sqlite m [(AutoKey v, v)]
-selectAll' = start where
-  start = if isSimple (constructors e)
-    then let
-      constr = head $ constructors e
-      fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId constr) $ renderFields escapeS (constrParams constr)
-      query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name)
-      types = maybe id (const $ (DbInt64:)) (constrId constr) $ getConstructorTypes constr
-      in queryRawTyped query types [] $ mapAllRows $ mkEntity 0
-    else liftM concat $ forM (zip [0..] (constructors e)) $ \(cNum, constr) -> do
-        let fields = fromJust (constrId constr) <> fromChar ',' <> renderFields escapeS (constrParams constr)
-        let cName = fromString $ name ++ [delim] ++ constrName constr
-        let query = "SELECT " <> fields <> " FROM " <> escapeS cName
-        let types = DbInt64:getConstructorTypes constr
-        queryRawTyped query types [] $ mapAllRows $ mkEntity cNum
-
-  e = entityDef (undefined :: v)
-  name = persistName (undefined :: v)
-
-{-# SPECIALIZE get' :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> DbPersist Sqlite IO (Maybe v) #-}
-get' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-     => Key v BackendSpecific -> DbPersist Sqlite m (Maybe v)
-get' (k :: Key v BackendSpecific) = do
-  let e = entityDef (undefined :: v)
-  let name = persistName (undefined :: v)
-  if isSimple (constructors e)
-    then do
-      let constr = head $ constructors e
-      let fields = renderFields escapeS (constrParams constr)
-      let query = "SELECT " <> fields <> "FROM " <> escapeS (fromString name) <> " WHERE " <> fromJust (constrId constr) <> "=?"
-      let types = getConstructorTypes constr
-      x <- queryRawTyped query types [toPrimitivePersistValue proxy k] id
-      case x of
-        Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
-        Nothing -> return Nothing
-    else do
-      let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawTyped query [DbInt32] [toPrimitivePersistValue proxy k] id
-      case x of
-        Just [discr] -> do
-          let constructorNum = fromPrimitivePersistValue proxy discr
-          let constr = constructors e !! constructorNum
-          let cName = fromString $ name ++ [delim] ++ constrName constr
-          let fields = renderFields escapeS (constrParams constr)
-          let cQuery = "SELECT " <> fields <> "FROM " <> escapeS cName <> " WHERE " <> fromJust (constrId constr) <> "=?"
-          x2 <- queryRawTyped cQuery (getConstructorTypes constr) [toPrimitivePersistValue proxy k] id
-          case x2 of
-            Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ discr:xs
-            Nothing -> fail "Missing entry in constructor table"
-        Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
-        Nothing -> return Nothing
-
-{-# SPECIALIZE getBy' :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => Key v (Unique u) -> DbPersist Sqlite IO (Maybe v) #-}
-getBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
-       => Key v (Unique u) -> DbPersist Sqlite m (Maybe v)
-getBy' (k :: Key v (Unique u)) = do
-  let e = entityDef (undefined :: v)
-  let name = persistName (undefined :: v)
-  uniques <- toPersistValues k
-  let u = (undefined :: Key v (Unique u) -> u (UniqueMarker v)) k
-  let uFields = foldr (renderChain escapeS) [] $ projectionFieldChains u []
-  let cond = intercalateS " AND " $ map (<> "=?") uFields
-  let constr = head $ constructors e
-  let fields = renderFields escapeS (constrParams constr)
-  let query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name) <> " WHERE " <> cond
-  x <- queryRawTyped query (getConstructorTypes constr) (uniques []) id
-  case x of
-    Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
-    Nothing -> return Nothing
-      
-update' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Sqlite m ()
-update' upds (cond :: Cond v c) = do
-  let e = entityDef (undefined :: v)
-  let name = persistName (undefined :: v)
-  case renderUpdates proxy escapeS upds of
-    Just upds' -> do
-      let cond' = renderCond' cond
-      let mkQuery tname = "UPDATE " <> escapeS tname <> " SET " <> whereClause where
-          whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
-      let tname = fromString $ if isSimple (constructors e) then name else name ++ [delim] ++ phantomConstrName (undefined :: c a)
-      executeRawCached' (mkQuery tname) (getValues upds' <> maybe mempty getValues cond' $ [])
-    Nothing -> return ()
-
-delete' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m ()
-delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValues) cond') where
-  e = entityDef (undefined :: v)
-  constr = head $ constructors e
-  cond' = renderCond' cond
-  name = persistName (undefined :: v)
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  query = if isSimple (constructors e)
-    then "DELETE FROM " <> escapeS (fromString name) <> whereClause
-    -- the entries in the constructor table are deleted because of the reference on delete cascade
-    else "DELETE FROM " <> escapeS (fromString name) <> " WHERE id IN(SELECT " <> fromJust (constrId constr) <> " FROM " <> escapeS cName <> whereClause <> ")" where
-      cName = fromString $ name ++ [delim] ++ phantomConstrName (undefined :: c a)
-
-deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-             => Key v BackendSpecific -> DbPersist Sqlite m ()
-deleteByKey' k = executeRawCached' query [toPrimitivePersistValue proxy k] where
-  e = entityDef ((undefined :: Key v u -> v) k)
-  constr = head $ constructors e
-  name = fromString (persistName $ (undefined :: Key v u -> v) k)
-  query = "DELETE FROM " <> escapeS name <> " WHERE " <> fromJust (constrId constr) <> "=?"
-  
-
-{-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite IO Int #-}
-count' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Sqlite m Int
-count' (cond :: Cond v c) = do
-  let e = entityDef (undefined :: v)
-  let cond' = renderCond' cond
-  let name = persistName (undefined :: v)
-  let tname = fromString $ if isSimple (constructors e)
-       then name
-       else name ++ [delim] ++ phantomConstrName (undefined :: c a)
-  let query = "SELECT COUNT(*) FROM " <> escapeS tname <> whereClause where
-      whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  x <- queryRawCached' query (maybe [] (flip getValues []) cond') id
-  case x of
-    Just [num] -> return $ fromPrimitivePersistValue proxy num
-    Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
-    Nothing -> fail $ "COUNT returned no rows"
-
-{-# SPECIALIZE countAll' :: PersistEntity v => v -> DbPersist Sqlite IO Int #-}
-countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Sqlite m Int
-countAll' (_ :: v) = do
-  let name = persistName (undefined :: v)
-  let query = "SELECT COUNT(*) FROM " <> escapeS (fromString name)
-  x <- queryRawTyped query [DbInt64] [] id
-  case x of
-    Just [num] -> return $ fromPrimitivePersistValue proxy num
-    Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
-    Nothing -> fail $ "COUNT returned no rows"
-
-project' :: forall m v c p opts a' . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, Projection p (RestrictionHolder v c) a', HasSelectOptions opts v c)
-         => p -> opts -> DbPersist Sqlite m [a']
-project' p options = start where
-  SelectOptions cond limit offset ords = getSelectOptions options
-  start = doSelectQuery $ if isSimple (constructors e)
-    then mkQuery name
-    else let
-      cName = name ++ [delim] ++ constrName constr
-      in mkQuery cName
-
-  e = entityDef (undefined :: v)
-  orders = renderOrders escapeS ords
-  name = persistName (undefined :: v)
-  (lim, limps) = case (limit, offset) of
-        (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" LIMIT -1 OFFSET ?", [toPrimitivePersistValue proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
-  cond' = renderCond' cond
-  chains = projectionFieldChains p []
-  fields = intercalateS (fromChar ',') $ foldr (renderChain escapeS) [] chains
-  mkQuery tname = "SELECT " <> fields <> " FROM " <> escapeS (fromString tname) <> whereClause <> orders <> lim
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery query = queryRawTyped query types binds $ mapAllRows $ liftM fst . projectionResult p
-  binds = maybe id getValues cond' $ limps
-  constr = constructors e !! phantomConstrNum (undefined :: c a)
-  types = foldr getDbTypes [] $ map (snd . fst) chains
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
 insertList' l = do
@@ -735,9 +464,6 @@ typeToSqlite (DbList _ _) = Just S.IntegerColumn
 typeToSqlite (DbEntity Nothing _) = Just S.IntegerColumn
 typeToSqlite t = error $ "typeToSqlite: DbType does not have corresponding database type: " ++ show t
 
-getConstructorTypes :: ConstructorDef -> [DbType]
-getConstructorTypes = foldr getDbTypes [] . map snd . constrParams where
-
 getDbTypes :: DbType -> [DbType] -> [DbType]
 getDbTypes typ acc = case typ of
   DbEmbedded (EmbeddedDef _ ts) -> foldr (getDbTypes . snd) acc ts
@@ -750,9 +476,6 @@ pFromSql (S.SQLFloat i)   = PersistDouble i
 pFromSql (S.SQLText s)    = PersistString s
 pFromSql (S.SQLBlob bs)   = PersistByteString bs
 pFromSql (S.SQLNull)      = PersistNull
-
-constrId :: ConstructorDef -> Maybe Utf8
-constrId = fmap (escapeS . fromString) . constrAutoKeyName
 
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String

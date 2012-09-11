@@ -11,46 +11,65 @@ module Database.Groundhog.Postgresql
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
+import qualified Database.Groundhog.Generic.Migration as GM
 import Database.Groundhog.Generic.Sql.String
-import Database.Groundhog.Postgresql.Base
-import Database.Groundhog.Postgresql.Migration
+import qualified Database.Groundhog.Generic.PersistBackendHelpers as H
 
 import qualified Database.PostgreSQL.Simple as PG
+import qualified Database.PostgreSQL.Simple.BuiltinTypes as PG
+import qualified Database.PostgreSQL.Simple.Internal as PG
+import qualified Database.PostgreSQL.Simple.ToField as PGTF
+import qualified Database.PostgreSQL.Simple.FromField as PGFF
+import qualified Database.PostgreSQL.Simple.Types as PG
+import Database.PostgreSQL.Simple.Ok (Ok (..))
+import qualified Database.PostgreSQL.LibPQ as LibPQ
 
-import Control.Monad (liftM, forM, (>=>))
+import Control.Arrow ((***))
+import Control.Exception (throw)
+import Control.Monad (forM, liftM)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Control(MonadBaseControl)
+import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
-import Data.ByteString.Char8 (pack)
+import Data.ByteString.Char8 (ByteString, pack, unpack)
+import Data.Either (partitionEithers)
+import Data.Function (on)
 import Data.Int (Int64)
-import Data.List (intercalate)
-import Data.Maybe (fromJust) 
+import Data.IORef
+import Data.List (groupBy, intercalate)
 import Data.Monoid
 import Data.Conduit.Pool
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import Data.Time.LocalTime (localTimeToUTC, utc)
+
+-- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
+newtype Postgresql = Postgresql PG.Connection
+
+instance DbDescriptor Postgresql where
+  type AutoKeyType Postgresql = Int64
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgresql m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
   type PhantomDb (DbPersist Postgresql m) = Postgresql
   insert v = insert' v
-  insertBy u v = insertBy' u v
-  insertByAll v = insertByAll' v
-  replace k v = replace' k v
-  select options = select' options
-  selectAll = selectAll'
-  get k = get' k
-  getBy k = getBy' k
-  update upds cond = update' upds cond
-  delete cond = delete' cond
-  deleteByKey k = deleteByKey' k
-  count cond = count' cond
-  countAll fakeV = countAll' fakeV
-  project p options = project' p options
+  insertBy u v = H.insertBy escapeS queryRawTyped' u v
+  insertByAll v = H.insertByAll escapeS queryRawTyped' v
+  replace k v = H.replace escapeS queryRawTyped' executeRaw' insertIntoConstructorTable k v
+  select options = H.select escapeS queryRawTyped' "" renderCond' options
+  selectAll = H.selectAll escapeS queryRawTyped'
+  get k = H.get escapeS queryRawTyped' k
+  getBy k = H.getBy escapeS queryRawTyped' k
+  update upds cond = H.update escapeS executeRaw' renderCond' upds cond
+  delete cond = H.delete escapeS executeRaw' renderCond' cond
+  deleteByKey k = H.deleteByKey escapeS executeRaw' k
+  count cond = H.count escapeS queryRawTyped' renderCond' cond
+  countAll fakeV = H.countAll escapeS queryRawTyped' fakeV
+  project p options = H.project escapeS queryRawTyped' "" renderCond' p options
   migrate fakeV = migrate' fakeV
 
-  executeRaw False query ps = executeRaw' (fromString query) ps
-  executeRaw True query ps = executeRawCached' (fromString query) ps
-  queryRaw False query ps f = queryRaw' (fromString query) ps f
-  queryRaw True query ps f = queryRawCached' (fromString query) ps f
+  executeRaw _ query ps = executeRaw' (fromString query) ps
+  queryRaw _ query ps f = queryRaw' (fromString query) ps f
 
   insertList l = insertList' l
   getList k = getList' k
@@ -108,9 +127,9 @@ insert' v = do
       let constr = head $ constructors e
       let query = insertIntoConstructorTable False name constr
       case constrAutoKeyName constr of
-        Nothing -> executeRawCached' query (tail vals) >> pureFromPersistValue []
+        Nothing -> executeRaw' query (tail vals) >> pureFromPersistValue []
         Just _  -> do
-          x <- queryRawCached' query (tail vals) id
+          x <- queryRaw' query (tail vals) id
           case x of
             Just xs -> pureFromPersistValue xs
             Nothing -> pureFromPersistValue []
@@ -118,29 +137,10 @@ insert' v = do
       let constr = constructors e !! constructorNum
       let cName = name ++ [delim] ++ constrName constr
       let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)RETURNING(id)"
-      rowid <- queryRawCached' query (take 1 vals) getKey
+      rowid <- queryRaw' query (take 1 vals) getKey
       let cQuery = insertIntoConstructorTable True cName constr
-      executeRawCached' cQuery $ rowid:(tail vals)
+      executeRaw' cQuery $ rowid:(tail vals)
       pureFromPersistValue [rowid]
-
-insertBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
-          => u (UniqueMarker v) -> v -> DbPersist Postgresql m (Either (AutoKey v) (AutoKey v))
-insertBy' u v = do
-  let e = entityDef v
-  let name = persistName v
-  uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
-  let fields = foldr (renderChain escapeS) [] $ projectionFieldChains u []
-  let cond = intercalateS " AND " $ map (<> "=?") fields
-  
-  let ifAbsent tname constr = do
-      let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawCached' query (uniques []) id
-      case x of
-        Nothing  -> liftM Right $ insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
-        Just xs  -> fail $ "unexpected query result: " ++ show xs
-  let constr = head $ constructors e
-  ifAbsent name constr
 
 insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> StringS
 insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning where
@@ -151,267 +151,17 @@ insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromStrin
   fieldNames   = renderFields escapeS fields
   placeholders = renderFields (const $ fromChar '?') fields
 
-{-# SPECIALIZE insertByAll' :: PersistEntity v => v -> DbPersist Postgresql IO (Either (AutoKey v) (AutoKey v)) #-}
-insertByAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m (Either (AutoKey v) (AutoKey v))
-insertByAll' v = do
-  let e = entityDef v
-  let name = persistName v
-
-  let (constructorNum, uniques) = getUniques proxy v
-  let uniqueDefs = constrUniques $ constructors e !! constructorNum
-  let cond = fromString $ intercalate " OR " $ map (intercalate " AND " . map (\(fname, _) -> escape fname ++ "=?")) $ map (\(UniqueDef _ fields) -> fields) uniqueDefs
-
-  let ifAbsent tname constr = do
-      let query = "SELECT " <> maybe "1" id (constrId constr) <> " FROM " <> escapeS (fromString tname) <> " WHERE " <> cond
-      x <- queryRawCached' query (concatMap snd uniques) id
-      case x of
-        Nothing  -> liftM Right $ insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
-        Just xs  -> fail $ "unexpected query result: " ++ show xs
-  if null uniques
-    then liftM Right $ insert v
-    else if isSimple (constructors e)
-      then do
-        let constr = head $ constructors e
-        ifAbsent name constr
-      else do
-        let constr = constructors e !! constructorNum
-        let cName = name ++ [delim] ++ constrName constr
-        ifAbsent cName constr
-
-replace' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-         => Key v BackendSpecific -> v -> DbPersist Postgresql m ()
-replace' k v = do
-  vals <- toEntityPersistValues' v
-  let e = entityDef v
-  let name = persistName v
-  let constructorNum = fromPrimitivePersistValue proxy (head vals)
-  let constr = constructors e !! constructorNum
-
-  let upds = renderFields (\f -> escapeS f <> "=?") $ constrParams constr
-  let mkQuery tname = "UPDATE " <> escapeS (fromString tname) <> " SET " <> upds <> " WHERE " <> fromString (fromJust $ constrAutoKeyName constr) <> "=?"
-
-  if isSimple (constructors e)
-    then executeRawCached' (mkQuery name) (tail vals ++ [toPrimitivePersistValue proxy k])
-    else do
-      let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawCached' query [toPrimitivePersistValue proxy k] (id >=> return . fmap (fromPrimitivePersistValue proxy . head))
-      case x of
-        Just discr -> do
-          let cName = name ++ [delim] ++ constrName constr
-
-          if discr == constructorNum
-            then executeRawCached' (mkQuery cName) (tail vals ++ [toPrimitivePersistValue proxy k])
-            else do
-              let insQuery = insertIntoConstructorTable True cName constr
-              executeRawCached' insQuery (toPrimitivePersistValue proxy k:tail vals)
-
-              let oldCName = fromString $ name ++ [delim] ++ constrName (constructors e !! discr)
-              let delQuery = "DELETE FROM " <> escapeS oldCName <> " WHERE " <> fromJust (constrId constr) <> "=?"
-              executeRawCached' delQuery [toPrimitivePersistValue proxy k]
-
-              let updateDiscrQuery = "UPDATE " <> escapeS (fromString name) <> " SET discr=? WHERE id=?"
-              executeRawCached' updateDiscrQuery [head vals, toPrimitivePersistValue proxy k]
-        Nothing -> return ()
-
--- | receives constructor number and row of values from the constructor table
-mkEntity :: (PersistEntity v, PersistBackend m) => Int -> [PersistValue] -> m (AutoKey v, v)
-mkEntity i xs = fromEntityPersistValues (toPrimitivePersistValue proxy i:xs') >>= \(v, _) -> return (k, v) where
-  (k, xs') = fromPurePersistValues proxy xs
-
-select' :: forall m v c opts . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, HasSelectOptions opts v c)
-        => opts -> DbPersist Postgresql m [v]
-select' options = start where
-  SelectOptions cond limit offset ords = getSelectOptions options
-  start = if isSimple (constructors e)
-    then doSelectQuery (mkQuery name) 0
-    else let
-      cName = name ++ [delim] ++ constrName constr
-      in doSelectQuery (mkQuery cName) $ constrNum constr
-
-  e = entityDef (undefined :: v)
-  orders = renderOrders escapeS ords
-  name = persistName (undefined :: v)
-  (lim, limps) = case (limit, offset) of
-        (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" OFFSET ?", [toPrimitivePersistValue proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
-  cond' = renderCond' cond
-  fields = renderFields escapeS (constrParams constr)
-  mkQuery tname = "SELECT " <> fields <> " FROM " <> fromString (escape tname) <> whereClause <> orders <> lim
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery query cNum = queryRawCached' query binds $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
-  binds = maybe id getValues cond' $ limps
-  constr = constructors e !! phantomConstrNum (undefined :: c a)
-
-selectAll' :: forall m v.(MonadBaseControl IO m, MonadIO m, PersistEntity v) => DbPersist Postgresql m [(AutoKey v, v)]
-selectAll' = start where
-  start = if isSimple (constructors e)
-    then let
-      constr = head $ constructors e
-      fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId constr) $ renderFields escapeS (constrParams constr)
-      query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name)
-      in queryRawCached' query [] $ mapAllRows (mkEntity 0)
-    else liftM concat $ forM (zip [0..] (constructors e)) $ \(i, constr) -> do
-        let fields = fromJust (constrId constr) <> fromChar ',' <> renderFields escapeS (constrParams constr)
-        let cName = name ++ [delim] ++ constrName constr
-        let query = "SELECT " <> fields <> " FROM " <> escapeS (fromString cName)
-        queryRawCached' query [] $ mapAllRows (mkEntity i)
-  e = entityDef (undefined :: v)
-  name = persistName (undefined :: v)
-
-{-# SPECIALIZE get' :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> DbPersist Postgresql IO (Maybe v) #-}
-{-# INLINE get' #-}
-get' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-     => Key v BackendSpecific -> DbPersist Postgresql m (Maybe v)
-get' (k :: Key v BackendSpecific) = do
-  let e = entityDef (undefined :: v)
-  let name = persistName (undefined :: v)
-  if isSimple (constructors e)
-    then do
-      let constr = head $ constructors e
-      let fields = renderFields escapeS (constrParams constr)
-      let query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name) <> " WHERE " <> fromJust (constrId constr) <> "=?"
-      x <- queryRawCached' query [toPrimitivePersistValue proxy k] id
-      case x of
-        Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
-        Nothing -> return Nothing
-    else do
-      let query = "SELECT discr FROM " <> escapeS (fromString name) <> " WHERE id=?"
-      x <- queryRawCached' query [toPrimitivePersistValue proxy k] id
-      case x of
-        Just [discr] -> do
-          let constructorNum = fromPrimitivePersistValue proxy discr
-          let constr = constructors e !! constructorNum
-          let cName = name ++ [delim] ++ constrName constr
-          let fields = renderFields escapeS (constrParams constr)
-          let cQuery = "SELECT " <> fields <> " FROM " <> escapeS (fromString cName) <> " WHERE " <> fromJust (constrId constr) <> "=?"
-          x2 <- queryRawCached' cQuery [toPrimitivePersistValue proxy k] id
-          case x2 of
-            Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ discr:xs
-            Nothing -> fail "Missing entry in constructor table"
-        Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
-        Nothing -> return Nothing
-
-{-# SPECIALIZE getBy' :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => Key v (Unique u) -> DbPersist Postgresql IO (Maybe v) #-}
-getBy' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
-       => Key v (Unique u) -> DbPersist Postgresql m (Maybe v)
-getBy' (k :: Key v (Unique u)) = do
-  let e = entityDef (undefined :: v)
-  let name = persistName (undefined :: v)
-  uniques <- toPersistValues k
-  let u = (undefined :: Key v (Unique u) -> u (UniqueMarker v)) k
-  let uFields = foldr (renderChain escapeS) [] $ projectionFieldChains u []
-  let cond = intercalateS " AND " $ map (<> "=?") uFields
-  let constr = head $ constructors e
-  let fields = renderFields escapeS (constrParams constr)
-  let query = "SELECT " <> fields <> " FROM " <> escapeS (fromString name) <> " WHERE " <> cond
-  x <- queryRawCached' query (uniques []) id
-  case x of
-    Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
-    Nothing -> return Nothing
-
-update' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> DbPersist Postgresql m ()
-update' upds (cond :: Cond v c) = do
-  let e = entityDef (undefined :: v)
-  let name = persistName (undefined :: v)
-  case renderUpdates proxy escapeS upds of
-    Just upds' -> do
-      let cond' = renderCond' cond
-      let mkQuery tname = "UPDATE " <> escapeS tname <> " SET " <> whereClause where
-          whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
-      let tname = fromString $ if isSimple (constructors e) then name else name ++ [delim] ++ phantomConstrName (undefined :: c a)
-      executeRawCached' (mkQuery tname) (getValues upds' <> maybe mempty getValues cond' $ [])
-    Nothing -> return ()
-
-delete' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m ()
-delete' (cond :: Cond v c) = executeRawCached' query (maybe [] (($ []) . getValues) cond') where
-  e = entityDef (undefined :: v)
-  constr = head $ constructors e
-  cond' = renderCond' cond
-  name = persistName (undefined :: v)
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  query = if isSimple (constructors e)
-    then "DELETE FROM " <> escapeS (fromString name) <> whereClause
-    -- the entries in the constructor table are deleted because of the reference on delete cascade
-    else "DELETE FROM " <> escapeS (fromString name) <> " WHERE id IN(SELECT " <> fromJust (constrId constr) <> " FROM " <> escapeS cName <> whereClause <> ")" where
-      cName = fromString $ name ++ [delim] ++ phantomConstrName (undefined :: c a)
-
-deleteByKey' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-             => Key v BackendSpecific -> DbPersist Postgresql m ()
-deleteByKey' k = executeRawCached' query [toPrimitivePersistValue proxy k] where
-  e = entityDef ((undefined :: Key v u -> v) k)
-  constr = head $ constructors e
-  name = fromString (persistName $ (undefined :: Key v u -> v) k)
-  query = "DELETE FROM " <> escapeS name <> " WHERE " <> fromJust (constrId constr) <> "=?"
-
-{-# SPECIALIZE count' :: (PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql IO Int #-}
-count' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c) => Cond v c -> DbPersist Postgresql m Int
-count' (cond :: Cond v c) = do
-  let e = entityDef (undefined :: v)
-  let cond' = renderCond' cond
-  let name = persistName (undefined :: v)
-  let tname = fromString $ if isSimple (constructors e)
-       then name
-       else name ++ [delim] ++ phantomConstrName (undefined :: c a)
-  let query = "SELECT COUNT(*) FROM " <> escapeS tname <> whereClause where
-      whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  x <- queryRawCached' query (maybe [] (flip getValues []) cond') id
-  case x of
-    Just [num] -> return $ fromPrimitivePersistValue proxy num
-    Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
-    Nothing -> fail $ "COUNT returned no rows"
-
-{-# SPECIALIZE countAll' :: PersistEntity v => v -> DbPersist Postgresql IO Int #-}
-countAll' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m Int
-countAll' (_ :: v) = do
-  let name = persistName (undefined :: v)
-  let query = "SELECT COUNT(*) FROM " <> escapeS (fromString name)
-  x <- queryRawCached' query [] id
-  case x of
-    Just [num] -> return $ fromPrimitivePersistValue proxy num
-    Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
-    Nothing -> fail $ "COUNT returned no rows"
-
-project' :: forall m v c p opts a' . (MonadBaseControl IO m, MonadIO m, PersistEntity v, Constructor c, Projection p (RestrictionHolder v c) a', HasSelectOptions opts v c)
-         => p -> opts -> DbPersist Postgresql m [a']
-project' p options = start where
-  SelectOptions cond limit offset ords = getSelectOptions options
-  start = doSelectQuery $ if isSimple (constructors e)
-    then mkQuery name
-    else let
-      cName = name ++ [delim] ++ constrName constr
-      in mkQuery cName
-
-  e = entityDef (undefined :: v)
-  orders = renderOrders escapeS ords
-  name = persistName (undefined :: v)
-  (lim, limps) = case (limit, offset) of
-        (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" OFFSET ?", [toPrimitivePersistValue proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
-  cond' = renderCond' cond
-  chains = projectionFieldChains p []
-  fields = intercalateS (fromChar ',') $ foldr (renderChain escapeS) [] chains
-  mkQuery tname = "SELECT " <> fields <> " FROM " <> escapeS (fromString tname) <> whereClause <> orders <> lim
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery query = queryRawCached' query binds $ mapAllRows $ liftM fst . projectionResult p
-  binds = maybe id getValues cond' $ limps
-  constr = constructors e !! phantomConstrNum (undefined :: c a)
-
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' (l :: [a]) = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
-  k <- queryRawCached' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES RETURNING(id)") [] getKey
+  k <- queryRaw' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES RETURNING(id)") [] getKey
   let valuesName = mainName <> delim' <> "values"
   let fields = [("ord", dbType (0 :: Int)), ("value", dbType (undefined :: a))]
   let query = "INSERT INTO " <> escapeS valuesName <> "(id," <> renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields <> ")"
   let go :: Int -> [a] -> DbPersist Postgresql m ()
       go n (x:xs) = do
        x' <- toPersistValues x
-       executeRawCached' query $ (k:) . (toPrimitivePersistValue proxy n:) . x' $ []
+       executeRaw' query $ (k:) . (toPrimitivePersistValue proxy n:) . x' $ []
        go (n + 1) xs
       go _ [] = return ()
   go 0 l
@@ -423,7 +173,7 @@ getList' k = do
   let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRawCached' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
+  queryRaw' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
 
 --TODO: consider removal
 {-# SPECIALIZE getKey :: RowPopper (DbPersist Postgresql IO) -> DbPersist Postgresql IO PersistValue #-}
@@ -441,12 +191,6 @@ executeRaw' query vals = do
     _ <- PG.execute conn stmt (map P vals)
     return ()
 
-executeRawCached' :: MonadIO m => StringS -> [PersistValue] -> DbPersist Postgresql m ()
-executeRawCached' = executeRaw'
-
-queryRawCached' :: (MonadBaseControl IO m, MonadIO m) => StringS -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
-queryRawCached' = queryRaw'
-
 renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> Maybe (RenderS StringS)
 renderCond' = renderCond proxy escapeS renderEquals renderNotEquals where
   renderEquals a b = a <> " IS NOT DISTINCT FROM " <> b
@@ -461,5 +205,451 @@ delim' = fromChar delim
 toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
-constrId :: ConstructorDef -> Maybe StringS
-constrId = fmap (escapeS . fromString) . constrAutoKeyName
+--- MIGRATION
+
+migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Postgresql m)
+migrate' = migrateRecursively (migrateEntity migrationPack) (migrateList migrationPack)
+
+migrationPack :: (MonadBaseControl IO m, MonadIO m) => GM.MigrationPack (DbPersist Postgresql m) DbType
+migrationPack = GM.MigrationPack
+  compareColumns
+  compareRefs
+  compareUniqs
+  checkTable
+  migTriggerOnDelete
+  migTriggerOnUpdate
+  GM.defaultMigConstr
+  escape
+  "SERIAL PRIMARY KEY UNIQUE"
+  "INT8"
+  mainTableId
+  defaultPriority
+  simplifyType
+  (\uniques refs -> ([], map (\(UniqueDef' uName fields) -> AddUniqueConstraint uName fields) uniques ++ map AddReference refs))
+  showColumn
+  showAlterDb
+
+showColumn :: Column DbType -> String
+showColumn (Column n nu t def) = concat
+    [ escape n
+    , " "
+    , showSqlType t
+    , " "
+    , if nu then "NULL" else "NOT NULL"
+    , case def of
+        Nothing -> ""
+        Just s  -> " DEFAULT " ++ s
+    ]
+
+checkFunction :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe String)
+checkFunction name = do
+  x <- queryRaw' "SELECT p.prosrc FROM pg_catalog.pg_namespace n INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = ?" [toPrimitivePersistValue proxy name] id
+  case x of
+    Nothing  -> return Nothing
+    Just src -> return (fst $ fromPurePersistValues proxy src)
+
+checkTrigger :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe String)
+checkTrigger name = do
+  x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_name = ?" [toPrimitivePersistValue proxy name] id
+  case x of
+    Nothing  -> return Nothing
+    Just src -> return (fst $ fromPurePersistValues proxy src)
+
+-- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB DbType])
+migTriggerOnDelete name deletes = do
+  let funcName = name
+  let trigName = name
+  func <- checkFunction funcName
+  trig <- checkTrigger trigName
+  let funcBody = "BEGIN " ++ concatMap snd deletes ++ "RETURN NEW;END;"
+      addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ escape funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
+      funcMig = case func of
+        Nothing | null deletes -> []
+        Nothing   -> [addFunction]
+        Just body -> if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
+          then [DropFunction funcName]
+          else if body == funcBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropFunction funcName, addFunction]
+
+      trigBody = "EXECUTE PROCEDURE " ++ escape funcName ++ "()"
+      addTrigger = AddTriggerOnDelete trigName name trigBody
+      (trigExisted, trigMig) = case trig of
+        Nothing | null deletes -> (False, [])
+        Nothing   -> (False, [addTrigger])
+        Just body -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
+          then [DropTrigger trigName name]
+          else if body == trigBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropTrigger trigName name, addTrigger])
+  return (trigExisted, funcMig ++ trigMig)
+      
+-- | Table name and a  list of field names and according delete statements
+-- assume that this function is called only for ephemeral fields
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB DbType])
+migTriggerOnUpdate name fieldName del = do
+  let funcName = name ++ delim : fieldName
+  let trigName = name ++ delim : fieldName
+  func <- checkFunction funcName
+  trig <- checkTrigger trigName
+  let funcBody = "BEGIN " ++ del ++ "RETURN NEW;END;"
+      addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ escape funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
+      funcMig = case func of
+        Nothing   -> [addFunction]
+        Just body -> if body == funcBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropFunction funcName, addFunction]
+
+      trigBody = "EXECUTE PROCEDURE " ++ escape funcName ++ "()"
+      addTrigger = AddTriggerOnUpdate trigName name fieldName trigBody
+      (trigExisted, trigMig) = case trig of
+        Nothing   -> (False, [addTrigger])
+        Just body -> (True, if body == trigBody
+            then []
+            -- this can happen when an ephemeral field was added or removed.
+            else [DropTrigger trigName name, addTrigger])
+  return (trigExisted, funcMig ++ trigMig)
+  
+checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] (TableInfo DbType)))
+checkTable name = do
+  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrimitivePersistValue proxy name] id
+  case table of
+    Just _ -> do
+      -- omit primary keys
+      cols <- queryRaw' "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default FROM information_schema.columns c WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?) ORDER BY c.ordinal_position" [toPrimitivePersistValue proxy name, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
+      let (col_errs, cols') = partitionEithers cols
+      
+      uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      let mkUniq us = UniqueDef' (fst $ head us) (map snd us)
+      let uniqs' = map mkUniq $ groupBy ((==) `on` fst) uniqRows
+      references <- checkTableReferences name
+      primaryKeyResult <- checkPrimaryKey name
+      let (primaryKey, uniqs'') = case primaryKeyResult of
+            (Left primaryKeyName) -> (primaryKeyName, uniqs')
+            (Right u) -> (Nothing, u:uniqs')
+      return $ Just $ case col_errs of
+        []   -> Right $ TableInfo primaryKey cols' uniqs'' references
+        errs -> Left errs
+    Nothing -> return Nothing
+
+checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
+checkPrimaryKey name = do
+  uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  let mkUniq us = UniqueDef' (fst $ head us) (map snd us)
+  return $ case uniqRows of
+    [] -> Left Nothing
+    [(_, primaryKeyName)] -> Left $ Just primaryKeyName
+    us -> Right $ mkUniq us
+
+getColumn :: String -> (String, String, String, Maybe String) -> Either String (Column DbType)
+getColumn _ (column_name, is_nullable, udt_name, d) = case readSqlType udt_name of
+      Left s -> Left s
+      Right t -> Right $ Column column_name (is_nullable == "YES") t d
+
+checkTableReferences :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m [(Maybe String, Reference)]
+checkTableReferences tableName = do
+  let sql = "SELECT c.conname, c.foreign_table || '', a_child.attname AS child, a_parent.attname AS parent FROM (SELECT r.confrelid::regclass AS foreign_table, r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname FROM pg_catalog.pg_constraint r WHERE r.conrelid = ?::regclass AND r.contype = 'f') AS c INNER JOIN pg_attribute a_parent ON a_parent.attnum = c.confkey AND a_parent.attrelid = c.confrelid INNER JOIN pg_attribute a_child ON a_child.attnum = c.conkey AND a_child.attrelid = c.conrelid ORDER BY c.conname"
+  x <- queryRaw' sql [toPrimitivePersistValue proxy $ escape tableName] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+  -- (refName, (parentTable, (childColumn, parentColumn)))
+  let mkReference xs = (Just refName, (parentTable, map (snd . snd) xs)) where
+        (refName, (parentTable, _)) = head xs
+      references = map mkReference $ groupBy ((==) `on` fst) x
+  return references
+
+showAlterDb :: AlterDB DbType -> SingleMigration
+showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
+showAlterDb (AlterTable t _ _ _ alts) = Right $ map (showAlterTable t) alts
+showAlterDb (DropTrigger trigName tName) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape trigName ++ " ON " ++ escape tName)]
+showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER DELETE ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
+showAlterDb (AddTriggerOnUpdate trigName tName fName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER UPDATE OF " ++ escape fName ++ " ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
+showAlterDb (CreateOrReplaceFunction s) = Right [(False, functionPriority, s)]
+showAlterDb (DropFunction funcName) = Right [(False, functionPriority, "DROP FUNCTION " ++ escape funcName ++ "()")]
+                 
+showAlterTable :: String -> AlterTable -> (Bool, Int, String)
+showAlterTable table (AlterColumn alt) = showAlterColumn table alt
+showAlterTable table (AddUniqueConstraint cname cols) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ADD CONSTRAINT "
+  , escape cname
+  , " UNIQUE("
+  , intercalate "," $ map escape cols
+  , ")"
+  ])
+showAlterTable table (DropConstraint cname) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " DROP CONSTRAINT "
+  , escape cname
+  ])
+showAlterTable table (AddReference (tName, columns)) = (False, referencePriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ADD FOREIGN KEY("
+  , our
+  , ") REFERENCES "
+  , escape tName
+  , "("
+  , foreign
+  , ")"
+  ]) where
+  (our, foreign) = f *** f $ unzip columns
+  f = intercalate ", " . map escape
+showAlterTable table (DropReference name) = (False, defaultPriority,
+    "ALTER TABLE " ++ escape table ++ " DROP CONSTRAINT " ++ name)
+
+showAlterColumn :: String -> AlterColumn' -> (Bool, Int, String)
+showAlterColumn table (n, Type t) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ALTER COLUMN "
+  , escape n
+  , " TYPE "
+  , showSqlType t
+  ])
+showAlterColumn table (n, IsNull) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ALTER COLUMN "
+  , escape n
+  , " DROP NOT NULL"
+  ])
+showAlterColumn table (n, NotNull) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ALTER COLUMN "
+  , escape n
+  , " SET NOT NULL"
+  ])
+showAlterColumn table (_, Add col) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ADD COLUMN "
+  , showColumn col
+  ])
+showAlterColumn table (n, Drop) = (True, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " DROP COLUMN "
+  , escape n
+  ])
+showAlterColumn table (n, AddPrimaryKey) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ADD COLUMN "
+  , escape n
+  , " SERIAL PRIMARY KEY UNIQUE"
+  ])
+showAlterColumn table (n, Default s) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ALTER COLUMN "
+  , escape n
+  , " SET DEFAULT "
+  , s
+  ])
+showAlterColumn table (n, NoDefault) = (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ALTER COLUMN "
+  , escape n
+  , " DROP DEFAULT"
+  ])
+showAlterColumn table (n, UpdateValue s) = (False, defaultPriority, concat
+  [ "UPDATE "
+  , escape table
+  , " SET "
+  , escape n
+  , "="
+  , s
+  , " WHERE "
+  , escape n
+  , " IS NULL"
+  ])
+    
+readSqlType :: String -> Either String DbType
+readSqlType "int4" = Right $ DbInt32
+readSqlType "int8" = Right $ DbInt64
+readSqlType "varchar" = Right $ DbString
+readSqlType "date" = Right $ DbDay
+readSqlType "bool" = Right $ DbBool
+readSqlType "timestamp" = Right $ DbDayTime
+readSqlType "timestamptz" = Right $ DbDayTimeZoned
+readSqlType "float4" = Right $ DbReal
+readSqlType "float8" = Right $ DbReal
+readSqlType "bytea" = Right $ DbBlob
+readSqlType "time" = Right $ DbTime
+readSqlType a = Left $ "Unknown type: " ++ a
+
+showSqlType :: DbType -> String
+showSqlType DbString = "VARCHAR"
+showSqlType DbInt32 = "INT4"
+showSqlType DbInt64 = "INT8"
+showSqlType DbReal = "DOUBLE PRECISION"
+showSqlType DbBool = "BOOLEAN"
+showSqlType DbDay = "DATE"
+showSqlType DbTime = "TIME"
+showSqlType DbDayTime = "TIMESTAMP"
+showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
+showSqlType DbBlob = "BYTEA"
+showSqlType (DbMaybe t) = showSqlType t
+showSqlType (DbList _ _) = showSqlType DbInt64
+showSqlType (DbEntity Nothing _) = showSqlType DbInt64
+showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
+
+compareColumns :: Column DbType -> Column DbType -> Bool
+compareColumns = ((==) `on` f) where
+  f col = col {colType = simplifyType (colType col)}
+
+compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
+compareUniqs (UniqueDef' name1 cols1) (UniqueDef' name2 cols2) = name1 == name2 && haveSameElems (==) cols1 cols2
+
+compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
+compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
+  unescape name = if head name == '"' && last name == '"' then tail $ init name else name
+
+-- | Converts complex datatypes that reference other data to id type DbInt64. Does not handle DbEmbedded
+simplifyType :: DbType -> DbType
+simplifyType (DbEntity Nothing _) = DbInt64
+simplifyType (DbList _ _) = DbInt64
+simplifyType x = x
+
+defaultPriority :: Int
+defaultPriority = 0
+
+referencePriority :: Int
+referencePriority = 1
+
+functionPriority :: Int
+functionPriority = 2
+
+triggerPriority :: Int
+triggerPriority = 3
+
+mainTableId :: String
+mainTableId = "id"
+
+--- MAIN
+
+-- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
+escape :: String -> String
+escape s = '\"' : s ++ "\""
+  
+getStatement :: StringS -> PG.Query
+getStatement sql = PG.Query $ T.encodeUtf8 $ T.pack $ fromStringS sql ""
+
+queryRawTyped' :: (MonadBaseControl IO m, MonadIO m) => StringS -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRawTyped' query _ vals f = queryRaw' query vals f
+
+queryRaw' :: (MonadBaseControl IO m, MonadIO m) => StringS -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRaw' query vals f = do
+  Postgresql conn <- DbPersist ask
+  rawquery <- liftIO $ PG.formatQuery conn (getStatement query) (map P vals)
+  -- Take raw connection
+  (ret, rowRef, rowCount, getters) <- liftIO $ PG.withConnection conn $ \rawconn -> do
+    -- Execute query
+    mret <- LibPQ.exec rawconn rawquery
+    case mret of
+      Nothing -> do
+        merr <- LibPQ.errorMessage rawconn
+        fail $ case merr of
+                 Nothing -> "Postgresql.withStmt': unknown error"
+                 Just e  -> "Postgresql.withStmt': " ++ unpack e
+      Just ret -> do
+        -- Check result status
+        status <- LibPQ.resultStatus ret
+        case status of
+          LibPQ.TuplesOk -> return ()
+          _ -> do
+            msg <- LibPQ.resStatus status
+            fail $ "Postgresql.withStmt': bad result status " ++
+                   show status ++ " (" ++ show msg ++ ")"
+
+        -- Get number and type of columns
+        cols <- LibPQ.nfields ret
+        getters <- forM [0..cols-1] $ \col -> do
+          oid <- LibPQ.ftype ret col
+          case PG.oid2builtin oid of
+            Nothing -> fail $ "Postgresql.withStmt': could not " ++
+                              "recognize Oid of column " ++
+                              show (let LibPQ.Col i = col in i) ++
+                              " (counting from zero)"
+            Just bt -> return $ getGetter bt $
+                       PG.Field ret col $
+                       PG.builtin2typname bt
+        -- Ready to go!
+        rowRef   <- newIORef (LibPQ.Row 0)
+        rowCount <- LibPQ.ntuples ret
+        return (ret, rowRef, rowCount, getters)
+
+  f $ liftIO $ do
+    row <- atomicModifyIORef rowRef (\r -> (r+1, r))
+    if row == rowCount
+      then return Nothing
+      else liftM Just $ forM (zip getters [0..]) $ \(getter, col) -> do
+        mbs <-  {-# SCC "getvalue'" #-} LibPQ.getvalue' ret row col
+        case mbs of
+          Nothing -> return PersistNull
+          Just bs -> bs `seq` case getter mbs of
+            Errors (exc:_) -> throw exc
+            Errors [] -> error "Got an Errors, but no exceptions"
+            Ok v  -> return v
+    
+-- | Avoid orphan instances.
+newtype P = P PersistValue
+
+instance PGTF.ToField P where
+    toField (P (PersistString t))        = PGTF.toField t
+    toField (P (PersistByteString bs)) = PGTF.toField (PG.Binary bs)
+    toField (P (PersistInt64 i))       = PGTF.toField i
+    toField (P (PersistDouble d))      = PGTF.toField d
+    toField (P (PersistBool b))        = PGTF.toField b
+    toField (P (PersistDay d))         = PGTF.toField d
+    toField (P (PersistTimeOfDay t))   = PGTF.toField t
+    toField (P (PersistUTCTime t))     = PGTF.toField t
+    toField (P (PersistZonedTime (ZT t))) = PGTF.toField t
+    toField (P PersistNull)            = PGTF.toField PG.Null
+
+type Getter a = PG.Field -> Maybe ByteString -> Ok a
+
+convertPV :: PGFF.FromField a => (a -> b) -> Getter b
+convertPV f = (fmap f .) . PGFF.fromField
+
+-- FIXME: check if those are correct and complete.
+getGetter :: PG.BuiltinType -> Getter PersistValue
+getGetter PG.Bool                  = convertPV PersistBool
+getGetter PG.ByteA                 = convertPV (PersistByteString . unBinary)
+getGetter PG.Char                  = convertPV PersistString
+getGetter PG.Name                  = convertPV PersistString
+getGetter PG.Int8                  = convertPV PersistInt64
+getGetter PG.Int2                  = convertPV PersistInt64
+getGetter PG.Int4                  = convertPV PersistInt64
+getGetter PG.Text                  = convertPV PersistString
+getGetter PG.Xml                   = convertPV PersistString
+getGetter PG.Float4                = convertPV PersistDouble
+getGetter PG.Float8                = convertPV PersistDouble
+getGetter PG.AbsTime               = convertPV PersistUTCTime
+getGetter PG.RelTime               = convertPV PersistUTCTime
+getGetter PG.Money                 = convertPV PersistDouble
+getGetter PG.BpChar                = convertPV PersistString
+getGetter PG.VarChar               = convertPV PersistString
+getGetter PG.Date                  = convertPV PersistDay
+getGetter PG.Time                  = convertPV PersistTimeOfDay
+getGetter PG.Timestamp             = convertPV (PersistUTCTime . localTimeToUTC utc)
+getGetter PG.TimestampTZ           = convertPV (PersistZonedTime . ZT)
+getGetter PG.Bit                   = convertPV PersistInt64
+getGetter PG.VarBit                = convertPV PersistInt64
+getGetter PG.Numeric               = convertPV (PersistDouble . fromRational)
+getGetter PG.Void                  = \_ _ -> Ok PersistNull
+getGetter other   = error $ "Postgresql.getGetter: type " ++
+                            show other ++ " not supported."
+
+unBinary :: PG.Binary a -> a
+unBinary (PG.Binary x) = x
+
+proxy :: Proxy Postgresql
+proxy = error "Proxy Postgresql"

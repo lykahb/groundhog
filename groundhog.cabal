@@ -28,12 +28,12 @@ library
                      Database.Groundhog.Generic
                      Database.Groundhog.Generic.Migration
                      Database.Groundhog.Generic.Sql
+                     Database.Groundhog.Generic.PersistBackendHelpers
                      Database.Groundhog.Instances
                      Database.Groundhog.TH
                      Database.Groundhog.TH.Settings
                      Database.Groundhog.TH.CodeGen
     ghc-options:     -Wall
-    ghc-prof-options: -prof -auto-all
     
 source-repository head
   type:     git
