@@ -21,7 +21,7 @@ library
                    , transformers            >= 0.2.1     && < 0.4
                    , groundhog               >= 0.1.0     && < 0.2.0
                    , monad-control           >= 0.3       && < 0.4
-                   , containers              >= 0.2       && < 0.5
+                   , containers              >= 0.2
                    , utf8-string             >= 0.3.4     && < 0.4
                    , blaze-builder           >= 0.3.0.0   && < 0.4
                    , pool-conduit            >= 0.1       && < 0.2

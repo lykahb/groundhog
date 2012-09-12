@@ -36,10 +36,10 @@ instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Exp
 instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (SubField v c a) v' c' where
   wrap = ExprField
 
-instance (PersistEntity v, Constructor c, FieldLike (AutoKeyField v c) (RestrictionHolder v c) a', v ~ v', c ~ c') => Expression (AutoKeyField v c) v' c' where
+instance (PersistEntity v, Constructor c, PersistField (Key v' BackendSpecific), FieldLike (AutoKeyField v c) (RestrictionHolder v c) a', v ~ v', c ~ c') => Expression (AutoKeyField v c) v' c' where
   wrap = ExprField
 
-instance (PersistEntity v, Constructor c, FieldLike (u (UniqueMarker v)) (RestrictionHolder v c) a', v ~ v', c ~ c') => Expression (u (UniqueMarker v)) v' c' where
+instance (PersistEntity v, Constructor c, FieldLike (u (UniqueMarker v)) (RestrictionHolder v c) a', c' ~ UniqueConstr (Key v' (Unique u)), v ~ v', IsUniqueKey (Key v' (Unique u)), c ~ c') => Expression (u (UniqueMarker v)) v' c' where
   wrap = ExprField
 
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.
@@ -53,7 +53,7 @@ class Normalize counterpart t r | t -> r
 instance (ExtractValue t (isPlain, r), NormalizeValue counterpart isPlain r r') => Normalize counterpart t r'
 
 class ExtractValue t r | t -> r
-instance r ~ (HTrue, a) => ExtractValue (Arith v c a) r
+instance r ~ (HFalse, a) => ExtractValue (Arith v c a) r
 instance r ~ (HFalse, a) => ExtractValue (Field v c a) r
 instance r ~ (HFalse, a) => ExtractValue (SubField v c a) r
 instance r ~ (HFalse, Key v BackendSpecific) => ExtractValue (AutoKeyField v c) r
