@@ -18,6 +18,7 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   ) where
 
+import Database.Groundhog.Core (delim)
 import Database.Groundhog.Generic
 import Database.Groundhog.TH.CodeGen
 import Database.Groundhog.TH.Settings
@@ -103,7 +104,7 @@ suffixNamingStyle = NamingStyle {
   , mkPhantomName = \_ cName _ -> cName ++ "Constructor"
   , mkUniqueKeyPhantomName = \_ _ uName -> firstLetter toUpper uName
   , mkUniqueKeyConstrName = \_ _ uName -> firstLetter toUpper uName ++ "Key"
-  , mkUniqueKeyDbName = \_ _ uName -> "Key$" ++ firstLetter toUpper uName
+  , mkUniqueKeyDbName = \_ _ uName -> "Key" ++ [delim] ++ firstLetter toUpper uName
   , mkDbConstrName = \_ cName _ -> cName
   , mkDbConstrAutoKeyName = \_ _ _ -> "id"
   , mkDbFieldName = \_ _ _ fName _ -> fName
@@ -364,11 +365,22 @@ firstLetter f s = f (head s):tail s
 -- @
 --data Settable = First {foo :: String, bar :: Int} deriving (Eq, Show)
 --
---mkPersist suffixNamingStyle [groundhog|
+--mkPersist defaultCodegenConfig [groundhog|
 --definitions:                           # First level key whose value is a list of definitions. It can be considered an optional header.
---                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space.
+--                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space. See full definition at http://yaml.org/spec/1.2/spec.html.
 --  - entity: Settable                   # Mandatory. Entity datatype name
 --    dbName: Settable                   # Name of the main table
+--    autoKey:                           # Description of the autoincremented key for data family Key instance
+--      constrName: SettableKey          # Name of constructor
+--      default: true                    # The default key is used when entity is referenced without key wrapper. E.g., \"field :: SomeData\" instead of \"field :: Key SomeData keytype\"
+--    keys:                              # List of the unique keys. An entity may have unique keys only if it has one constructor
+--      - name: someconstraint           # This name references names from uniques field of constructor
+--        keyPhantom: Someconstraint     # Name of phantom datatype that corresponds for each unique key
+--        constrName: SomeconstraintKey  # Name of data family Key instance constructor for this unique key
+--        dbName: Key\#Someconstraint     # It is used for function \"persistName\" of \"PersistField (Key Settable (Unique Someconstraint))\"
+--        fields: []                     # Set fields that comprise this unique constraint. It works like setting fields in constructors
+--        mkEmbedded: false              # Defines if instance of \"Embedded (Key Settable (Unique Someconstraint))\" will be created. The \"Selector\" constructor names are defined by properties of key fields.
+--        default: false                 # Defines if this unique key is used as default
 --    constructors:                      # List of constructors. The constructors you don't change can be omitted
 --      - name: First                    # Mandatory. Constructor name
 --        phantomName: FooBarConstructor # Constructor phantom type name used to guarantee type safety
@@ -380,7 +392,7 @@ firstLetter f s = f (head s):tail s
 --          - name: bar
 --            dbName: bar
 --            exprName: BarField
---        constraints:
+--        uniques:
 --          - name: someconstraint
 --            fields: [foo, bar]         # List of constructor parameter names. Not DB names(!)
 -- |]
@@ -389,11 +401,13 @@ firstLetter f s = f (head s):tail s
 -- which is equivalent to the declaration with defaulted names
 --
 -- @
---mkPersist suffixNamingStyle [groundhog|
+--mkPersist defaultCodegenConfig [groundhog|
 --entity: Settable                       # If we did not want to add a constraint, this line would be enough
+--keys:
+--  - name: someconstraint
 --constructors:
 --  - name: First
---    constraints:
+--    uniques:
 --      - name: someconstraint
 --        fields: [foo, bar]
 -- |]
@@ -405,7 +419,7 @@ firstLetter f s = f (head s):tail s
 --data Company = Company {name :: String, headquarter :: Address, dataCentre :: Address, salesOffice :: Address} deriving (Eq, Show)
 --data Address = Address {city :: String, zipCode :: String, street :: String} deriving (Eq, Show)
 --
---mkPersist suffixNamingStyle [groundhog|
+--mkPersist defaultCodegenConfig [groundhog|
 --definitions:
 --  - entity: Company
 --    constructors:

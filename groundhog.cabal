@@ -13,7 +13,6 @@ build-type:      Simple
 
 library
     build-depends:   base                     >= 4         && < 5
-                   , template-haskell
                    , bytestring               >= 0.9       && < 0.10
                    , transformers             >= 0.2.1     && < 0.4
                    , time                     >= 1.1.4
@@ -21,7 +20,6 @@ library
                    , containers               >= 0.2       && < 0.5
                    , monad-control            >= 0.3       && < 0.4
                    , transformers-base
-                   , yaml                     >= 0.6.1     && < 0.8
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core
                      Database.Groundhog.Expression
@@ -30,9 +28,6 @@ library
                      Database.Groundhog.Generic.Sql
                      Database.Groundhog.Generic.PersistBackendHelpers
                      Database.Groundhog.Instances
-                     Database.Groundhog.TH
-                     Database.Groundhog.TH.Settings
-                     Database.Groundhog.TH.CodeGen
     ghc-options:     -Wall
     
 source-repository head

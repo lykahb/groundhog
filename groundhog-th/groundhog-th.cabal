@@ -1,0 +1,29 @@
+name:            groundhog-th
+version:         0.1.0
+license:         BSD3
+license-file:    LICENSE
+author:          Boris Lykah <lykahb@gmail.com>
+maintainer:      Boris Lykah <lykahb@gmail.com>
+synopsis:        Type-safe ADT-database mapping library.
+description:     This library helps to generate boilerplate for Groundhog datatypes
+category:        Database
+stability:       Non-stable
+cabal-version:   >= 1.6
+build-type:      Simple
+
+library
+    build-depends:   base                     >= 4         && < 5
+                   , bytestring               >= 0.9       && < 0.10
+                   , groundhog                >= 0.1.0     && < 0.2.0
+                   , template-haskell
+                   , time                     >= 1.1.4
+                   , containers               >= 0.2       && < 0.5
+                   , yaml                     >= 0.6.1     && < 0.8
+    exposed-modules: Database.Groundhog.TH
+                     Database.Groundhog.TH.Settings
+                     Database.Groundhog.TH.CodeGen
+    ghc-options:     -Wall
+    
+source-repository head
+  type:     git
+  location: git://github.com/lykahb/groundhog.git

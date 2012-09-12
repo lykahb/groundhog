@@ -1,44 +1,43 @@
 -- | This module exports the most commonly used functions and datatypes.
 --
--- An example which shows the main features:
+-- The example below shows the most of the main features. See more examples in the examples directory.
 --
 -- @
---{-\# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes \#-}
---import Control.Monad.IO.Class(liftIO)
+--{-\# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances \#-}
+--import Control.Monad.IO.Class (liftIO)
 --import Database.Groundhog.TH
 --import Database.Groundhog.Sqlite
 --
---data Customer a = Customer {customerName :: String, details :: a} deriving Show
---data Item = Product {productName :: String, quantity :: Int, customer :: Customer String}
---          | Service {serviceName :: String, deliveryAddress :: String, servicePrice :: Int}
---     deriving Show
+--data Customer a = Customer {customerName :: String, remark :: a} deriving Show
+--data Product = Product {productName :: String, quantity :: Int, customer :: Customer String} deriving Show
 --
---'mkPersist' defaultCodegenConfig [groundhog|
+--'mkPersist' ('defaultCodegenConfig' {migrationFunction = Just \"migrateAll\"}) [groundhog|
 -- - entity: Customer
 --   constructors:
 --     - name: Customer
---       constraints:
+--       uniques:
 --         - name: NameConstraint
 --           fields: [customerName]
--- - entity: Item
+-- - entity: Product
 -- |]
 --
 --main = withSqliteConn \":memory:\" $ runSqliteConn $ do
---  -- Customer is also migrated because Item contains it
---  'runMigration' 'silentMigrationLogger' $ 'migrate' (undefined :: Item)
+--  -- Customer is also migrated because Product references it.
+--  -- It is possible to migrate schema for given type, e.g. migrate (undefined :: Customer String), or run migrateAll
+--  'runMigration' 'defaultMigrationLogger' migrateAll
 --  let john = Customer \"John Doe\" \"Phone: 01234567\"
 --  johnKey <- 'insert' john
 --  -- John is inserted only once because of the name constraint
 --  insert $ Product \"Apples\" 5 john
 --  insert $ Product \"Melon\" 2 john
---  insert $ Service \"Taxi\" \"Elm Street\" 50
+--  -- Groundhog prevents SQL injections. Quotes and other special symbols are safe.
 --  insert $ Product \"Melon\" 6 (Customer \"Jack Smith\" \"Don't let him pay by check\")
---  -- bonus melon for all large melon orders
+--  -- Bonus melon for all large melon orders. The values used in expressions should have known type, so literal 5 is annotated.
 --  'update' [QuantityField '=.' toArith QuantityField + 1] (ProductNameField '==.' \"Melon\" '&&.' QuantityField '>.' (5 :: Int))
---  productsForJohn <- 'select' (CustomerField ==. johnKey) [] 0 0
+--  productsForJohn <- 'select' $ CustomerField ==. johnKey
 --  liftIO $ putStrLn $ \"Products for John: \" ++ show productsForJohn
---  -- check bonus
---  melon <- select (ProductNameField ==. \"Melon\") ['Desc' QuantityField] 0 0
+--  -- Check bonus
+--  melon <- select $ (ProductNameField ==. \"Melon\") \`orderBy\` ['Desc' QuantityField]
 --  liftIO $ putStrLn $ \"Melon orders: \" ++ show melon
 -- @
 module Database.Groundhog (module G) where
