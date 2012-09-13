@@ -1,5 +1,5 @@
 name:            groundhog-postgresql
-version:         0.1.0
+version:         0.1.0.1
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>

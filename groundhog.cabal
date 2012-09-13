@@ -1,5 +1,5 @@
 name:            groundhog
-version:         0.1.0
+version:         0.1.0.1
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -10,6 +10,8 @@ category:        Database
 stability:       Non-stable
 cabal-version:   >= 1.6
 build-type:      Simple
+
+extra-source-files:  examples/*.hs
 
 library
     build-depends:   base                     >= 4         && < 5
