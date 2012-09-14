@@ -2,22 +2,24 @@
 module Main where
 
 import qualified Database.Groundhog.Core as G
-import qualified Database.Groundhog.Sqlite as G
---import qualified Database.Groundhog.Postgresql as G
+--import qualified Database.Groundhog.Sqlite as G
+import qualified Database.Groundhog.Postgresql as G
 import qualified Database.Groundhog.TH as G
 import Database.Groundhog.TH (groundhog)
 
 import qualified Database.Persist as P
 import Database.Persist (PersistEntityBackend)
 import qualified Database.Persist.GenericSql.Raw as P
-import qualified Database.Persist.Sqlite as P
---import qualified Database.Persist.Postgresql as P
+--import qualified Database.Persist.Sqlite as P
+import qualified Database.Persist.Postgresql as P
 import qualified Database.Persist.TH as P
 import Database.Persist.TH (persist)
 
+import Database.Esqueleto as E
+
 import Criterion.Main
 import Criterion.Config
-import Control.Monad (replicateM_)
+import Control.Monad
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Reader (runReaderT)
 
@@ -34,7 +36,7 @@ PPerson
 |]
 
 myConfig = defaultConfig {
-             cfgReport = ljust "SqliteBench.html"
+             cfgReport = ljust "PostgreSQLBench.html"
            , cfgPerformGC = ljust True
            }
 
@@ -49,25 +51,38 @@ gMigrate truncate = G.runMigration G.defaultMigrationLogger (G.migrate gPerson) 
 pMigrate :: P.SqlPersist IO () -> P.SqlPersist IO (P.Key P.SqlPersist PPerson)
 pMigrate truncate = P.runMigration migrateAll >> truncate >> P.insert pPerson
 
+-- open transaction to reduce execution time on the DB side
+eachStatementInTransaction :: Bool
+eachStatementInTransaction = True
+
+-- operatons are replicated to reduce influence of running a monad on the actual library and database performance measurements
+numberOfOperations :: Int
+numberOfOperations = 1
+
 main = 
-  G.withSqliteConn ":memory:" $ \gConn -> 
+{-  G.withSqliteConn ":memory:" $ \gConn -> 
   P.withSqliteConn ":memory:" $ \pConn -> do
     gKey <- G.runSqliteConn (gMigrate $ return ()) gConn
     pKey <- P.runSqlConn (pMigrate $ return ()) pConn
-{-
+-}
+
   G.withPostgresqlConn "dbname=test user=test password=test host=localhost" $ \gConn ->
   P.withPostgresqlConn "dbname=test user=test password=test host=localhost" $ \pConn -> do
     gKey <- G.runPostgresqlConn (gMigrate $ G.executeRaw False "truncate table \"GPerson\"" []) gConn
     pKey <- P.runSqlConn (pMigrate $ P.execute "truncate table \"PPerson\"" []) pConn
--}
--- replicateM_ is used to reduce influence of running a monad on the actual database performance
--- open transaction to reduce execution time on the DB side
-    G.runDbPersist (G.executeRaw False "BEGIN" []) gConn
-    runReaderT ((\(P.SqlPersist m) -> m) $ P.execute "BEGIN" []) pConn
+
+    unless eachStatementInTransaction $ do
+      G.runDbPersist (G.executeRaw False "BEGIN" []) gConn
+      runReaderT ((\(P.SqlPersist m) -> m) $ P.execute "BEGIN" []) pConn
+
     let mkBench :: (forall m . G.PersistBackend m => m a1) -> P.SqlPersist IO a2 -> [Benchmark]
-        mkBench gm (P.SqlPersist pm) = [bench "groundhog" $ whnfIO $ G.runDbPersist (replicateM_ 10 gm) gConn, bench "persistent" $ whnfIO $ runReaderT (replicateM_ 10 pm) pConn]
+        mkBench gm pm = [bench "groundhog" $ whnfIO $ runSqlite gm, bench "persistent" $ whnfIO $ runPersistent pm] where
+          (runSqlite, runPersistent) = if eachStatementInTransaction
+            then (\gm -> G.runPostgresqlConn (replicateM_ numberOfOperations gm) gConn, \pm -> runSqlConn (replicateM_ numberOfOperations pm) pConn)
+            else (\gm -> G.runDbPersist (replicateM_ numberOfOperations gm) gConn, \(P.SqlPersist pm) -> runReaderT (replicateM_ numberOfOperations pm) pConn)
     defaultMainWith myConfig (return ())
       [ bgroup "get" $ mkBench (G.get gKey) (P.get pKey)
+--      , bgroup "get" [bench "esqueleto" $ whnfIO $  runPers (E.select $ E.from $ \p -> E.where_ (p ^. PPersonId ==. val pKey) >> return p)]
       , bgroup "replace" $ mkBench (G.replace gKey gPerson) (P.replace pKey pPerson)
       , bgroup "select" $ mkBench (G.project (G.AutoKeyField, GPersonConstructor) gCond) (P.selectList pCond [])
       , bgroup "updateByKey" $ mkBench (G.update [NameField G.=. ("abc" :: String)] $ G.AutoKeyField G.==. gKey) (P.update pKey [PPersonName P.=. "abc"])
