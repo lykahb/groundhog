@@ -18,7 +18,7 @@ library
                    , template-haskell
                    , time                     >= 1.1.4
                    , containers               >= 0.2
-                   , yaml                     >= 0.6.1     && < 0.8
+                   , yaml                     >= 0.6.1
     exposed-modules: Database.Groundhog.TH
                      Database.Groundhog.TH.Settings
                      Database.Groundhog.TH.CodeGen
