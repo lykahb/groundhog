@@ -505,7 +505,7 @@ mkPersistEntityInstance def = do
       vars <- mapM (\f -> newName "x" >>= \x -> return $ if fieldName f `elem` allConstrainedFields then Just (x, fieldType f) else Nothing) $ thConstrFields cdef
       let pat = conP (thConstrName cdef) $ map (maybe wildP (varP . fst)) vars
       proxy <- newName "p"
-      let body = normalB $ [| (cNum, $(listE $ map (\(PSUniqueDef uName fnames) -> [| (uName, $result) |] ) $ thConstrUniques cdef)) |]
+      let body = normalB $ [| (cNum, $(listE $ map (\(PSUniqueDef uName fnames) -> [| (uName, $result []) |] ) $ thConstrUniques cdef)) |]
           result = mkToPurePersistValues proxy (catMaybes vars)
       clause [varP proxy, pat] body []
     in funD 'getUniques clauses
