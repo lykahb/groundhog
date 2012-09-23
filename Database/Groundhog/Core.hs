@@ -96,7 +96,7 @@ class (PersistField v, PurePersistField (AutoKey v)) => PersistEntity v where
   -- | Constructs the value from the list of 'PersistValue'
   fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m (v, [PersistValue])
   -- | Returns constructor number and a list of uniques names and corresponding field values
-  getUniques :: DbDescriptor db => Proxy db -> v -> (Int, [(String, [PersistValue])])
+  getUniques :: DbDescriptor db => Proxy db -> v -> (Int, [(String, [PersistValue] -> [PersistValue])])
   -- | Is internally used by FieldLike Field instance
   -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
   entityFieldChain :: Field v c a -> FieldChain
