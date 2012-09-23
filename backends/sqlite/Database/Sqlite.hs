@@ -21,6 +21,8 @@ module Database.Sqlite (
                          step,
                          reset,
                          finalize,
+                         bindParameterCount,
+                         bindParameterName,
                          bindBlob,
                          bindDouble,
                          bindInt,
@@ -36,7 +38,8 @@ module Database.Sqlite (
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
-import qualified Data.ByteString.UTF8 as UTF8
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.Typeable
 import Foreign
 import Foreign.C
@@ -65,7 +68,7 @@ data ColumnType = IntegerColumn
 
 data SQLData = SQLInteger Int64
              | SQLFloat Double
-             | SQLText String
+             | SQLText T.Text
              | SQLBlob BS.ByteString
              | SQLNull
                deriving (Eq, Show, Typeable)
@@ -117,7 +120,7 @@ errmsg :: Database -> IO String
 errmsg (Database database) = do
   message <- errmsgC database
   byteString <- BS.packCString message
-  return $ UTF8.toString byteString
+  return $ T.unpack $ T.decodeUtf8 byteString
 
 sqlError :: Maybe Database -> String -> Error -> IO a
 sqlError maybeDatabase functionName err = do
@@ -134,7 +137,7 @@ foreign import ccall "sqlite3_open"
   openC :: CString -> Ptr (Ptr ()) -> IO Int
 openError :: String -> IO (Either Database Error)
 openError path = do
-  BS.useAsCString (UTF8.fromString path)
+  BS.useAsCString (T.encodeUtf8 $ T.pack path)
                   (\pathC -> do
                      alloca (\databaseC -> do
                                err <- openC pathC databaseC
@@ -213,6 +216,33 @@ finalize (Statement statement database) = do
     then return ()
     else sqlError (Just database) "finalize" err
 
+foreign import ccall "sqlite3_bind_parameter_count"
+  bindParameterCountC :: Ptr () -> IO Int
+
+-- | Find the number SQL parameters in a prepared statement.
+bindParameterCount :: Statement -> IO Int
+bindParameterCount (Statement stmt _) = do
+  bindParameterCountC stmt
+
+maybeNullCString :: CString -> IO (Maybe BS.ByteString)
+maybeNullCString s =
+  if s == nullPtr then return Nothing else fmap Just (BS.packCString s)
+
+foreign import ccall "sqlite3_bind_parameter_name"
+  bindParameterNameC :: Ptr () -> Int -> IO CString
+
+-- | Return the N-th SQL parameter name.
+--
+-- Named parameters are returned as-is.  E.g. \":v\" is returned as
+-- @Just \":v\"@.  Unnamed parameters, however, are converted to
+-- @Nothing@.
+--
+-- Note that the column index starts at 1, not 0.
+bindParameterName :: Statement -> Int -> IO (Maybe String)
+bindParameterName (Statement stmt _) colNdx = do
+  mn <- bindParameterNameC stmt colNdx >>= maybeNullCString
+  return (mn >>= return . T.unpack . T.decodeUtf8)
+
 foreign import ccall "sqlite3_bind_blob"
   bindBlobC :: Ptr () -> Int -> Ptr () -> Int -> Ptr () -> IO Int
 bindBlob :: Statement -> Int -> BS.ByteString -> IO ()
@@ -265,9 +295,9 @@ bindNull (Statement statement database) parameterIndex = do
 
 foreign import ccall "sqlite3_bind_text"
   bindTextC :: Ptr () -> Int -> CString -> Int -> Ptr () -> IO Int
-bindText :: Statement -> Int -> String -> IO ()
+bindText :: Statement -> Int -> T.Text -> IO ()
 bindText (Statement statement database) parameterIndex text = do
-  byteString <- return $ UTF8.fromString text
+  byteString <- return $ T.encodeUtf8 text
   size <- return $ BS.length byteString
   err <- BS.useAsCString byteString
                   (\dataC -> do
@@ -325,11 +355,11 @@ columnDouble (Statement statement _) columnIndex = do
 
 foreign import ccall "sqlite3_column_text"
   columnTextC :: Ptr () -> Int -> IO CString
-columnText :: Statement -> Int -> IO String
+columnText :: Statement -> Int -> IO T.Text
 columnText (Statement statement _) columnIndex = do
   text <- columnTextC statement columnIndex
   byteString <- BS.packCString text
-  return $ UTF8.toString byteString
+  return $ T.decodeUtf8 byteString
 
 foreign import ccall "sqlite3_column_count"
   columnCountC :: Ptr () -> IO Int

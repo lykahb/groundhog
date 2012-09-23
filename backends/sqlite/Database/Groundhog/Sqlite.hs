@@ -32,6 +32,7 @@ import Data.IORef
 import qualified Data.HashMap.Strict as Map
 import Data.Maybe (maybeToList)
 import Data.Conduit.Pool
+import qualified Data.Text as T
 
 import GHC.Exts (inline)
 
@@ -308,7 +309,6 @@ sqlUnique (UniqueDef' name cols) = concat
     ]
 
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Sqlite IO (AutoKey v) #-}
-{-# INLINE insert' #-}
 insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Sqlite m (AutoKey v)
 insert' v = do
   -- constructor number and the rest of the field values
@@ -386,15 +386,15 @@ bind stmt = go 1 where
   go i (x:xs) = do
     case x of
       PersistInt64 int64     -> S.bindInt64 stmt i int64
-      PersistString text     -> S.bindText stmt i text
+      PersistString text     -> S.bindText stmt i $ T.pack text
       PersistDouble double   -> S.bindDouble stmt i double
       PersistBool b          -> S.bindInt64 stmt i $ if b then 1 else 0
       PersistByteString blob -> S.bindBlob stmt i blob
       PersistNull            -> S.bindNull stmt i
-      PersistDay d           -> S.bindText stmt i $ show d
-      PersistTimeOfDay d     -> S.bindText stmt i $ show d
-      PersistUTCTime d       -> S.bindText stmt i $ show d
-      PersistZonedTime (ZT d)-> S.bindText stmt i $ show d
+      PersistDay d           -> S.bindText stmt i $ T.pack $ show d
+      PersistTimeOfDay d     -> S.bindText stmt i $ T.pack $ show d
+      PersistUTCTime d       -> S.bindText stmt i $ T.pack $ show d
+      PersistZonedTime (ZT d)-> S.bindText stmt i $ T.pack $ show d
     go (i + 1) xs
 
 executeRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
@@ -473,7 +473,7 @@ getDbTypes typ acc = case typ of
 pFromSql :: S.SQLData -> PersistValue
 pFromSql (S.SQLInteger i) = PersistInt64 i
 pFromSql (S.SQLFloat i)   = PersistDouble i
-pFromSql (S.SQLText s)    = PersistString s
+pFromSql (S.SQLText s)    = PersistString (T.unpack s)
 pFromSql (S.SQLBlob bs)   = PersistByteString bs
 pFromSql (S.SQLNull)      = PersistNull
 
