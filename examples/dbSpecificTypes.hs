@@ -23,8 +23,6 @@ instance PersistField Point where
 
 data MobilePhone = MobilePhone {number :: String, prepaidMoney :: String, location :: Point, ipAddress :: String} deriving Show
 
--- Code generator will derive the necessary instances and generate other boilerplate code for the entities defined below.
--- It will also create function migrateAll that migrates schema for all non-polymorphic entities 
 mkPersist defaultCodegenConfig [groundhog|
 - entity: MobilePhone
   constructors:
