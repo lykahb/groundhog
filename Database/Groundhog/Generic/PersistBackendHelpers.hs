@@ -250,12 +250,11 @@ insertByAll escape queryFunc v = do
 
   let (constructorNum, uniques) = getUniques proxy v
   let uniqueDefs = constrUniques $ constructors e !! constructorNum
-  let cond = intercalateS " OR " $ map (intercalateS " AND " . map (\(fname, _) -> escape (fromString fname) <> "=?")) $ map (\(UniqueDef _ fields) -> fields) uniqueDefs
+  let cond = intercalateS " OR " $ map (intercalateS " AND " . map (\(fname, _) -> escape (fromString fname) <> "=?")) $ map (\(UniqueDef _ _ fields) -> fields) uniqueDefs
 
   let ifAbsent tname constr = do
       let query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> escape (fromString tname) <> " WHERE " <> cond
---      x <- queryFunc query [DbInt64] (foldr ((.) . snd) id uniques []) id
-      x <- queryFunc query [DbInt64] (concatMap snd uniques) id
+      x <- queryFunc query [DbInt64] (foldr ((.) . snd) id uniques []) id
       case x of
         Nothing  -> liftM Right $ Core.insert v
         Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]

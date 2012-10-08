@@ -1,5 +1,5 @@
 name:            groundhog-th
-version:         0.1.0.3
+version:         0.1.0.2
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -18,7 +18,7 @@ library
                    , template-haskell
                    , time                     >= 1.1.4
                    , containers               >= 0.2
-                   , yaml                     >= 0.6.1
+                   , yaml                     >= 0.8.1
     exposed-modules: Database.Groundhog.TH
                      Database.Groundhog.TH.Settings
                      Database.Groundhog.TH.CodeGen

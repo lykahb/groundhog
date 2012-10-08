@@ -1,7 +1,5 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
 --module Main where
-import qualified Data.Map as M
-import qualified Data.Traversable as T
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
 import Control.Monad (replicateM_, liftM, forM_, (>=>), unless)
@@ -14,8 +12,10 @@ import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
 import Data.Int
+import Data.List (isInfixOf)
 import qualified Data.Map as Map
 import qualified Data.Time as Time
+import qualified Data.Traversable as T
 import Data.Word
 import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit
@@ -28,7 +28,7 @@ data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, 
 data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
 data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
-data Settable = Settable {settable1 :: String, settable2 :: String, settableTuple :: (Int, (String, Int))} deriving (Eq, Show)
+data Settable = Settable {settable1 :: String, settable2 :: String, settableTuple :: (Int, (String, Double))} deriving (Eq, Show)
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String) BackendSpecific, refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String) BackendSpecific)}
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
 data UniqueKeySample = UniqueKeySample { uniqueKey1 :: String, uniqueKey2 :: Int, uniqueKey3 :: String } deriving (Eq, Show)
@@ -52,6 +52,7 @@ mkPersist defaultCodegenConfig [groundhog|
       fields:
         - name: settable1
           dbName: sqlsettable1
+          typeName: varchar(50)
           exprName: Settable1Fld
         - name: settableTuple
           embeddedType:
@@ -63,6 +64,7 @@ mkPersist defaultCodegenConfig [groundhog|
                   dbName: secondTupleElement
                 - name: val1
                   dbName: thirdTupleElement
+                  typeName: numeric(5)
               dbName: name
       uniques:
         - name: someconstraint
@@ -141,8 +143,11 @@ mkTestSuite label run = testGroup label
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
-  , testCase "testMigrateAddUnique" $ run testMigrateAddUnique
-  , testCase "testMigrateDropUnique" $ run testMigrateDropUnique
+  , testCase "testMigrateAddUniqueConstraint" $ run testMigrateAddUniqueConstraint
+  , testCase "testMigrateDropUniqueConstraint" $ run testMigrateDropUniqueConstraint
+  , testCase "testMigrateAddUniqueIndex" $ run testMigrateAddUniqueIndex
+  , testCase "testMigrateDropUniqueIndex" $ run testMigrateDropUniqueIndex
+  , testCase "testMigrateAddDropNotNull" $ run testMigrateAddDropNotNull
   , testCase "testMigrateAddConstructorToMany" $ run testMigrateAddConstructorToMany
   , testCase "testLongNames" $ run testLongNames
   , testCase "testReference" $ run testReference
@@ -154,18 +159,18 @@ mkTestSuite label run = testGroup label
   , testCase "testAutoKeyField" $ run testAutoKeyField
   , testCase "testTime" $ run testTime
   ]
---  [testCase "testSelect" $ run testSelect]
+--  [testCase "testPersistSettings" $ run testPersistSettings]
 
 sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
 sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
-  [ testCase "testOrphanConstructors" $ run testOrphanConstructors
+  [ testCase "testMigrateOrphanConstructors" $ run testMigrateOrphanConstructors
   ]
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
 
-testOrphanConstructors :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-testOrphanConstructors = do
+testMigrateOrphanConstructors :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateOrphanConstructors = do
   migr (undefined :: Multi String)
   executeRaw False "drop table \"Multi#String\"" []
   assertExc "Migration must fail in presence of orhpan constructor tables" $ migr (undefined :: Multi String)
@@ -183,6 +188,9 @@ testNumber = do
 testPersistSettings :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testPersistSettings = do
   let settable = Settable "abc" "def" (1, ("qqq", 2))
+  m <- createMigration $ migrate settable
+  let expectedTypes = ["numeric(5)", "varchar(50)"]
+  liftIO $ all (`isInfixOf` show m) expectedTypes H.@? ("Should contain " ++ show expectedTypes ++ ": " ++ show m)
   migr settable
   proxy <- phantomDb
   k <- insert settable
@@ -459,23 +467,54 @@ testMigrateAddColumnSingle = do
   val' <- get k
   Just val @=? val'
 
-testMigrateAddUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-testMigrateAddUnique = do
-  let val = Old.AddUnique 5 "abc"
-  migr (undefined :: Old.AddUnique)
+testMigrateAddUniqueConstraint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateAddUniqueConstraint = do
+  let val = Old.AddUniqueConstraint 5 "abc"
+  migr (undefined :: Old.AddUniqueConstraint)
   insert val
-  migr (undefined :: New.AddUnique)
+  migr (undefined :: New.AddUniqueConstraint)
   assertExc "Uniqueness constraint not enforced" $ insert val
   return ()
 
-testMigrateDropUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-testMigrateDropUnique = do
-  let val = Old.AddUnique 5 "abc"
-  migr (undefined :: New.AddUnique)
+testMigrateDropUniqueConstraint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateDropUniqueConstraint = do
+  let val = Old.AddUniqueConstraint 5 "abc"
+  migr (undefined :: New.AddUniqueConstraint)
   insert val
-  migr (undefined :: Old.AddUnique)
+  migr (undefined :: Old.AddUniqueConstraint)
   insert val
   return ()
+
+testMigrateAddUniqueIndex :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateAddUniqueIndex = do
+  let val = Old.AddUniqueIndex 5 "abc"
+  migr (undefined :: Old.AddUniqueIndex)
+  insert val
+  migr (undefined :: New.AddUniqueIndex)
+  assertExc "Unique index not enforced" $ insert val
+  return ()
+
+testMigrateDropUniqueIndex :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateDropUniqueIndex = do
+  let val = Old.AddUniqueIndex 5 "abc"
+  migr (undefined :: New.AddUniqueIndex)
+  insert val
+  migr (undefined :: Old.AddUniqueIndex)
+  insert val
+  return ()
+
+testMigrateAddDropNotNull :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testMigrateAddDropNotNull = do
+  let val = Old.AddNotNull Nothing
+  let val2 = Old.AddNotNull $ Just "abc"
+  migr (undefined :: New.AddNotNull)
+  k <- insert val2
+  migr (undefined :: Old.AddNotNull)
+  insert val >>= deleteByKey
+  migr (undefined :: New.AddNotNull)
+  val2' <- get k
+  Just val2 @=? val2'
+  assertExc "Not null not enforced" $ insert val
 
 testMigrateAddConstructorToMany :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddConstructorToMany = do

@@ -7,6 +7,7 @@ module Database.Groundhog.TH.Settings
   , THEmbeddedDef(..)
   , THConstructorDef(..)
   , THFieldDef(..)
+  , THUniqueDef(..)
   , THUniqueKeyDef(..)
   , THAutoKeyDef(..)
   , PSEntityDef(..)
@@ -19,6 +20,7 @@ module Database.Groundhog.TH.Settings
   , PSAutoKeyDef(..)
   ) where
 
+import Database.Groundhog.Core (UniqueType(..))
 import Database.Groundhog.Generic (PSEmbeddedFieldDef(..))
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
@@ -31,8 +33,8 @@ data PersistDefinitions = PersistDefinitions {definitions :: [Either PSEntityDef
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
 data THEntityDef = THEntityDef {
-    dataName :: Name -- SomeData
-  , dbEntityName :: String  -- SQLSomeData
+    thDataName :: Name -- SomeData
+  , thDbEntityName :: String  -- SQLSomeData
   , thAutoKey :: Maybe THAutoKeyDef
   , thUniqueKeys :: [THUniqueKeyDef]
   , thTypeParams :: [TyVarBndr]
@@ -45,28 +47,35 @@ data THAutoKeyDef = THAutoKeyDef {
 } deriving Show
 
 data THEmbeddedDef = THEmbeddedDef {
-    embeddedName :: Name
-  , embeddedConstructorName :: Name
-  , dbEmbeddedName :: String -- used only to set polymorphic part of name of its container
+    thEmbeddedName :: Name
+  , thEmbeddedConstructorName :: Name
+  , thDbEmbeddedName :: String -- used only to set polymorphic part of name of its container
   , thEmbeddedTypeParams :: [TyVarBndr]
-  , embeddedFields :: [THFieldDef]
+  , thEmbeddedFields :: [THFieldDef]
 } deriving Show
 
 data THConstructorDef = THConstructorDef {
     thConstrName    :: Name -- U2
   , thPhantomConstrName :: String -- U2Constructor
-  , dbConstrName    :: String -- SQLU2
+  , thDbConstrName    :: String -- SQLU2
   , thDbAutoKeyName :: Maybe String -- u2_id
   , thConstrFields  :: [THFieldDef]
-  , thConstrUniques :: [PSUniqueDef]
+  , thConstrUniques :: [THUniqueDef]
 } deriving Show
 
 data THFieldDef = THFieldDef {
-    fieldName :: String -- bar
-  , dbFieldName :: String -- SQLbar
-  , exprName :: String -- BarField
-  , fieldType :: Type
-  , embeddedDef :: Maybe [PSEmbeddedFieldDef]
+    thFieldName :: String -- bar
+  , thDbFieldName :: String -- SQLbar
+  , thDbTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
+  , thExprName :: String -- BarField
+  , thFieldType :: Type
+  , thEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
+} deriving Show
+
+data THUniqueDef = THUniqueDef {
+    thUniqueName :: String
+  , thUniqueType :: UniqueType
+  , thUniqueFields :: [String]
 } deriving Show
 
 data THUniqueKeyDef = THUniqueKeyDef {
@@ -105,12 +114,14 @@ data PSConstructorDef = PSConstructorDef {
 data PSFieldDef = PSFieldDef {
     psFieldName :: String -- bar
   , psDbFieldName :: Maybe String -- SQLbar
+  , psDbTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
   , psExprName :: Maybe String -- BarField
   , psEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
 data PSUniqueDef = PSUniqueDef {
     psUniqueName :: String
+  , psUniqueType :: Maybe UniqueType
   , psUniqueFields :: [String]
 } deriving Show
 
@@ -142,13 +153,17 @@ instance Lift PSConstructorDef where
   lift (PSConstructorDef {..}) = [| PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psDbAutoKeyName) $(lift psConstrFields) $(lift psConstrUniques) |]
 
 instance Lift PSUniqueDef where
-  lift (PSUniqueDef name fields) = [| PSUniqueDef $(lift name) $(lift fields) |]
+  lift (PSUniqueDef name typ fields) = [| PSUniqueDef $(lift name) $(lift typ) $(lift fields) |]
+
+instance Lift UniqueType where
+  lift UniqueConstraint = [| UniqueConstraint |]
+  lift UniqueIndex = [| UniqueIndex |]
 
 instance Lift PSFieldDef where
-  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psExprName) $(lift psEmbeddedDef) |]
+  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) |]
 
 instance Lift PSEmbeddedFieldDef where
-  lift (PSEmbeddedFieldDef {..}) = [| PSEmbeddedFieldDef $(lift psEmbeddedFieldName) $(lift psDbEmbeddedFieldName) $(lift psSubEmbedded) |]
+  lift (PSEmbeddedFieldDef {..}) = [| PSEmbeddedFieldDef $(lift psEmbeddedFieldName) $(lift psDbEmbeddedFieldName) $(lift psDbEmbeddedTypeName) $(lift psSubEmbedded) |]
 
 instance Lift PSUniqueKeyDef where
   lift (PSUniqueKeyDef {..}) = [| PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef) |]
@@ -199,15 +214,23 @@ instance FromJSON PSConstructorDef where
   parseJSON _          = mzero
 
 instance FromJSON PSUniqueDef where
-  parseJSON (Object v) = PSUniqueDef <$> v .: "name" <*> v .: "fields"
+  parseJSON (Object v) = PSUniqueDef <$> v .: "name" <*> v .:? "type" <*> v .: "fields"
   parseJSON _          = mzero
 
+instance FromJSON UniqueType where
+  parseJSON o = do
+    x <- parseJSON o
+    case (x :: String) of
+      "constraint" -> return UniqueConstraint
+      "index" -> return UniqueIndex
+      _ -> fail "parseJSON: UniqueType must be either \"constraint\" or \"index\""
+
 instance FromJSON PSFieldDef where
-  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "exprName" <*> v .:? "embeddedType"
+  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "typeName" <*> v .:? "exprName" <*> v .:? "embeddedType"
   parseJSON _          = mzero
 
 instance FromJSON PSEmbeddedFieldDef where
-  parseJSON (Object v) = PSEmbeddedFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "embeddedType"
+  parseJSON (Object v) = PSEmbeddedFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "typeName" <*> v .:? "embeddedType"
   parseJSON _          = mzero
 
 instance FromJSON PSUniqueKeyDef where

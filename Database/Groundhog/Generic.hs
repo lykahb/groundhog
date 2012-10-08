@@ -149,6 +149,7 @@ onException io what = control $ \runInIO -> E.onException (runInIO io) (runInIO 
 data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
     psEmbeddedFieldName :: String -- bar
   , psDbEmbeddedFieldName :: Maybe String -- SQLbar
+  , psDbEmbeddedTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
   , psSubEmbedded :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
 
@@ -161,7 +162,11 @@ applyEmbeddedDbTypeSettings settings typ = (case typ of
   go [] fs = fs
   go st [] = error $ "applyEmbeddedDbTypeSettings: embedded datatype does not have following fields: " ++ show st
   go st (f@(fName, fType):fs) = case find fName st of
-    Just (rest, PSEmbeddedFieldDef _ dbName subs) -> (fromMaybe fName dbName, maybe id applyEmbeddedDbTypeSettings subs fType):go rest fs
+    Just (rest, PSEmbeddedFieldDef _ dbName dbTypeName subs) -> (fromMaybe fName dbName, typ'):go rest fs where
+      typ' = case (subs, dbTypeName) of
+        (Just e, _) -> applyEmbeddedDbTypeSettings e fType
+        (_, Just typeName) -> DbOther typeName
+        _ -> fType
     Nothing -> f:go st fs
   find :: String -> [PSEmbeddedFieldDef] -> Maybe ([PSEmbeddedFieldDef], PSEmbeddedFieldDef)
   find _ [] = Nothing

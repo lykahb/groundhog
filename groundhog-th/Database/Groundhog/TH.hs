@@ -18,7 +18,7 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   ) where
 
-import Database.Groundhog.Core (delim)
+import Database.Groundhog.Core (delim, UniqueType(..))
 import Database.Groundhog.Generic
 import Database.Groundhog.TH.CodeGen
 import Database.Groundhog.TH.Settings
@@ -30,8 +30,9 @@ import Data.ByteString.Char8 (pack)
 import Data.Char (toUpper, toLower, isSpace)
 import Data.Either (lefts)
 import Data.List (nub, (\\))
-import Data.Maybe (fromMaybe, isNothing)
-import Data.Yaml (decodeEither)
+import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Yaml as Y(decodeHelper, ParseException(..))
+import qualified Text.Libyaml as Y
 
 data CodegenConfig = CodegenConfig {
     -- | Naming style that is applied for all definitions
@@ -184,19 +185,19 @@ mkPersist CodegenConfig{..} (PersistDefinitions defs) = do
   return $ migrateFunc ++ concat decs
 
 applyEntitySettings :: NamingStyle -> PSEntityDef -> THEntityDef -> THEntityDef
-applyEntitySettings style settings def@(THEntityDef{..}) =
-  def { dbEntityName = fromMaybe dbEntityName $ psDbEntityName settings
+applyEntitySettings style PSEntityDef{..} def@(THEntityDef{..}) =
+  def { thDbEntityName = fromMaybe thDbEntityName psDbEntityName
       , thAutoKey = thAutoKey'
-      , thUniqueKeys = maybe thUniqueKeys (map mkUniqueKey') $ psUniqueKeys settings
+      , thUniqueKeys = maybe thUniqueKeys (map mkUniqueKey') psUniqueKeys
       , thConstructors = thConstructors'
       } where
-  thAutoKey' = maybe thAutoKey (liftM2 applyAutoKeySettings thAutoKey) $ psAutoKey settings
+  thAutoKey' = maybe thAutoKey (liftM2 applyAutoKeySettings thAutoKey) psAutoKey
 
-  thConstructors' = maybe thConstructors'' (f thConstructors'') $ psConstructors settings where
+  thConstructors' = maybe thConstructors'' (f thConstructors'') $ psConstructors where
     thConstructors'' = maybe id (\_ -> zipWith putAutoKey [0..]) thAutoKey' thConstructors
-    putAutoKey cNum cDef@(THConstructorDef{..}) = cDef {thDbAutoKeyName = Just $ mkDbConstrAutoKeyName style (nameBase dataName) (nameBase thConstrName) cNum}
+    putAutoKey cNum cDef@(THConstructorDef{..}) = cDef {thDbAutoKeyName = Just $ mkDbConstrAutoKeyName style (nameBase thDataName) (nameBase thConstrName) cNum}
 
-  mkUniqueKey' = mkUniqueKey style (nameBase dataName) (head thConstructors')
+  mkUniqueKey' = mkUniqueKey style (nameBase thDataName) (head thConstructors')
   f = foldr $ replaceOne "constructor" psConstrName (nameBase . thConstrName) applyConstructorSettings
 
 mkUniqueKey :: NamingStyle -> String -> THConstructorDef -> PSUniqueKeyDef -> THUniqueKeyDef
@@ -210,44 +211,46 @@ mkUniqueKey style@NamingStyle{..} dName cDef@THConstructorDef{..} PSUniqueKeyDef
   , thUniqueKeyMakeEmbedded = fromMaybe False psUniqueKeyMakeEmbedded
   , thUniqueKeyIsDef = fromMaybe False psUniqueKeyIsDef
   }
-  f = foldr $ replaceOne "unique field" psFieldName fieldName applyFieldSettings
+  f = foldr $ replaceOne "unique field" psFieldName thFieldName applyFieldSettings
   uniqueFields = mkFieldsForUniqueKey style dName key cDef
 
 applyAutoKeySettings :: THAutoKeyDef -> PSAutoKeyDef -> THAutoKeyDef
-applyAutoKeySettings def@(THAutoKeyDef{..}) settings = 
-  def { thAutoKeyConstrName = fromMaybe thAutoKeyConstrName $ psAutoKeyConstrName settings
-      , thAutoKeyIsDef = fromMaybe thAutoKeyIsDef $ psAutoKeyIsDef settings
+applyAutoKeySettings def@(THAutoKeyDef{..}) PSAutoKeyDef{..} = 
+  def { thAutoKeyConstrName = fromMaybe thAutoKeyConstrName psAutoKeyConstrName
+      , thAutoKeyIsDef = fromMaybe thAutoKeyIsDef psAutoKeyIsDef
       }
 
 applyConstructorSettings :: PSConstructorDef -> THConstructorDef -> THConstructorDef
-applyConstructorSettings settings def@(THConstructorDef{..}) =
-  def { thPhantomConstrName = fromMaybe thPhantomConstrName $ psPhantomConstrName settings
-      , dbConstrName = fromMaybe dbConstrName $ psDbConstrName settings
-      , thDbAutoKeyName = fromMaybe thDbAutoKeyName $ psDbAutoKeyName settings
-      , thConstrFields = maybe thConstrFields (f thConstrFields) $ psConstrFields settings
-      , thConstrUniques = fromMaybe thConstrUniques $ psConstrUniques settings
+applyConstructorSettings PSConstructorDef{..} def@(THConstructorDef{..}) =
+  def { thPhantomConstrName = fromMaybe thPhantomConstrName psPhantomConstrName
+      , thDbConstrName = fromMaybe thDbConstrName psDbConstrName
+      , thDbAutoKeyName = fromMaybe thDbAutoKeyName psDbAutoKeyName
+      , thConstrFields = maybe thConstrFields (f thConstrFields) psConstrFields
+      , thConstrUniques = maybe thConstrUniques (map convertUnique) psConstrUniques
       } where
-  f = foldr $ replaceOne "field" psFieldName fieldName applyFieldSettings
+  f = foldr $ replaceOne "field" psFieldName thFieldName applyFieldSettings
+  convertUnique (PSUniqueDef uName uType uFields) = THUniqueDef uName (fromMaybe UniqueConstraint uType) uFields
   
 applyFieldSettings :: PSFieldDef -> THFieldDef -> THFieldDef
-applyFieldSettings settings def@(THFieldDef{..}) =
-  def { dbFieldName = fromMaybe dbFieldName $ psDbFieldName settings
-      , exprName = fromMaybe exprName $ psExprName settings
-      , embeddedDef = psEmbeddedDef settings
+applyFieldSettings PSFieldDef{..} def@(THFieldDef{..}) =
+  def { thDbFieldName = fromMaybe thDbFieldName psDbFieldName
+      , thExprName = fromMaybe thExprName psExprName
+      , thDbTypeName = psDbTypeName
+      , thEmbeddedDef = psEmbeddedDef
       }
 
 applyEmbeddedSettings :: PSEmbeddedDef -> THEmbeddedDef -> THEmbeddedDef
-applyEmbeddedSettings settings def@(THEmbeddedDef{..}) =
-  def { dbEmbeddedName = fromMaybe dbEmbeddedName $ psDbEmbeddedName settings
-      , embeddedFields = maybe embeddedFields (f embeddedFields) $ psEmbeddedFields settings
+applyEmbeddedSettings PSEmbeddedDef{..} def@(THEmbeddedDef{..}) =
+  def { thDbEmbeddedName = fromMaybe thDbEmbeddedName psDbEmbeddedName
+      , thEmbeddedFields = maybe thEmbeddedFields (f thEmbeddedFields) psEmbeddedFields
       } where
-  f = foldr $ replaceOne "field" psFieldName fieldName applyFieldSettings
+  f = foldr $ replaceOne "field" psFieldName thFieldName applyFieldSettings
 
 mkFieldsForUniqueKey :: NamingStyle -> String -> THUniqueKeyDef -> THConstructorDef -> [THFieldDef]
-mkFieldsForUniqueKey style dName uniqueKey cDef = zipWith (setSelector . findField) (psUniqueFields uniqueDef) [0..] where
-  findField name = findOne "field" id fieldName name $ thConstrFields cDef
-  uniqueDef = findOne "unique" id psUniqueName (thUniqueKeyName uniqueKey) $ thConstrUniques cDef
-  setSelector f i = f {exprName = mkExprSelectorName style dName (thUniqueKeyConstrName uniqueKey) (fieldName f) i}
+mkFieldsForUniqueKey style dName uniqueKey cDef = zipWith (setSelector . findField) (thUniqueFields uniqueDef) [0..] where
+  findField name = findOne "field" id thFieldName name $ thConstrFields cDef
+  uniqueDef = findOne "unique" id thUniqueName (thUniqueKeyName uniqueKey) $ thConstrUniques cDef
+  setSelector f i = f {thExprName = mkExprSelectorName style dName (thUniqueKeyConstrName uniqueKey) (thFieldName f) i}
 
 notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]
 notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
@@ -265,41 +268,47 @@ validateEntity :: THEntityDef -> Either String THEntityDef
 validateEntity def = do
   let constrs = thConstructors def
   assertUnique thPhantomConstrName constrs "constructor phantom name"
-  assertUnique dbConstrName constrs "constructor db name"
+  assertUnique thDbConstrName constrs "constructor db name"
   forM_ constrs $ \cdef -> do
     let fields = thConstrFields cdef
     assertSpaceFree (thPhantomConstrName cdef) "constructor phantom name"
-    assertUnique exprName fields "expr field name in a constructor"
-    assertUnique dbFieldName fields "db field name in a constructor"
-    forM_ fields $ \fdef -> assertSpaceFree (exprName fdef) "field expr name"
-    case filter (\(PSUniqueDef _ cfields) -> null cfields) $ thConstrUniques cdef of
+    assertUnique thExprName fields "expr field name in a constructor"
+    assertUnique thDbFieldName fields "db field name in a constructor"
+    mapM_ validateField fields
+    case filter (\(THUniqueDef _ _ uFields) -> null uFields) $ thConstrUniques cdef of
       [] -> return ()
       ys -> fail $ "Constraints must have at least one field: " ++ show ys
     when (isNothing (thDbAutoKeyName cdef) /= isNothing (thAutoKey def)) $
-      fail $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (dataName def)
+      fail $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def)
       
   -- check that unique keys = [] for multiple constructor datatype
   if length constrs > 1 && not (null $ thUniqueKeys def)
-    then fail $ "Unique keys may exist only for datatypes with single constructor: " ++ show (dataName def)
+    then fail $ "Unique keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
     else -- check that all unique keys reference existing uniques
-         let uniqueNames = map psUniqueName $ thConstrUniques $ head constrs
+         let uniqueNames = map thUniqueName $ thConstrUniques $ head constrs
          in  forM_ (thUniqueKeys def) $ \cKey -> unless (thUniqueKeyName cKey `elem` uniqueNames) $
-             fail $ "Unique key mentions unknown unique: " ++ thUniqueKeyName cKey ++ " in datatype " ++ show (dataName def)
+             fail $ "Unique key mentions unknown unique: " ++ thUniqueKeyName cKey ++ " in datatype " ++ show (thDataName def)
   -- check that if unique keys = [] there is auto key
   when (null (thUniqueKeys def) && isNothing (thAutoKey def)) $
-    fail $ "A datatype must have either an auto key or unique keys: " ++ show (dataName def)
+    fail $ "A datatype must have either an auto key or unique keys: " ++ show (thDataName def)
   -- check that only one of the keys is default
   let defaults = maybe False thAutoKeyIsDef (thAutoKey def) : map thUniqueKeyIsDef (thUniqueKeys def)
   when (length (filter id defaults) /= 1) $
-    fail $ "A datatype must have exactly one default key: " ++ show (dataName def)
+    fail $ "A datatype must have exactly one default key: " ++ show (thDataName def)
   return def
+  
+validateField :: THFieldDef -> Either String ()
+validateField fDef = do
+  assertSpaceFree (thExprName fDef) "field expr name"
+  when (isJust (thDbTypeName fDef) && isJust (thEmbeddedDef fDef)) $
+    fail $ "A field may not have both typeName and embeddedType: " ++ show (thFieldName fDef)
 
 validateEmbedded :: THEmbeddedDef -> Either String THEmbeddedDef
 validateEmbedded def = do
-  let fields = embeddedFields def
-  assertUnique exprName fields "expr field name in an embedded datatype"
-  assertUnique dbFieldName fields "db field name in an embedded datatype"
-  forM_ fields $ \fdef -> assertSpaceFree (exprName fdef) "field expr name"
+  let fields = thEmbeddedFields def
+  assertUnique thExprName fields "expr field name in an embedded datatype"
+  assertUnique thDbFieldName fields "db field name in an embedded datatype"
+  mapM_ validateField fields
   return def
 
 mkTHEntityDefWith :: NamingStyle -> Dec -> THEntityDef
@@ -318,10 +327,10 @@ mkTHEntityDefWith NamingStyle{..} (DataD _ dName typeVars cons _) =
       apply f = f dName' (nameBase name) cNum
 
     mkField :: String -> StrictType -> Int -> THFieldDef
-    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (apply mkNormalExprFieldName) t Nothing where
+    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (apply mkNormalExprFieldName) t Nothing where
       apply f = f dName' cName cNum fNum
     mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) (apply mkExprFieldName) t Nothing where
+    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (apply mkExprFieldName) t Nothing where
       apply f = f dName' cName cNum fName' fNum
       fName' = nameBase fName
 mkTHEntityDefWith _ _ = error "Only datatypes can be processed"
@@ -340,10 +349,10 @@ mkTHEmbeddedDefWith (NamingStyle{..}) (DataD _ dName typeVars cons _) =
     _ -> error $ "An embedded datatype must have exactly one constructor: " ++ show dName
   
   mkField :: String -> StrictType -> Int -> THFieldDef
-  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) (mkNormalExprSelectorName dName' cName' fNum) t Nothing where
+  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (mkNormalExprSelectorName dName' cName' fNum) t Nothing where
     apply f = f dName' cName' 0 fNum
   mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) (mkExprSelectorName dName' cName' fName' fNum) t Nothing where
+  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing where
     apply f = f dName' cName' 0 fName' fNum
     fName' = nameBase fName
 mkTHEmbeddedDefWith _ _ = error "Only datatypes can be processed"
@@ -388,12 +397,13 @@ firstLetter f s = f (head s):tail s
 --        fields:                        # List of constructor fields. If you don't change a field, you can omit it
 --          - name: foo
 --            dbName: foo                # Column name
---            exprName: FooField         # Name of a field used in expressions
+--            thExprName: FooField         # Name of a field used in expressions
 --          - name: bar
 --            dbName: bar
---            exprName: BarField
+--            thExprName: BarField
 --        uniques:
 --          - name: someconstraint
+--            type: constraint           # The type can be either \"constraint\" or \"index\"
 --            fields: [foo, bar]         # List of constructor parameter names. Not DB names(!)
 -- |]
 -- @
@@ -463,8 +473,20 @@ groundhogFile :: QuasiQuoter
 groundhogFile = quoteFile groundhog
 
 parseDefinitions :: String -> Q Exp
-parseDefinitions s = either fail lift result where
-  result = decodeEither $ pack s :: Either String PersistDefinitions
+parseDefinitions s = do
+  result <- runIO $ decodeHelper (Y.decode $ pack s)
+  case result of
+    Left err -> case err of
+      InvalidYaml (Just (Y.YamlParseException problem context mark)) -> fail $ unlines
+        [ "YAML parse error: " ++ problem
+        , "Context: " ++ context
+        , "At line: " ++ show (Y.yamlLine mark)
+        , lines s !! Y.yamlLine mark
+        , replicate (Y.yamlColumn mark) ' ' ++ "^"
+        ]
+      _ -> fail $ show err
+    Right (Left err) -> fail err
+    Right (Right result') -> lift (result' :: PersistDefinitions)
 
 mkEntityDecs :: THEntityDef -> Q [Dec]
 mkEntityDecs def = do

@@ -82,12 +82,12 @@ main =
     defaultMainWith myConfig (return ())
       [ bgroup "get" $ mkBench (G.get gKey) (P.get pKey)
 --      , bgroup "get" [bench "esqueleto" $ whnfIO $  runPers (E.select $ E.from $ \p -> E.where_ (p ^. PPersonId ==. val pKey) >> return p)]
-      , bgroup "replace" $ mkBench (G.replace gKey gPerson) (P.replace pKey pPerson)
+  {-    , bgroup "replace" $ mkBench (G.replace gKey gPerson) (P.replace pKey pPerson)
       , bgroup "select" $ mkBench (G.project (G.AutoKeyField, GPersonConstructor) gCond) (P.selectList pCond [])
       , bgroup "updateByKey" $ mkBench (G.update [NameField G.=. ("abc" :: String)] $ G.AutoKeyField G.==. gKey) (P.update pKey [PPersonName P.=. "abc"])
       , bgroup "updateWhere" $ mkBench (G.update [NameField G.=. ("abc" :: String)] gCond) (P.updateWhere pCond [PPersonName P.=. "abc"])
       , bgroup "count" $ mkBench (G.count gCond) (P.count pCond)
       , bgroup "deleteByKey" $ mkBench (G.deleteByKey gKey) (P.delete pKey)
-      , bgroup "deleteWhere" $ mkBench (G.delete gCond) (P.deleteWhere pCond)
+      , bgroup "deleteWhere" $ mkBench (G.delete gCond) (P.deleteWhere pCond) -}
       , bgroup "insert" $ mkBench (G.insert gPerson) (P.insert pPerson)
       ]

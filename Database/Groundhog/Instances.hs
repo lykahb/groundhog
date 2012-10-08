@@ -198,6 +198,7 @@ instance PrimitivePersistField Word64 where
 instance PrimitivePersistField Double where
   toPrimitivePersistValue _ a = PersistDouble a
   fromPrimitivePersistValue _ (PersistDouble a) = a
+  fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Double, received: " ++ show x)
 
 instance PrimitivePersistField Bool where
@@ -479,7 +480,7 @@ instance (PersistEntity v, Constructor c) => Projection (c (ConstructorMarker v)
 instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), r ~ RestrictionHolder v (UniqueConstr (Key v (Unique u))))
       => Projection (u (UniqueMarker v)) r (Key v (Unique u)) where
   projectionFieldChains u = (chains++) where
-    UniqueDef _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
+    UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chains = map (\f -> (f, [])) uFields
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
   projectionResult _ = pureFromPersistValue
@@ -533,6 +534,6 @@ instance (PersistEntity v, Constructor c, Projection (Field v c a) r a') => Fiel
 
 instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) r a') => FieldLike (u (UniqueMarker v)) r a' where
   fieldChain u = chain where
-    UniqueDef _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
+    UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chain = (("will_be_ignored", DbEmbedded $ EmbeddedDef True $ uFields), [])
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))

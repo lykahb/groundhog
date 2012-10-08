@@ -27,11 +27,11 @@ import qualified Database.PostgreSQL.LibPQ as LibPQ
 
 import Control.Arrow ((***))
 import Control.Exception (throw)
-import Control.Monad (forM, liftM)
+import Control.Monad (forM, liftM, liftM2)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
-import Data.ByteString.Char8 (ByteString, pack, unpack)
+import Data.ByteString.Char8 (ByteString, pack, unpack, copy)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int64)
@@ -42,6 +42,7 @@ import Data.Conduit.Pool
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Time.LocalTime (localTimeToUTC, utc)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 newtype Postgresql = Postgresql PG.Connection
@@ -210,9 +211,9 @@ toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Postgresql m)
 migrate' = migrateRecursively (migrateEntity migrationPack) (migrateList migrationPack)
 
-migrationPack :: (MonadBaseControl IO m, MonadIO m) => GM.MigrationPack (DbPersist Postgresql m) DbType
+migrationPack :: (MonadBaseControl IO m, MonadIO m) => GM.MigrationPack (DbPersist Postgresql m)
 migrationPack = GM.MigrationPack
-  compareColumns
+  compareTypes
   compareRefs
   compareUniqs
   checkTable
@@ -224,12 +225,11 @@ migrationPack = GM.MigrationPack
   "INT8"
   mainTableId
   defaultPriority
-  simplifyType
-  (\uniques refs -> ([], map (\(UniqueDef' uName fields) -> AddUniqueConstraint uName fields) uniques ++ map AddReference refs))
+  (\uniques refs -> ([], map AddUnique uniques ++ map AddReference refs))
   showColumn
   showAlterDb
 
-showColumn :: Column DbType -> String
+showColumn :: Column -> String
 showColumn (Column n nu t def) = concat
     [ escape n
     , " "
@@ -256,7 +256,7 @@ checkTrigger name = do
     Just src -> return (fst $ fromPurePersistValues proxy src)
 
 -- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB DbType])
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB])
 migTriggerOnDelete name deletes = do
   let funcName = name
   let trigName = name
@@ -289,7 +289,7 @@ migTriggerOnDelete name deletes = do
       
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB DbType])
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB])
 migTriggerOnUpdate name fieldName del = do
   let funcName = name ++ delim : fieldName
   let trigName = name ++ delim : fieldName
@@ -314,41 +314,41 @@ migTriggerOnUpdate name fieldName del = do
             else [DropTrigger trigName name, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
   
-checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] (TableInfo DbType)))
+checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] TableInfo))
 checkTable name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrimitivePersistValue proxy name] id
   case table of
     Just _ -> do
       -- omit primary keys
-      cols <- queryRaw' "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default FROM information_schema.columns c WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?) ORDER BY c.ordinal_position" [toPrimitivePersistValue proxy name, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
+      cols <- queryRaw' "SELECT c.column_name, c.is_nullable, c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.datetime_precision, c.interval_type, c.column_default FROM information_schema.columns c WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?) ORDER BY c.ordinal_position" [toPrimitivePersistValue proxy name, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
       let (col_errs, cols') = partitionEithers cols
       
-      uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-      let mkUniq us = UniqueDef' (fst $ head us) (map snd us)
-      let uniqs' = map mkUniq $ groupBy ((==) `on` fst) uniqRows
+      uniqConstraints <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid WHERE tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
+      let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes
       references <- checkTableReferences name
       primaryKeyResult <- checkPrimaryKey name
-      let (primaryKey, uniqs'') = case primaryKeyResult of
-            (Left primaryKeyName) -> (primaryKeyName, uniqs')
-            (Right u) -> (Nothing, u:uniqs')
+      let (primaryKey, uniqs') = case primaryKeyResult of
+            (Left primaryKeyName) -> (primaryKeyName, uniqs)
+            (Right u) -> (Nothing, u:uniqs)
       return $ Just $ case col_errs of
-        []   -> Right $ TableInfo primaryKey cols' uniqs'' references
+        []   -> Right $ TableInfo primaryKey cols' uniqs' references
         errs -> Left errs
     Nothing -> return Nothing
 
 checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
 checkPrimaryKey name = do
   uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-  let mkUniq us = UniqueDef' (fst $ head us) (map snd us)
+  let mkUniq us = UniqueDef' (fst $ head us) UniqueConstraint (map snd us)
   return $ case uniqRows of
     [] -> Left Nothing
     [(_, primaryKeyName)] -> Left $ Just primaryKeyName
     us -> Right $ mkUniq us
 
-getColumn :: String -> (String, String, String, Maybe String) -> Either String (Column DbType)
-getColumn _ (column_name, is_nullable, udt_name, d) = case readSqlType udt_name of
-      Left s -> Left s
-      Right t -> Right $ Column column_name (is_nullable == "YES") t d
+getColumn :: String -> (String, String, String, (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String), Maybe String) -> Either String Column
+getColumn _ (column_name, is_nullable, udt_name, modifiers, d) = Right $ Column column_name (is_nullable == "YES") t d where
+  t = readSqlType udt_name modifiers
 
 checkTableReferences :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m [(Maybe String, Reference)]
 checkTableReferences tableName = do
@@ -360,7 +360,7 @@ checkTableReferences tableName = do
       references = map mkReference $ groupBy ((==) `on` fst) x
   return references
 
-showAlterDb :: AlterDB DbType -> SingleMigration
+showAlterDb :: AlterDB -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
 showAlterDb (AlterTable t _ _ _ alts) = Right $ map (showAlterTable t) alts
 showAlterDb (DropTrigger trigName tName) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape trigName ++ " ON " ++ escape tName)]
@@ -371,20 +371,33 @@ showAlterDb (DropFunction funcName) = Right [(False, functionPriority, "DROP FUN
                  
 showAlterTable :: String -> AlterTable -> (Bool, Int, String)
 showAlterTable table (AlterColumn alt) = showAlterColumn table alt
-showAlterTable table (AddUniqueConstraint cname cols) = (False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef' uName UniqueConstraint cols)) = (False, defaultPriority, concat
   [ "ALTER TABLE "
   , escape table
   , " ADD CONSTRAINT "
-  , escape cname
+  , escape uName
   , " UNIQUE("
   , intercalate "," $ map escape cols
   , ")"
   ])
-showAlterTable table (DropConstraint cname) = (False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = (False, defaultPriority, concat
+  [ "CREATE UNIQUE INDEX "
+  , escape uName
+  , " ON "
+  , escape table
+  , "("
+  , intercalate "," $ map escape cols
+  , ")"
+  ])
+showAlterTable table (DropConstraint uName) = (False, defaultPriority, concat
   [ "ALTER TABLE "
   , escape table
   , " DROP CONSTRAINT "
-  , escape cname
+  , escape uName
+  ])
+showAlterTable _ (DropIndex uName) = (False, defaultPriority, concat
+  [ "DROP INDEX "
+  , escape uName
   ])
 showAlterTable table (AddReference (tName, columns)) = (False, referencePriority, concat
   [ "ALTER TABLE "
@@ -470,20 +483,28 @@ showAlterColumn table (n, UpdateValue s) = (False, defaultPriority, concat
   , escape n
   , " IS NULL"
   ])
-    
-readSqlType :: String -> Either String DbType
-readSqlType "int4" = Right $ DbInt32
-readSqlType "int8" = Right $ DbInt64
-readSqlType "varchar" = Right $ DbString
-readSqlType "date" = Right $ DbDay
-readSqlType "bool" = Right $ DbBool
-readSqlType "timestamp" = Right $ DbDayTime
-readSqlType "timestamptz" = Right $ DbDayTimeZoned
-readSqlType "float4" = Right $ DbReal
-readSqlType "float8" = Right $ DbReal
-readSqlType "bytea" = Right $ DbBlob
-readSqlType "time" = Right $ DbTime
-readSqlType a = Left $ "Unknown type: " ++ a
+
+-- | udt_name, character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type
+readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> DbType
+readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type) = (case typ of
+  "int4" -> DbInt32
+  "int8" -> DbInt64
+  "varchar" -> maybe DbString (DbOther . ("varchar"++) . wrap . show) character_maximum_length
+  "numeric" -> DbOther $ "numeric" ++ maybe "" wrap attrs where
+    attrs = liftM2 (\a b -> if b == 0 then show a else show a ++ ", " ++ show b) numeric_precision numeric_scale
+  "date" -> DbDay
+  "bool" -> DbBool
+  "time" -> mkDate DbTime "time"
+  "timestamp" -> mkDate DbDayTime "timestamp"
+  "timestamptz" -> mkDate DbDayTimeZoned "timestamptz"
+  "float4" -> DbReal
+  "float8" -> DbReal
+  "bytea" -> DbBlob
+  a -> DbOther a) where
+    wrap x = "(" ++ x ++ ")"
+    mkDate t name = maybe t (DbOther . (name++) . wrap . show) datetime_precision'
+    defDateTimePrec = 6
+    datetime_precision' = datetime_precision >>= \p -> if p == defDateTimePrec then Nothing else Just p
 
 showSqlType :: DbType -> String
 showSqlType DbString = "VARCHAR"
@@ -496,21 +517,21 @@ showSqlType DbTime = "TIME"
 showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
 showSqlType DbBlob = "BYTEA"
+showSqlType (DbOther name) = name
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = showSqlType DbInt64
 showSqlType (DbEntity Nothing _) = showSqlType DbInt64
 showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
-compareColumns :: Column DbType -> Column DbType -> Bool
-compareColumns = ((==) `on` f) where
-  f col = col {colType = simplifyType (colType col)}
-
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-compareUniqs (UniqueDef' name1 cols1) (UniqueDef' name2 cols2) = name1 == name2 && haveSameElems (==) cols1 cols2
+compareUniqs (UniqueDef' name1 typ1 cols1) (UniqueDef' name2 typ2 cols2) = name1 == name2 && typ1 == typ2 && haveSameElems (==) cols1 cols2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
+
+compareTypes :: DbType -> DbType -> Bool
+compareTypes type1 type2 = showSqlType (simplifyType type1) == showSqlType (simplifyType type2)
 
 -- | Converts complex datatypes that reference other data to id type DbInt64. Does not handle DbEmbedded
 simplifyType :: DbType -> DbType
@@ -566,8 +587,10 @@ queryRaw' query vals f = do
           LibPQ.TuplesOk -> return ()
           _ -> do
             msg <- LibPQ.resStatus status
+            merr <- LibPQ.errorMessage rawconn
             fail $ "Postgresql.withStmt': bad result status " ++
-                   show status ++ " (" ++ show msg ++ ")"
+                   show status ++ " (" ++ show msg ++ ")" ++
+                   maybe "" ((". Error message: "++) . unpack) merr
 
         -- Get number and type of columns
         cols <- LibPQ.nfields ret
@@ -634,7 +657,7 @@ getGetter PG.Float4                = convertPV PersistDouble
 getGetter PG.Float8                = convertPV PersistDouble
 getGetter PG.AbsTime               = convertPV PersistUTCTime
 getGetter PG.RelTime               = convertPV PersistUTCTime
-getGetter PG.Money                 = convertPV PersistDouble
+--getGetter PG.Money                 = convertPV PersistString
 getGetter PG.BpChar                = convertPV PersistString
 getGetter PG.VarChar               = convertPV PersistString
 getGetter PG.Date                  = convertPV PersistDay
@@ -645,8 +668,13 @@ getGetter PG.Bit                   = convertPV PersistInt64
 getGetter PG.VarBit                = convertPV PersistInt64
 getGetter PG.Numeric               = convertPV (PersistDouble . fromRational)
 getGetter PG.Void                  = \_ _ -> Ok PersistNull
-getGetter other   = error $ "Postgresql.getGetter: type " ++
-                            show other ++ " not supported."
+getGetter _ = \f dat -> fmap (PersistByteString . unBinary) $ case dat of
+  Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
+  Just str -> case PGFF.format f of
+    LibPQ.Text -> case unsafePerformIO (LibPQ.unescapeBytea str) of
+      Nothing  -> PGFF.returnError PGFF.ConversionFailed f "unescapeBytea failed"
+      Just str' -> return $ PG.Binary str'
+    LibPQ.Binary -> return $ PG.Binary $ copy $ str
 
 unBinary :: PG.Binary a -> a
 unBinary (PG.Binary x) = x

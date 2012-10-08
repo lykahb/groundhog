@@ -51,6 +51,7 @@ module Database.Groundhog.Core
   , Constructor(..)
   , IsUniqueKey(..)
   , UniqueDef(..)
+  , UniqueType(..)
   -- * Migration
   , SingleMigration
   , NamedMigrations
@@ -96,7 +97,7 @@ class (PersistField v, PurePersistField (AutoKey v)) => PersistEntity v where
   -- | Constructs the value from the list of 'PersistValue'
   fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m (v, [PersistValue])
   -- | Returns constructor number and a list of uniques names and corresponding field values
-  getUniques :: DbDescriptor db => Proxy db -> v -> (Int, [(String, [PersistValue])])
+  getUniques :: DbDescriptor db => Proxy db -> v -> (Int, [(String, [PersistValue] -> [PersistValue])])
   -- | Is internally used by FieldLike Field instance
   -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
   entityFieldChain :: Field v c a -> FieldChain
@@ -332,12 +333,15 @@ class (Constructor (UniqueConstr uKey), PurePersistField uKey) => IsUniqueKey uK
   extractUnique :: uKey ~ Key v u => v -> uKey
   uniqueNum :: uKey -> Int
 
--- | Unique name and list of the field names that form a unique combination.
--- Only fields of 'PrimitivePersistField' types can be used in a unique definition
+-- | Unique name and list of the field names that form a unique combination
 data UniqueDef = UniqueDef {
     uniqueName :: String
+  , uniqueType :: UniqueType
   , uniqueFields :: [(String, DbType)]
-}  deriving (Show, Eq)
+} deriving (Show, Eq)
+
+-- | Defines how to treat the unique set of fields for a datatype
+data UniqueType = UniqueConstraint | UniqueIndex deriving (Show, Eq)
 
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
 -- datatypes, eg DbString instead of DbVarchar. Different databases may
@@ -351,12 +355,13 @@ data DbType = DbString
             | DbTime
             | DbDayTime
             | DbDayTimeZoned
-            | DbBlob    -- ByteString
--- More complex types
+            | DbBlob         -- ^ ByteString
+            | DbOther String -- ^ Name for a database type
+            -- More complex types
             | DbMaybe DbType
-            | DbList String DbType -- list name and type of its argument
+            | DbList String DbType -- ^ List table name and type of its argument
             | DbEmbedded EmbeddedDef
-            -- Nothing means autokey, Just contains a unique key definition and a name of unique constraint.
+            -- | Nothing means autokey, Just contains a unique key definition and a name of unique constraint.
             | DbEntity (Maybe (EmbeddedDef, String)) EntityDef
   deriving (Eq, Show)
 
