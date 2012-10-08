@@ -8,10 +8,10 @@ import Database.Groundhog.Postgresql
 
 data Point = Point { pointX :: Int, pointY :: Int } deriving Show
 
--- PostgreSQL keeps circle in format "(x,y)"
+-- PostgreSQL keeps point in format "(x,y)"
 instance PrimitivePersistField Point where
   toPrimitivePersistValue _ (Point x y) = PersistString $ "(" ++ show x ++ "," ++ show y ++ ")"
-  -- Crude parsing. Rely on the correspondence between Haskell tuple format and PostgreSQL point.
+  -- Crude parsing. Rely on the correspondence between Haskell tuple format and PostgreSQL point format.
   fromPrimitivePersistValue _ (PersistString a) = let (x, y) = read a in Point x y
   fromPrimitivePersistValue _ (PersistByteString a) = let (x, y) = read (unpack a) in Point x y
 
