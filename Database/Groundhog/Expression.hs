@@ -22,25 +22,25 @@ import Database.Groundhog.Instances ()
 
 -- | Instances of this type can be converted to 'Expr'. It is useful for uniform manipulation over fields and plain values
 class Expression a v c where
-  wrap :: a -> Expr v c a
+  toExpression :: a -> Expr v c a
 
 instance PurePersistField a => Expression a v c where
-  wrap = ExprPure
+  toExpression = ExprPure
 
 instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (Arith v c a) v' c' where
-  wrap = ExprArith
+  toExpression = ExprArith
 
 instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (Field v c a) v' c' where
-  wrap = ExprField
+  toExpression = ExprField
 
 instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (SubField v c a) v' c' where
-  wrap = ExprField
+  toExpression = ExprField
 
 instance (PersistEntity v, Constructor c, PersistField (Key v' BackendSpecific), FieldLike (AutoKeyField v c) (RestrictionHolder v c) a', v ~ v', c ~ c') => Expression (AutoKeyField v c) v' c' where
-  wrap = ExprField
+  toExpression = ExprField
 
 instance (PersistEntity v, Constructor c, FieldLike (u (UniqueMarker v)) (RestrictionHolder v c) a', c' ~ UniqueConstr (Key v' (Unique u)), v ~ v', IsUniqueKey (Key v' (Unique u)), c ~ c') => Expression (u (UniqueMarker v)) v' c' where
-  wrap = ExprField
+  toExpression = ExprField
 
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.
 -- Example: Int -> Field v c Int, but Entity -> Field v c (Entity / Key Entity)
@@ -94,7 +94,7 @@ infixr 3 =.
   , FieldLike f (RestrictionHolder v c) a'
   , Unifiable f b)
   => f -> b -> Update v c
-f =. b = Update f (wrap b)
+f =. b = Update f (toExpression b)
 
 -- | Boolean \"and\" operator.
 (&&.) :: Cond v c -> Cond v c -> Cond v c
@@ -121,9 +121,9 @@ a ||. b = Or a b
   => a -> b -> Cond v c
 
 infix 4 ==., <., <=., >., >=.
-a ==. b = Compare Eq (wrap a) (wrap b)
-a /=. b = Compare Ne (wrap a) (wrap b)
-a <.  b = Compare Lt (wrap a) (wrap b)
-a <=. b = Compare Le (wrap a) (wrap b)
-a >.  b = Compare Gt (wrap a) (wrap b)
-a >=. b = Compare Ge (wrap a) (wrap b)
+a ==. b = Compare Eq (toExpression a) (toExpression b)
+a /=. b = Compare Ne (toExpression a) (toExpression b)
+a <.  b = Compare Lt (toExpression a) (toExpression b)
+a <=. b = Compare Le (toExpression a) (toExpression b)
+a >.  b = Compare Gt (toExpression a) (toExpression b)
+a >=. b = Compare Ge (toExpression a) (toExpression b)
