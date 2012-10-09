@@ -486,7 +486,7 @@ showAlterColumn table (n, UpdateValue s) = (False, defaultPriority, concat
 
 -- | udt_name, character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type
 readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> DbType
-readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type) = (case typ of
+readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, _) = (case typ of
   "int4" -> DbInt32
   "int8" -> DbInt64
   "varchar" -> maybe DbString (DbOther . ("varchar"++) . wrap . show) character_maximum_length
