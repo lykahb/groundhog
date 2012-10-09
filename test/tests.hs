@@ -52,7 +52,7 @@ mkPersist defaultCodegenConfig [groundhog|
       fields:
         - name: settable1
           dbName: sqlsettable1
-          typeName: varchar(50)
+          type: varchar(50)
           exprName: Settable1Fld
         - name: settableTuple
           embeddedType:
@@ -64,7 +64,7 @@ mkPersist defaultCodegenConfig [groundhog|
                   dbName: secondTupleElement
                 - name: val1
                   dbName: thirdTupleElement
-                  typeName: numeric(5)
+                  type: numeric(5)
               dbName: name
       uniques:
         - name: someconstraint
