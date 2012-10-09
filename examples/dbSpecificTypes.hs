@@ -8,10 +8,9 @@ import Database.Groundhog.Postgresql
 
 data Point = Point { pointX :: Int, pointY :: Int } deriving Show
 
--- PostgreSQL keeps point in format "(x,y)"
+-- PostgreSQL keeps point in format "(x,y)". This instance relies on the correspondence between Haskell tuple format and PostgreSQL point format.
 instance PrimitivePersistField Point where
-  toPrimitivePersistValue _ (Point x y) = PersistString $ "(" ++ show x ++ "," ++ show y ++ ")"
-  -- Crude parsing. Rely on the correspondence between Haskell tuple format and PostgreSQL point format.
+  toPrimitivePersistValue _ (Point x y) = PersistString $ show (x, y)
   fromPrimitivePersistValue _ (PersistString a) = let (x, y) = read a in Point x y
   fromPrimitivePersistValue _ (PersistByteString a) = let (x, y) = read (unpack a) in Point x y
 
@@ -29,12 +28,12 @@ mkPersist defaultCodegenConfig [groundhog|
     - name: MobilePhone
       fields:
         - name: number
-          typeName: varchar(13)
+          type: varchar(13)
         - name: prepaidMoney
-          typeName: money
+          type: money
 # We don't need to put "typeName: point" for location because the dbType definition already has the required type
         - name: ipAddress
-          typeName: inet
+          type: inet
 |]
 
 main = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ do
@@ -44,5 +43,5 @@ main = withPostgresqlConn "dbname=test user=test password=test host=localhost" .
   -- This will output the mobile phone data with money rounded to two fractional digits
   get k >>= liftIO . print
   liftIO $ putStrLn "This insert will make PostgreSQL throw an exception:"
-  -- PGRES_FATAL_ERROR: ERROR:  value too long for type character varying(13)\n"}
+  -- PGRES_FATAL_ERROR: ERROR:  value too long for type character varying(13)
   insert $ phone {number = "Phone number is too long now"}
