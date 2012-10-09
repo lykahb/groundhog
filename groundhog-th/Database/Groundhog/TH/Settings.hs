@@ -114,7 +114,7 @@ data PSConstructorDef = PSConstructorDef {
 data PSFieldDef = PSFieldDef {
     psFieldName :: String -- bar
   , psDbFieldName :: Maybe String -- SQLbar
-  , psDbTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
+  , psDbTypeName :: Maybe String -- inet, NUMERIC(5,2), VARCHAR(50)
   , psExprName :: Maybe String -- BarField
   , psEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
 } deriving Show
@@ -226,11 +226,11 @@ instance FromJSON UniqueType where
       _ -> fail "parseJSON: UniqueType must be either \"constraint\" or \"index\""
 
 instance FromJSON PSFieldDef where
-  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "typeName" <*> v .:? "exprName" <*> v .:? "embeddedType"
+  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType"
   parseJSON _          = mzero
 
 instance FromJSON PSEmbeddedFieldDef where
-  parseJSON (Object v) = PSEmbeddedFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "typeName" <*> v .:? "embeddedType"
+  parseJSON (Object v) = PSEmbeddedFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "embeddedType"
   parseJSON _          = mzero
 
 instance FromJSON PSUniqueKeyDef where

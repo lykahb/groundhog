@@ -301,7 +301,7 @@ validateField :: THFieldDef -> Either String ()
 validateField fDef = do
   assertSpaceFree (thExprName fDef) "field expr name"
   when (isJust (thDbTypeName fDef) && isJust (thEmbeddedDef fDef)) $
-    fail $ "A field may not have both typeName and embeddedType: " ++ show (thFieldName fDef)
+    fail $ "A field may not have both type and embeddedType: " ++ show (thFieldName fDef)
 
 validateEmbedded :: THEmbeddedDef -> Either String THEmbeddedDef
 validateEmbedded def = do
@@ -369,11 +369,27 @@ firstLetter f s = f (head s):tail s
 -- You can create your own embedded types and adjust the fields names of an existing embedded type individually for any place where it is used.
 -- 
 -- Unless the property is marked as mandatory, it can be omitted. In this case value created by the NamingStyle will be used.
--- The example below has all properties set explicitly.
 --
 -- @
 --data Settable = First {foo :: String, bar :: Int} deriving (Eq, Show)
 --
+--    \-- The declaration with defaulted names
+--
+--mkPersist defaultCodegenConfig [groundhog|
+--entity: Settable                       # If we did not want to add a constraint, this line would be enough
+--keys:
+--  - name: someconstraint
+--constructors:
+--  - name: First
+--    uniques:
+--      - name: someconstraint
+--        fields: [foo, bar]
+-- |]
+-- @
+--
+-- Which is equivalent to the example below that has all properties set explicitly.
+--
+-- @
 --mkPersist defaultCodegenConfig [groundhog|
 --definitions:                           # First level key whose value is a list of definitions. It can be considered an optional header.
 --                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space. See full definition at http://yaml.org/spec/1.2/spec.html.
@@ -395,31 +411,18 @@ firstLetter f s = f (head s):tail s
 --        phantomName: FooBarConstructor # Constructor phantom type name used to guarantee type safety
 --        dbName: First                  # Name of constructor table which is created only for datatypes with multiple constructors
 --        fields:                        # List of constructor fields. If you don't change a field, you can omit it
---          - name: foo
+--          - name: foo                  # The name as in constructor record. If constructor is not a record, the name is created by 'mkNormalFieldName'. For example, the fields in constructor SomeConstr would have names someConstr0 and someConstr1 by default.
 --            dbName: foo                # Column name
---            thExprName: FooField         # Name of a field used in expressions
+--            thExprName: FooField       # Name of a field used in expressions
+--            \# type: varchar            # This would result in having field type DbOther \"varchar\" instead of DbString. Value of this attribute will be used by DB backend for migration
 --          - name: bar
 --            dbName: bar
 --            thExprName: BarField
+--                                       # For some databases \"type: integer\" would be appropriate
 --        uniques:
 --          - name: someconstraint
 --            type: constraint           # The type can be either \"constraint\" or \"index\"
 --            fields: [foo, bar]         # List of constructor parameter names. Not DB names(!)
--- |]
--- @
---
--- which is equivalent to the declaration with defaulted names
---
--- @
---mkPersist defaultCodegenConfig [groundhog|
---entity: Settable                       # If we did not want to add a constraint, this line would be enough
---keys:
---  - name: someconstraint
---constructors:
---  - name: First
---    uniques:
---      - name: someconstraint
---        fields: [foo, bar]
 -- |]
 -- @
 --
