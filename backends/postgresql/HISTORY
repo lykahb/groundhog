@@ -1,0 +1,12 @@
+0.2.0
+* database indexes
+* support DB-specific column types
+
+0.1.0.2
+* removed overly restrictive upper bound for bytestring package
+
+0.1.0.1
+* removed overly restrictive upper bound for containers package
+
+0.1.0
+The first release.

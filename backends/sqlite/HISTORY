@@ -1,0 +1,19 @@
+0.2.0
+* database indexes
+* support DB-specific column types
+
+0.1.0.2
+* removed overly restrictive upper bound for bytestring package
+* support zoned time
+* merged changes from direct-sqlite
+
+0.1.0.1
+* removed overly restrictive upper bound for containers package
+
+0.1.0
+The library supports new features of groundhog-0.1.0: composite keys, projections, etc.
+* updated sqlite3 C sources to 3.7.13
+* migration analyzes schema instead of comparing CREATE statements as strings
+
+0.0.1
+The first release.

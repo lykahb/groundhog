@@ -1,0 +1,22 @@
+0.2
+* database indexes
+* support DB-specific column types
+* renaming and refactoring
+
+0.1.0.2
+* removed overly restrictive upper bound for bytestring package
+
+0.1.0.1
+* compatibility with GHC 7.6
+
+0.1.0
+The library was almost completely overhauled.
+* support for embedded datatypes
+* new syntax for select
+* embedded datatypes
+* composite foreign keys and natural keys
+* projections of datatype fields
+* codegeneration modules are moved to groundhog-th package
+
+0.0.1
+The first release. It has support for polymorphic datatypes and sum types.

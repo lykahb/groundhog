@@ -1,0 +1,17 @@
+0.2
+* improvements of YAML parsing error reporting
+* database indexes
+* support DB-specific column types
+
+0.1.0.3
+* removed upper bound for bytestring
+* support embedded datatypes as part of an unique constraint
+
+0.1.0.2
+* removed upper bound for yaml
+
+0.1.0.1
+* removed upper bound for containers
+
+0.1.0
+The first release. The modules were moved from the groundhog package.
