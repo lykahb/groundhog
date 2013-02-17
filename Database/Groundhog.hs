@@ -56,8 +56,7 @@ import Database.Groundhog.Core as G
   , (~>)
   , limitTo
   , offsetBy
-  , orderBy
-  , toArith)
+  , orderBy)
 import Database.Groundhog.Expression as G
 import Database.Groundhog.Generic as G
   ( createMigration

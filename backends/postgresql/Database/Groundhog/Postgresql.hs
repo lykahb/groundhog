@@ -6,6 +6,7 @@ module Database.Groundhog.Postgresql
     , runPostgresqlConn
     , Postgresql
     , module Database.Groundhog
+    , module Database.Groundhog.Generic.Sql.Functions
     ) where
 
 import Database.Groundhog
@@ -13,7 +14,8 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
-import Database.Groundhog.Generic.Sql.String
+import Database.Groundhog.Generic.Sql
+import Database.Groundhog.Generic.Sql.Functions
 import qualified Database.Groundhog.Generic.PersistBackendHelpers as H
 
 import qualified Database.PostgreSQL.Simple as PG
@@ -39,8 +41,6 @@ import Data.IORef
 import Data.List (groupBy, intercalate)
 import Data.Monoid
 import Data.Conduit.Pool
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
 import Data.Time.LocalTime (localTimeToUTC, utc)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -49,6 +49,9 @@ newtype Postgresql = Postgresql PG.Connection
 
 instance DbDescriptor Postgresql where
   type AutoKeyType Postgresql = Int64
+  type QueryRaw Postgresql = Snippet Postgresql
+
+instance SqlDb Postgresql
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgresql m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
@@ -143,7 +146,7 @@ insert' v = do
       executeRaw' cQuery $ rowid:(tail vals)
       pureFromPersistValue [rowid]
 
-insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> StringS
+insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> Utf8
 insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning where
   (fields, returning) = case constrAutoKeyName c of
     Just idName | withId    -> ((idName, dbType (0 :: Int64)):constrParams c, mempty)
@@ -183,24 +186,24 @@ getKey pop = pop >>= \(Just [k]) -> return k
 
 ----------
 
-executeRaw' :: MonadIO m => StringS -> [PersistValue] -> DbPersist Postgresql m ()
+executeRaw' :: MonadIO m => Utf8 -> [PersistValue] -> DbPersist Postgresql m ()
 executeRaw' query vals = do
-  --liftIO $ print $ fromStringS query ""
+  --liftIO $ print $ fromUtf8 query ""
   Postgresql conn <- DbPersist ask
   let stmt = getStatement query
   liftIO $ do
     _ <- PG.execute conn stmt (map P vals)
     return ()
 
-renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> Maybe (RenderS StringS)
-renderCond' = renderCond proxy escapeS renderEquals renderNotEquals where
+renderCond' :: Cond Postgresql r -> Maybe (RenderS Postgresql r)
+renderCond' = renderCond escapeS renderEquals renderNotEquals where
   renderEquals a b = a <> " IS NOT DISTINCT FROM " <> b
   renderNotEquals a b = a <> " IS DISTINCT FROM " <> b
 
-escapeS :: StringS -> StringS
+escapeS :: Utf8 -> Utf8
 escapeS a = let q = fromChar '"' in q <> a <> q
 
-delim' :: StringS
+delim' :: Utf8
 delim' = fromChar delim
 
 toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m [PersistValue]
@@ -489,8 +492,8 @@ readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe Stri
 readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, _) = (case typ of
   "int4" -> DbInt32
   "int8" -> DbInt64
-  "varchar" -> maybe DbString (DbOther . ("varchar"++) . wrap . show) character_maximum_length
-  "numeric" -> DbOther $ "numeric" ++ maybe "" wrap attrs where
+  "varchar" -> maybe DbString (dbOther . ("varchar"++) . wrap . show) character_maximum_length
+  "numeric" -> dbOther $ "numeric" ++ maybe "" wrap attrs where
     attrs = liftM2 (\a b -> if b == 0 then show a else show a ++ ", " ++ show b) numeric_precision numeric_scale
   "date" -> DbDay
   "bool" -> DbBool
@@ -500,9 +503,10 @@ readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, dat
   "float4" -> DbReal
   "float8" -> DbReal
   "bytea" -> DbBlob
-  a -> DbOther a) where
+  a -> dbOther a) where
+    dbOther = DbOther . OtherTypeDef . const
     wrap x = "(" ++ x ++ ")"
-    mkDate t name = maybe t (DbOther . (name++) . wrap . show) datetime_precision'
+    mkDate t name = maybe t (dbOther . (name++) . wrap . show) datetime_precision'
     defDateTimePrec = 6
     datetime_precision' = datetime_precision >>= \p -> if p == defDateTimePrec then Nothing else Just p
 
@@ -517,7 +521,7 @@ showSqlType DbTime = "TIME"
 showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
 showSqlType DbBlob = "BYTEA"
-showSqlType (DbOther name) = name
+showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = showSqlType DbInt64
 showSqlType (DbEntity Nothing _) = showSqlType DbInt64
@@ -560,13 +564,13 @@ mainTableId = "id"
 escape :: String -> String
 escape s = '\"' : s ++ "\""
   
-getStatement :: StringS -> PG.Query
-getStatement sql = PG.Query $ T.encodeUtf8 $ T.pack $ fromStringS sql ""
+getStatement :: Utf8 -> PG.Query
+getStatement sql = PG.Query $ fromUtf8 sql
 
-queryRawTyped' :: (MonadBaseControl IO m, MonadIO m) => StringS -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRawTyped' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRawTyped' query _ vals f = queryRaw' query vals f
 
-queryRaw' :: (MonadBaseControl IO m, MonadIO m) => StringS -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRaw' query vals f = do
   Postgresql conn <- DbPersist ask
   rawquery <- liftIO $ PG.formatQuery conn (getStatement query) (map P vals)
@@ -590,7 +594,7 @@ queryRaw' query vals f = do
             merr <- LibPQ.errorMessage rawconn
             fail $ "Postgresql.withStmt': bad result status " ++
                    show status ++ " (" ++ show msg ++ ")" ++
-                   maybe "" ((". Error message: "++) . unpack) merr
+                   maybe "" ((". Error message: " ++) . unpack) merr
 
         -- Get number and type of columns
         cols <- LibPQ.nfields ret
@@ -626,16 +630,16 @@ queryRaw' query vals f = do
 newtype P = P PersistValue
 
 instance PGTF.ToField P where
-    toField (P (PersistString t))        = PGTF.toField t
-    toField (P (PersistByteString bs)) = PGTF.toField (PG.Binary bs)
-    toField (P (PersistInt64 i))       = PGTF.toField i
-    toField (P (PersistDouble d))      = PGTF.toField d
-    toField (P (PersistBool b))        = PGTF.toField b
-    toField (P (PersistDay d))         = PGTF.toField d
-    toField (P (PersistTimeOfDay t))   = PGTF.toField t
-    toField (P (PersistUTCTime t))     = PGTF.toField t
-    toField (P (PersistZonedTime (ZT t))) = PGTF.toField t
-    toField (P PersistNull)            = PGTF.toField PG.Null
+  toField (P (PersistString t))         = PGTF.toField t
+  toField (P (PersistByteString bs))    = PGTF.toField (PG.Binary bs)
+  toField (P (PersistInt64 i))          = PGTF.toField i
+  toField (P (PersistDouble d))         = PGTF.toField d
+  toField (P (PersistBool b))           = PGTF.toField b
+  toField (P (PersistDay d))            = PGTF.toField d
+  toField (P (PersistTimeOfDay t))      = PGTF.toField t
+  toField (P (PersistUTCTime t))        = PGTF.toField t
+  toField (P (PersistZonedTime (ZT t))) = PGTF.toField t
+  toField (P PersistNull)               = PGTF.toField PG.Null
 
 type Getter a = PG.Field -> Maybe ByteString -> Ok a
 

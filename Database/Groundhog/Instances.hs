@@ -116,17 +116,6 @@ instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersis
     (e, rest4) = fromPurePersistValues p rest3
     in ((a, b, c, d, e), rest4)
 
-instance Numeric Int
-instance Numeric Int8
-instance Numeric Int16
-instance Numeric Int32
-instance Numeric Int64
-instance Numeric Word8
-instance Numeric Word16
-instance Numeric Word32
-instance Numeric Word64
-instance Numeric Double
-
 instance PrimitivePersistField String where
   toPrimitivePersistValue _ s = PersistString s
   fromPrimitivePersistValue _ (PersistString s) = s
@@ -458,50 +447,54 @@ instance (DbDescriptor db, PersistEntity v) => PersistField (KeyForBackend db v)
   fromPersistValues = primFromPersistValue
   dbType a = dbType ((undefined :: KeyForBackend db v -> v) a)
 
-instance (PersistEntity v, Constructor c, PersistField a) => Projection (Field v c a) (RestrictionHolder v c) a where
-  projectionFieldChains f = (fieldChain f:)
+instance (PersistEntity v, Constructor c, PersistField a) => Projection (Field v c a) db (RestrictionHolder v c) a where
+  projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c, PersistField a) => Projection (SubField v c a) (RestrictionHolder v c) a where
-  projectionFieldChains f = (fieldChain f:)
+instance (PersistEntity v, Constructor c, PersistField a) => Projection (SubField v c a) db (RestrictionHolder v c) a where
+  projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c, PersistField (Key v BackendSpecific)) => Projection (AutoKeyField v c) (RestrictionHolder v c) (Key v BackendSpecific) where
-  projectionFieldChains f = (fieldChain f:)
+instance PersistField a => Projection (Expr db r a) db r a where
+  projectionExprs e = (ExprRaw e:)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c) => Projection (c (ConstructorMarker v)) (RestrictionHolder v c) v where
-  projectionFieldChains c = (chains++) where
+instance (PersistEntity v, Constructor c, PersistField (Key v BackendSpecific)) => Projection (AutoKeyField v c) db (RestrictionHolder v c) (Key v BackendSpecific) where
+  projectionExprs f = (ExprField (fieldChain f):)
+  projectionResult _ = fromPersistValues
+
+instance (PersistEntity v, Constructor c) => Projection (c (ConstructorMarker v)) db (RestrictionHolder v c) v where
+  projectionExprs c = ((map ExprField chains)++) where
     chains = map (\f -> (f, [])) $ constrParams constr
     e = entityDef ((undefined :: c (ConstructorMarker v) -> v) c)
     constr = constructors e !! phantomConstrNum c
   projectionResult c xs = toSinglePersistValue (phantomConstrNum c) >>= \cNum -> fromEntityPersistValues (cNum:xs)
 
 instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), r ~ RestrictionHolder v (UniqueConstr (Key v (Unique u))))
-      => Projection (u (UniqueMarker v)) r (Key v (Unique u)) where
-  projectionFieldChains u = (chains++) where
+      => Projection (u (UniqueMarker v)) db r (Key v (Unique u)) where
+  projectionExprs u = ((map ExprField chains)++) where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chains = map (\f -> (f, [])) uFields
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
   projectionResult _ = pureFromPersistValue
 
-instance (Projection a1 r a1', Projection a2 r a2') => Projection (a1, a2) r (a1', a2') where
-  projectionFieldChains (a1, a2) = projectionFieldChains a1 . projectionFieldChains a2
+instance (Projection a1 db r a1', Projection a2 db r a2') => Projection (a1, a2) db r (a1', a2') where
+  projectionExprs (a1, a2) = projectionExprs a1 . projectionExprs a2
   projectionResult (a', b') xs = do
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
     return ((a, b), rest1)
 
-instance (Projection a1 r a1', Projection a2 r a2', Projection a3 r a3') => Projection (a1, a2, a3) r (a1', a2', a3') where
-  projectionFieldChains (a1, a2, a3) = projectionFieldChains a1 . projectionFieldChains a2 . projectionFieldChains a3
+instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3') => Projection (a1, a2, a3) db r (a1', a2', a3') where
+  projectionExprs (a1, a2, a3) = projectionExprs a1 . projectionExprs a2 . projectionExprs a3
   projectionResult (a', b', c') xs = do
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
     (c, rest2) <- projectionResult c' rest1
     return ((a, b, c), rest2)
 
-instance (Projection a1 r a1', Projection a2 r a2', Projection a3 r a3', Projection a4 r a4') => Projection (a1, a2, a3, a4) r (a1', a2', a3', a4') where
-  projectionFieldChains (a1, a2, a3, a4) = projectionFieldChains a1 . projectionFieldChains a2 . projectionFieldChains a3 . projectionFieldChains a4
+instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3', Projection a4 db r a4') => Projection (a1, a2, a3, a4) db r (a1', a2', a3', a4') where
+  projectionExprs (a1, a2, a3, a4) = projectionExprs a1 . projectionExprs a2 . projectionExprs a3 . projectionExprs a4
   projectionResult (a', b', c', d') xs = do
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
@@ -509,8 +502,8 @@ instance (Projection a1 r a1', Projection a2 r a2', Projection a3 r a3', Project
     (d, rest3) <- projectionResult d' rest2
     return ((a, b, c, d), rest3)
 
-instance (Projection a1 r a1', Projection a2 r a2', Projection a3 r a3', Projection a4 r a4', Projection a5 r a5') => Projection (a1, a2, a3, a4, a5) r (a1', a2', a3', a4', a5') where
-  projectionFieldChains (a1, a2, a3, a4, a5) = projectionFieldChains a1 . projectionFieldChains a2 . projectionFieldChains a3 . projectionFieldChains a4 . projectionFieldChains a5
+instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3', Projection a4 db r a4', Projection a5 db r a5') => Projection (a1, a2, a3, a4, a5) db r (a1', a2', a3', a4', a5') where
+  projectionExprs (a1, a2, a3, a4, a5) = projectionExprs a1 . projectionExprs a2 . projectionExprs a3 . projectionExprs a4 . projectionExprs a5
   projectionResult (a', b', c', d', e') xs = do
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
@@ -519,20 +512,28 @@ instance (Projection a1 r a1', Projection a2 r a2', Projection a3 r a3', Project
     (e, rest4) <- projectionResult e' rest3
     return ((a, b, c, d, e), rest4)
 
-instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) r a') => FieldLike (AutoKeyField v c) r a' where
+instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) db r a') => Assignable (AutoKeyField v c) db r a'
+
+instance (PersistEntity v, Constructor c, Projection (SubField v c a) db r a') => Assignable (SubField v c a) db r a'
+
+instance (PersistEntity v, Constructor c, Projection (Field v c a) db r a') => Assignable (Field v c a) db r a'
+
+instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) db r a') => Assignable (u (UniqueMarker v)) db r a'
+
+instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) db r a') => FieldLike (AutoKeyField v c) db r a' where
   fieldChain a = chain where
     chain = maybe (error "fieldChain AutoKeyField: constructor constrAutoKeyName == Nothing") (\idName -> ((idName, DbEntity Nothing e), [])) $ constrAutoKeyName constr
     e = entityDef ((undefined :: AutoKeyField v c -> v) a)
     cNum = phantomConstrNum ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
     constr = constructors e !! cNum
 
-instance (PersistEntity v, Constructor c, Projection (SubField v c a) r a') => FieldLike (SubField v c a) r a' where
+instance (PersistEntity v, Constructor c, Projection (SubField v c a) db r a') => FieldLike (SubField v c a) db r a' where
   fieldChain (SubField a) = a
 
-instance (PersistEntity v, Constructor c, Projection (Field v c a) r a') => FieldLike (Field v c a) r a' where
+instance (PersistEntity v, Constructor c, Projection (Field v c a) db r a') => FieldLike (Field v c a) db r a' where
   fieldChain = entityFieldChain
 
-instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) r a') => FieldLike (u (UniqueMarker v)) r a' where
+instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) db r a') => FieldLike (u (UniqueMarker v)) db r a' where
   fieldChain u = chain where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chain = (("will_be_ignored", DbEmbedded $ EmbeddedDef True $ uFields), [])

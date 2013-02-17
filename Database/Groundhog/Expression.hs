@@ -12,6 +12,8 @@
 
 module Database.Groundhog.Expression
   ( Expression(..)
+  , Unifiable
+  , ExpressionOf
   , (=.)
   , (&&.), (||.)
   , (==.), (/=.), (<.), (<=.), (>.), (>=.)
@@ -21,26 +23,30 @@ import Database.Groundhog.Core
 import Database.Groundhog.Instances ()
 
 -- | Instances of this type can be converted to 'Expr'. It is useful for uniform manipulation over fields and plain values
-class Expression a v c where
-  toExpression :: a -> Expr v c a
+class Expression db r a where
+  toExpr :: a -> UntypedExpr db r
 
-instance PurePersistField a => Expression a v c where
-  toExpression = ExprPure
+class (Expression db r a, Unifiable a a') => ExpressionOf db r a a'
 
-instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (Arith v c a) v' c' where
-  toExpression = ExprArith
+instance (Expression db r a, Unifiable a a') => ExpressionOf db r a a'
 
-instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (Field v c a) v' c' where
-  toExpression = ExprField
+instance PurePersistField a => Expression db r a where
+  toExpr = ExprPure
 
-instance (PersistEntity v, Constructor c, PersistField a, v ~ v', c ~ c') => Expression (SubField v c a) v' c' where
-  toExpression = ExprField
+instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
+  toExpr = ExprRaw
 
-instance (PersistEntity v, Constructor c, PersistField (Key v' BackendSpecific), FieldLike (AutoKeyField v c) (RestrictionHolder v c) a', v ~ v', c ~ c') => Expression (AutoKeyField v c) v' c' where
-  toExpression = ExprField
+instance (PersistEntity v, Constructor c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
+  toExpr = ExprField . fieldChain
 
-instance (PersistEntity v, Constructor c, FieldLike (u (UniqueMarker v)) (RestrictionHolder v c) a', c' ~ UniqueConstr (Key v' (Unique u)), v ~ v', IsUniqueKey (Key v' (Unique u)), c ~ c') => Expression (u (UniqueMarker v)) v' c' where
-  toExpression = ExprField
+instance (PersistEntity v, Constructor c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (SubField v c a) where
+  toExpr = ExprField . fieldChain
+
+instance (PersistEntity v, Constructor c, PersistField (Key v BackendSpecific), FieldLike (AutoKeyField v c) db r' a') => Expression db r' (AutoKeyField v c) where
+  toExpr = ExprField . fieldChain
+
+instance (PersistEntity v, FieldLike (u (UniqueMarker v)) db r' a', IsUniqueKey (Key v (Unique u))) => Expression db r' (u (UniqueMarker v)) where
+  toExpr = ExprField . fieldChain
 
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.
 -- Example: Int -> Field v c Int, but Entity -> Field v c (Entity / Key Entity)
@@ -53,9 +59,9 @@ class Normalize counterpart t r | t -> r
 instance (ExtractValue t (isPlain, r), NormalizeValue counterpart isPlain r r') => Normalize counterpart t r'
 
 class ExtractValue t r | t -> r
-instance r ~ (HFalse, a) => ExtractValue (Arith v c a) r
 instance r ~ (HFalse, a) => ExtractValue (Field v c a) r
 instance r ~ (HFalse, a) => ExtractValue (SubField v c a) r
+instance r ~ (HFalse, a) => ExtractValue (Expr db r' a) r
 instance r ~ (HFalse, Key v BackendSpecific) => ExtractValue (AutoKeyField v c) r
 instance r ~ (HFalse, Key v (Unique u)) => ExtractValue (u (UniqueMarker v)) r
 instance r ~ (HTrue, a) => ExtractValue a r
@@ -90,17 +96,17 @@ type instance Not HFalse = HTrue
 -- | Update field
 infixr 3 =.
 (=.) ::
-  ( Expression b v c
-  , FieldLike f (RestrictionHolder v c) a'
+  ( FieldLike f db r a'
+  , Expression db r b
   , Unifiable f b)
-  => f -> b -> Update v c
-f =. b = Update f (toExpression b)
+  => f -> b -> Update db r
+f =. b = Update f (toExpr b)
 
 -- | Boolean \"and\" operator.
-(&&.) :: Cond v c -> Cond v c -> Cond v c
+(&&.) :: Cond db r -> Cond db r -> Cond db r
 
 -- | Boolean \"or\" operator.  
-(||.) :: Cond v c -> Cond v c -> Cond v c
+(||.) :: Cond db r -> Cond db r -> Cond db r
 
 infixr 3 &&.
 a &&. b = And a b
@@ -109,21 +115,21 @@ infixr 2 ||.
 a ||. b = Or a b
 
 (==.), (/=.) ::
-  ( Expression a v c
-  , Expression b v c
+  ( Expression db r a
+  , Expression db r b
   , Unifiable a b)
-  => a -> b -> Cond v c
+  => a -> b -> Cond db r
 
 (<.), (<=.), (>.), (>=.) ::
-  ( Expression a v c
-  , Expression b v c
+  ( Expression db r a
+  , Expression db r b
   , Unifiable a b)
-  => a -> b -> Cond v c
+  => a -> b -> Cond db r
 
 infix 4 ==., <., <=., >., >=.
-a ==. b = Compare Eq (toExpression a) (toExpression b)
-a /=. b = Compare Ne (toExpression a) (toExpression b)
-a <.  b = Compare Lt (toExpression a) (toExpression b)
-a <=. b = Compare Le (toExpression a) (toExpression b)
-a >.  b = Compare Gt (toExpression a) (toExpression b)
-a >=. b = Compare Ge (toExpression a) (toExpression b)
+a ==. b = Compare Eq (toExpr a) (toExpr b)
+a /=. b = Compare Ne (toExpr a) (toExpr b)
+a <.  b = Compare Lt (toExpr a) (toExpr b)
+a <=. b = Compare Le (toExpr a) (toExpr b)
+a >.  b = Compare Gt (toExpr a) (toExpr b)
+a >=. b = Compare Ge (toExpr a) (toExpr b)

@@ -14,7 +14,7 @@ module Database.Groundhog.Generic
   , silentMigrationLogger
   , defaultMigrationLogger
   , failMessage
-  -- * Helper functions defining *PersistValue instances
+  -- * Helper functions for defining *PersistValue instances
   , primToPersistValue
   , primFromPersistValue
   , pureToPersistValue
@@ -165,7 +165,7 @@ applyEmbeddedDbTypeSettings settings typ = (case typ of
     Just (rest, PSEmbeddedFieldDef _ dbName dbTypeName subs) -> (fromMaybe fName dbName, typ'):go rest fs where
       typ' = case (subs, dbTypeName) of
         (Just e, _) -> applyEmbeddedDbTypeSettings e fType
-        (_, Just typeName) -> DbOther typeName
+        (_, Just typeName) -> DbOther (OtherTypeDef $ const typeName)
         _ -> fType
     Nothing -> f:go st fs
   find :: String -> [PSEmbeddedFieldDef] -> Maybe ([PSEmbeddedFieldDef], PSEmbeddedFieldDef)

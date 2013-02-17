@@ -28,14 +28,13 @@ module Database.Groundhog.Core
   , ExprRelation(..)
   , Update(..)
   , (~>)
-  , toArith
   , FieldLike(..)
+  , Assignable
   , SubField(..)
   , AutoKeyField(..)
   , FieldChain
   , NeverNull
-  , Numeric
-  , Arith(..)
+  , UntypedExpr(..)
   , Expr(..)
   , Order(..)
   , HasSelectOptions(..)
@@ -47,6 +46,7 @@ module Database.Groundhog.Core
   , DbType(..)
   , EntityDef(..)
   , EmbeddedDef(..)
+  , OtherTypeDef(..)
   , ConstructorDef(..)
   , Constructor(..)
   , IsUniqueKey(..)
@@ -120,26 +120,36 @@ data HFalse
 data HTrue
 
 -- | Represents condition for a query.
-data Cond v (c :: (* -> *) -> *) =
-    And (Cond v c) (Cond v c)
-  | Or  (Cond v c) (Cond v c)
-  | Not (Cond v c)
-  | forall a b . Compare ExprRelation (Expr v c a) (Expr v c b)
+data Cond db r =
+    And (Cond db r) (Cond db r)
+  | Or  (Cond db r) (Cond db r)
+  | Not (Cond db r)
+  | Compare ExprRelation (UntypedExpr db r) (UntypedExpr db r)
+  | CondRaw (QueryRaw db r)
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
-data Update v c = forall f a b . (FieldLike f (RestrictionHolder v c) a) => Update f (Expr v c b)
+data Update db r = forall f a . Assignable f db r a => Update f (UntypedExpr db r)
 
 -- | Defines sort order of a result-set
-data Order v c = forall a f . (FieldLike f (RestrictionHolder v c) a) => Asc  f
-               | forall a f . (FieldLike f (RestrictionHolder v c) a) => Desc f
+data Order db r = forall a f . (FieldLike f db r a) => Asc  f
+                | forall a f . (FieldLike f db r a) => Desc f
 
+-- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
 type FieldChain = ((String, DbType), [(String, EmbeddedDef)])
 
--- | Generalises data that can occur in expressions (so far there are Field and SubField).
-class Projection f r a => FieldLike f r a | f -> r a where
-  -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in Right [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
-  -- Function fieldChain can be simplified to f v c a -> [(String, DbType)]. Datatype Either is used for optimisation of the common case, eg Field v c Int.
+-- | Any data that can be fetched from a database
+class PersistField a => Projection p db r a | p -> db r a where
+  -- | It returns multiple expressions that can be transformed into values which can be selected. Difflist is used for concatenation efficiency.
+  projectionExprs :: p -> [UntypedExpr db r] -> [UntypedExpr db r]
+  -- | It is like 'fromPersistValues'. However, we cannot use it for projections in all cases. For the 'PersistEntity' instances 'fromPersistValues' expects entity id instead of the entity values.
+  projectionResult :: PersistBackend m => p -> [PersistValue] -> m (a, [PersistValue])
+
+-- | This subset of Projection instances is for things that behave like fields. Namely, they can occur in condition expressions (for example, Field and SubField) and on the left side of update statements. For example \"lower(field)\" is a valid Projection, but not Field like because it cannot be on the left side. Datatypes that index PostgreSQL arrays \"arr[5]\" or access composites \"(comp).subfield\" are valid instances of Assignable.
+class Projection f db r a => Assignable f db r a | f -> r a
+
+-- | This subset of Assignable is for plain database fields.
+class Assignable f db r a => FieldLike f db r a | f -> r a where
   fieldChain :: f -> FieldChain
 
 class PersistField v => Embedded v where
@@ -148,14 +158,14 @@ class PersistField v => Embedded v where
 
 infixl 5 ~>
 -- | Accesses fields of the embedded datatypes. For example, @SomeField ==. (\"abc\", \"def\") ||. SomeField ~> Tuple2_0Selector ==. \"def\"@
-(~>) :: (PersistEntity v, Constructor c, FieldLike f (RestrictionHolder v c) a, Embedded a) => f -> Selector a a' -> SubField v c a'
+(~>) :: (PersistEntity v, Constructor c, FieldLike f db (RestrictionHolder v c) a, Embedded a) => f -> Selector a a' -> SubField v c a'
 field ~> sel = case fieldChain field of
   ((name, typ), prefix) -> case typ of
     DbEmbedded emb@(EmbeddedDef _ ts)             -> SubField (ts !! selectorNum sel, (name, emb):prefix)
     DbEntity (Just (emb@(EmbeddedDef _ ts), _)) _ -> SubField (ts !! selectorNum sel, (name, emb):prefix)
     other -> error $ "(~>): cannot get subfield of non-embedded type " ++ show other
 
-newtype SubField v (c :: (* -> *) -> *) a = SubField ((String, DbType), [(String, EmbeddedDef)])
+newtype SubField v (c :: (* -> *) -> *) a = SubField FieldChain
 
 -- | It can be used in expressions like a regular field. Note that the constructor should be specified for the condition.
 -- For example, @delete (AutoKeyField `asTypeOf` (undefined :: f v SomeConstructor) ==. k)@
@@ -165,47 +175,40 @@ data AutoKeyField v c where
 
 data RestrictionHolder v (c :: (* -> *) -> *)
 
--- | Any data that can be fetched from a database
-class Projection p r a | p -> r a where
-  -- | It is like a 'fieldChain' for many fields. Difflist is used for concatenation efficiency.
-  projectionFieldChains :: p -> [FieldChain] -> [FieldChain]
-  -- | It is like 'fromPersistValues'. However, we cannot use it for projections in all cases. For the 'PersistEntity' instances 'fromPersistValues' expects entity id instead of the entity values.
-  projectionResult :: PersistBackend m => p -> [PersistValue] -> m (a, [PersistValue])
-
-data SelectOptions v c hasLimit hasOffset hasOrder = SelectOptions {
-    condOptions   :: Cond v c
+data SelectOptions db r hasLimit hasOffset hasOrder = SelectOptions {
+    condOptions   :: Cond db r
   , limitOptions  :: Maybe Int
   , offsetOptions :: Maybe Int
-  , orderOptions  :: [Order v c]
+  , orderOptions  :: [Order db r]
   }
 
-class HasSelectOptions a v c | a -> v c where
+class HasSelectOptions a db r | a -> db r where
   type HasLimit a
   type HasOffset a
   type HasOrder a
-  getSelectOptions :: a -> SelectOptions v c (HasLimit a) (HasOffset a) (HasOrder a)
+  getSelectOptions :: a -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a)
 
-instance HasSelectOptions (Cond v c) v c where
-  type HasLimit (Cond v c) = HFalse
-  type HasOffset (Cond v c) = HFalse
-  type HasOrder (Cond v c) = HFalse
+instance HasSelectOptions (Cond db r) db r where
+  type HasLimit (Cond db r) = HFalse
+  type HasOffset (Cond db r) = HFalse
+  type HasOrder (Cond db r) = HFalse
   getSelectOptions a = SelectOptions a Nothing Nothing []
 
-instance HasSelectOptions (SelectOptions v c hasLimit hasOffset hasOrder) v c where
-  type HasLimit (SelectOptions v c hasLimit hasOffset hasOrder) = hasLimit
-  type HasOffset (SelectOptions v c hasLimit hasOffset hasOrder) = hasOffset
-  type HasOrder (SelectOptions v c hasLimit hasOffset hasOrder) = hasOrder
+instance HasSelectOptions (SelectOptions db r hasLimit hasOffset hasOrder) db r where
+  type HasLimit (SelectOptions db r hasLimit hasOffset hasOrder) = hasLimit
+  type HasOffset (SelectOptions db r hasLimit hasOffset hasOrder) = hasOffset
+  type HasOrder (SelectOptions db r hasLimit hasOffset hasOrder) = hasOrder
   getSelectOptions = id
 
-limitTo :: (HasSelectOptions a v c, HasLimit a ~ HFalse) => a -> Int -> SelectOptions v c HTrue (HasOffset a) (HasOrder a)
+limitTo :: (HasSelectOptions a db r, HasLimit a ~ HFalse) => a -> Int -> SelectOptions db r HTrue (HasOffset a) (HasOrder a)
 limitTo opts lim = case getSelectOptions opts of
   SelectOptions c _ off ord -> SelectOptions c (Just lim) off ord
 
-offsetBy :: (HasSelectOptions a v c, HasOffset a ~ HFalse) => a -> Int -> SelectOptions v c (HasLimit a) HTrue (HasOrder a)
+offsetBy :: (HasSelectOptions a db r, HasOffset a ~ HFalse) => a -> Int -> SelectOptions db r (HasLimit a) HTrue (HasOrder a)
 offsetBy opts off = case getSelectOptions opts of
   SelectOptions c lim _ ord -> SelectOptions c lim (Just off) ord
 
-orderBy :: (HasSelectOptions a v c, HasOrder a ~ HFalse) => a -> [Order v c] -> SelectOptions v c (HasLimit a) (HasOffset a) HTrue
+orderBy :: (HasSelectOptions a db r, HasOrder a ~ HFalse) => a -> [Order db r] -> SelectOptions db r (HasLimit a) (HasOffset a) HTrue
 orderBy opts ord = case getSelectOptions opts of
   SelectOptions c lim off _ -> SelectOptions c lim off ord
 
@@ -228,9 +231,12 @@ instance MonadBaseControl IO m => MonadBaseControl IO (DbPersist conn m) where
 runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
 runDbPersist = runReaderT . unDbPersist
 
-class PrimitivePersistField (AutoKeyType a) => DbDescriptor a where
+class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   -- | Type of the database default autoincremented key. For example, Sqlite has Int64
-  type AutoKeyType a
+  type AutoKeyType db
+  -- TODO: write better comment
+  -- | This is a query snippet that can be used as a raw part of a query. For example, it can be RenderS with SQL and PersistValues for relational databases, or part of BSON for MongoDB.
+  type QueryRaw db :: * -> *
 
 class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | A token which defines the DB type. For example, different monads working with Sqlite, return Sqlite type.
@@ -246,7 +252,7 @@ class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | Replace a record with the given autogenerated key. Result is undefined if the record does not exist.
   replace       :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> v -> m ()
   -- | Return a list of the records satisfying the condition
-  select        :: (PersistEntity v, Constructor c, HasSelectOptions opts v c)
+  select        :: (PersistEntity v, Constructor c, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
                 => opts -> m [v]
   -- | Return a list of all records. Order is undefined. It is useful for datatypes with multiple constructors.
   selectAll     :: PersistEntity v => m [(AutoKey v, v)]
@@ -255,17 +261,17 @@ class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | Fetch an entity from a database by its unique key
   getBy         :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => Key v (Unique u) -> m (Maybe v)
   -- | Update the records satisfying the condition
-  update        :: (PersistEntity v, Constructor c) => [Update v c] -> Cond v c -> m ()
+  update        :: (PersistEntity v, Constructor c) => [Update (PhantomDb m) (RestrictionHolder v c)] -> Cond (PhantomDb m) (RestrictionHolder v c) -> m ()
   -- | Remove the records satisfying the condition
-  delete        :: (PersistEntity v, Constructor c) => Cond v c -> m ()
+  delete        :: (PersistEntity v, Constructor c) => Cond (PhantomDb m) (RestrictionHolder v c) -> m ()
   -- | Remove the record with given key. No-op if the record does not exist
   deleteByKey   :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m ()
   -- | Count total number of records satisfying the condition
-  count         :: (PersistEntity v, Constructor c) => Cond v c -> m Int
+  count         :: (PersistEntity v, Constructor c) => Cond (PhantomDb m) (RestrictionHolder v c) -> m Int
   -- | Count total number of records with all constructors
   countAll      :: PersistEntity v => v -> m Int
   -- | Fetch projection of some fields
-  project       :: (PersistEntity v, Constructor c, Projection p (RestrictionHolder v c) a', HasSelectOptions opts v c)
+  project       :: (PersistEntity v, Constructor c, Projection p (PhantomDb m) (RestrictionHolder v c) a', HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
                 => p
                 -> opts
                 -> m [a']
@@ -356,7 +362,7 @@ data DbType = DbString
             | DbDayTime
             | DbDayTimeZoned
             | DbBlob         -- ^ ByteString
-            | DbOther String -- ^ Name for a database type
+            | DbOther OtherTypeDef
             -- More complex types
             | DbMaybe DbType
             | DbList String DbType -- ^ List table name and type of its argument
@@ -364,6 +370,15 @@ data DbType = DbString
             -- | Nothing means autokey, Just contains a unique key definition and a name of unique constraint.
             | DbEntity (Maybe (EmbeddedDef, String)) EntityDef
   deriving (Eq, Show)
+
+-- | Stores name for a database type
+newtype OtherTypeDef = OtherTypeDef ((DbType -> String) -> String)
+
+instance Eq OtherTypeDef where
+  OtherTypeDef f1 == OtherTypeDef f2 = f1 show == f2 show
+
+instance Show OtherTypeDef where
+  showsPrec p (OtherTypeDef f) = showParen (p > 10) $ showString "OtherTypeDef " . showsPrec 11 (f show)
 
 -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True).
 -- Value False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
@@ -391,60 +406,23 @@ instance Eq ZT where
 instance Ord ZT where
     ZT a `compare` ZT b = zonedTimeToUTC a `compare` zonedTimeToUTC b
 
--- | Arithmetic expressions which can include fields and literals
-data Arith v c a =
-    Plus  (Arith v c a) (Arith v c a)
-  | Minus (Arith v c a) (Arith v c a)
-  | Mult  (Arith v c a) (Arith v c a)
-  | Abs   (Arith v c a)
-  | forall f . (FieldLike f (RestrictionHolder v c) a) => ArithField f
-  | Lit   Int64
-
-instance (PersistEntity v, Constructor c) => Eq (Arith v c a) where
-  (Plus a1 b1)   == (Plus a2 b2)   = a1 == a2 && b1 == b2
-  (Minus a1 b1)  == (Minus a2 b2)  = a1 == a2 && b1 == b2
-  (Mult a1 b1)   == (Mult a2 b2)   = a1 == a2 && b1 == b2
-  (Abs a)        == (Abs b)        = a == b
-  (ArithField a) == (ArithField b) = fieldChain a == fieldChain b
-  (Lit a)        == (Lit b)        = a == b
-  _              == _              = False
-
-instance (PersistEntity v, Constructor c) => Show (Arith v c a) where
-  show (Plus a b)     = "Plus (" ++ show a ++ ") (" ++ show b ++ ")"
-  show (Minus a b)    = "Minus (" ++ show a ++ ") (" ++ show b ++ ")"
-  show (Mult a b)     = "Mult (" ++ show a ++ ") (" ++ show b ++ ")"
-  show (Abs a)        = "Abs (" ++ show a ++ ")"
-  show (ArithField a) = "ArithField " ++ show (fieldChain a)
-  show (Lit a)        = "Lit " ++ show a
-
-instance (PersistEntity v, Constructor c, Numeric a) => Num (Arith v c a) where
-  a + b       = Plus  a b
-  a - b       = Minus a b
-  a * b       = Mult  a b
-  abs         = Abs
-  signum      = error "no signum"
-  fromInteger = Lit . fromInteger
-  
--- | Convert field to an arithmetic value
-toArith :: (PersistEntity v, FieldLike f (RestrictionHolder v c) a') => f -> Arith v c a'
-toArith = ArithField
-
--- | Constraint for use in arithmetic expressions. 'Num' is not used to explicitly include only types supported by the library.
--- TODO: consider replacement with 'Num'
-class Numeric a
-
--- | Types which when converted to 'PersistValue' are never NULL.
+-- | Types which are never NULL when converted to 'PersistValue'.
 -- Consider the type @Maybe (Maybe a)@. Now Nothing is stored as NULL, so we cannot distinguish between Just Nothing and Nothing which is a problem.
 -- The purpose of this class is to ban the inner Maybe's.
 -- Maybe this class can be removed when support for inner Maybe's appears.
 class NeverNull a
 
--- | Used to uniformly represent fields, constants and arithmetic expressions.
--- A value should be converted to 'Expr' for usage in expressions
-data Expr v c a where
-  ExprField :: (PersistEntity v, FieldLike f (RestrictionHolder v c) a') => f -> Expr v c f
-  ExprArith :: PersistEntity v => Arith v c a -> Expr v c (Arith v c a)
-  ExprPure :: forall v c a . PurePersistField a => a -> Expr v c a
+-- | Used to uniformly represent fields, constants and more complex things, e.g., arithmetic expressions.
+-- A value should be converted to 'UntypedExpr' for usage in expressions
+data UntypedExpr db r where
+  ExprRaw :: forall db r a . PersistField a => Expr db r a -> UntypedExpr db r
+  ExprField :: FieldChain -> UntypedExpr db r
+  ExprPure :: forall db r a . PurePersistField a => a -> UntypedExpr db r
+
+-- | Expr with phantom type helps to keep type safety in complex expressions
+newtype Expr db r a = Expr (QueryRaw db r)
+instance Show (Expr db r a) where show _ = "Expr"
+instance Eq (Expr db r a) where (==) = error "(==): this instance Eq (Expr db r a) is made only for Num superclass constraint"
 
 -- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where

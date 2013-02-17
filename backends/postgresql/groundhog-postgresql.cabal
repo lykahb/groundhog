@@ -21,8 +21,10 @@ library
                    , monad-control           >= 0.3       && < 0.4
                    , containers              >= 0.2
                    , text                    >= 0.8       && < 0.12
+                   , attoparsec              >= 0.8.5.3
                    , pool-conduit            >= 0.1       && < 0.2
                    , time                    >= 1.1
     exposed-modules: Database.Groundhog.Postgresql
-    other-modules:   Database.Groundhog.Generic.Sql.String
+                     Database.Groundhog.Postgresql.Array
+                     Database.Groundhog.Postgresql.Geometry
     ghc-options:     -Wall -fno-warn-unused-do-bind

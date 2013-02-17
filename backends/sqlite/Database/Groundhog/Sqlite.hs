@@ -6,6 +6,7 @@ module Database.Groundhog.Sqlite
     , runSqliteConn
     , Sqlite
     , module Database.Groundhog
+    , module Database.Groundhog.Generic.Sql.Functions
     ) where
 
 import Database.Groundhog
@@ -13,7 +14,8 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
-import Database.Groundhog.Generic.Sql.Utf8
+import Database.Groundhog.Generic.Sql
+import Database.Groundhog.Generic.Sql.Functions
 import qualified Database.Groundhog.Generic.PersistBackendHelpers as H
 
 import qualified Database.Sqlite as S
@@ -41,6 +43,9 @@ data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
 
 instance DbDescriptor Sqlite where
   type AutoKeyType Sqlite = Int64
+  type QueryRaw Sqlite = Snippet Sqlite
+
+instance SqlDb Sqlite
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
@@ -254,7 +259,7 @@ showSqlType DbTime = "TIME"
 showSqlType DbDayTime = "TIMESTAMP"
 showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
 showSqlType DbBlob = "BLOB"
-showSqlType (DbOther name) = name
+showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = showSqlType DbInt64
 showSqlType (DbEntity Nothing _) = showSqlType DbInt64
@@ -270,26 +275,12 @@ readSqlType "TIME" = DbTime
 readSqlType "TIMESTAMP" = DbDayTime
 readSqlType "TIMESTAMP WITH TIME ZONE" = DbDayTimeZoned
 readSqlType "BLOB" = DbBlob
-readSqlType typ = DbOther typ
+readSqlType typ = DbOther $ OtherTypeDef $ const typ
 
 data Affinity = TEXT | NUMERIC | INTEGER | REAL | NONE deriving (Eq, Show)
 
 dbTypeAffinity :: DbType -> Affinity
-dbTypeAffinity DbString = TEXT
-dbTypeAffinity DbInt32 = INTEGER
-dbTypeAffinity DbInt64 = INTEGER
-dbTypeAffinity DbReal = REAL
-dbTypeAffinity DbBool = NUMERIC
-dbTypeAffinity DbDay = NUMERIC
-dbTypeAffinity DbTime = NUMERIC
-dbTypeAffinity DbDayTime = NUMERIC
-dbTypeAffinity DbDayTimeZoned = NUMERIC
-dbTypeAffinity DbBlob = NONE
-dbTypeAffinity (DbOther name) = readSqlTypeAffinity name
-dbTypeAffinity (DbMaybe t) = dbTypeAffinity t
-dbTypeAffinity (DbList _ _) = INTEGER
-dbTypeAffinity (DbEntity Nothing _) = INTEGER
-dbTypeAffinity t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
+dbTypeAffinity = readSqlTypeAffinity . showSqlType
 
 readSqlTypeAffinity :: String -> Affinity
 readSqlTypeAffinity typ = affinity where
@@ -498,8 +489,8 @@ escape s = '\"' : s ++ "\""
 escapeS :: Utf8 -> Utf8
 escapeS a = let q = fromChar '"' in q <> a <> q
 
-renderCond' :: (PersistEntity v, Constructor c) => Cond v c -> Maybe (RenderS Utf8)
-renderCond' = renderCond proxy escapeS renderEquals renderNotEquals where
+renderCond' :: Cond Sqlite r -> Maybe (RenderS Sqlite r)
+renderCond' = renderCond escapeS renderEquals renderNotEquals where
   renderEquals a b = a <> " IS " <> b
   renderNotEquals a b = a <> " IS NOT " <> b
 

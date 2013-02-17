@@ -87,7 +87,7 @@ mkEmbeddedPersistFieldInstance def = do
               else [| undefined :: $(return $ thFieldType f) |]
             typ = case (thEmbeddedDef f, thDbTypeName f) of
               (Just e, _) -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-              (_, Just name) -> [| DbOther $(lift name) |]
+              (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
               _ -> [| dbType $nvar |]
         [| (fname, $typ) |]
     let pat = if null $ thEmbeddedTypeParams def then wildP else varP v
@@ -269,7 +269,7 @@ mkUniqueKeysPersistFieldInstances def = do
               nvar = [| undefined :: $(return $ thFieldType f) |]
               typ = case (thEmbeddedDef f, thDbTypeName f) of
                 (Just e, _)  -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-                (_, Just name) -> [| DbOther $(lift name) |]
+                (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
                 _ -> [| dbType $nvar |]
           [| (fname, $typ) |]
       let embedded = [| EmbeddedDef False $(listE $ map mkField $ thUniqueKeyFields unique) |]
@@ -446,7 +446,7 @@ mkPersistEntityInstance def = do
               else [| undefined :: $(return $ thFieldType f) |]
             typ = case (thEmbeddedDef f, thDbTypeName f) of
               (Just e, _)  -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-              (_, Just name) -> [| DbOther $(lift name) |]
+              (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
               _ -> [| dbType $nvar |]
         [| (fname, $typ) |]
     let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
@@ -522,7 +522,7 @@ mkPersistEntityInstance def = do
         let nvar = [| (undefined :: Field v c a -> a) $(varE fArg) |]
             typ = case (thEmbeddedDef f, thDbTypeName f) of
               (Just e, _)  -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-              (_, Just name) -> [| DbOther $(lift name) |]
+              (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
               _ -> [| dbType $nvar |]
         let body = [| (($(lift $ thDbFieldName f), $typ), []) |]
         return (fArg, body)
