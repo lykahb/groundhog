@@ -11,6 +11,8 @@ import Database.Groundhog.Generic.Sql
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
+import Database.Groundhog.Postgresql.Array hiding (all, any, append)
+import qualified Database.Groundhog.Postgresql.Array as Arr
 import Database.Groundhog.Postgresql.Geometry
 import Data.ByteString.Char8 (unpack)
 import Data.Int
@@ -177,10 +179,14 @@ sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
 postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Postgresql m () -> IO ()) -> Test
 postgresqlTestSuite run = testGroup "Database.Groundhog.Postgresql"
   [ testCase "testGeometry" $ run testGeometry
+  , testCase "testArrays" $ run testArrays
   ]
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
+
+(@=??) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> m a -> m ()
+expected @=?? action = action >>= \actual -> expected @=? actual
 
 testMigrateOrphanConstructors :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateOrphanConstructors = do
@@ -303,9 +309,9 @@ testCond = do
 --  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + toArith SingleField >=. toArith SingleField - 2)
   
   -- test parentheses
-  ("single=? OR ?=? AND ?=?", [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
+  ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
   ("single=? AND (?<? OR ?<?)", [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) &&. (1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int))
-  ("single=? AND (single=single OR single<>single)", [0 :: Int]) === (SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField /=. SingleField))
+  ("NOT (single=? AND (single=single OR single<>single))", [0 :: Int]) === (Not $ SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField /=. SingleField))
   
   -- test empty conditions
   ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
@@ -364,7 +370,7 @@ testComparison = do
 
 testEncoding :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testEncoding = do
-  let val = Single "\x0001\x0081\x0801\x10001"
+  let val = Single $ "\x0001\x0081\x0801\x10001" ++ ['\1'..'\255']
   migr val
   k <- insert val
   val' <- get k
@@ -680,7 +686,40 @@ testGeometry = do
   k2 <- insert val2
   val2' <- get k2
   Just val2 @=? val2'
-  
+
+testArrays :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+testArrays = do
+  let val = Single (Array [1 :: Int, 2, 3])
+  migr val
+  k <- insert val
+  val' <- get k
+  Just val @=? val'
+  -- test operators
+  let int :: Int -> Int
+      int = id
+  [2] @=?? project (SingleField ! int 2) (AutoKeyField ==. k)
+  [Array [2, 3]] @=?? project (SingleField !: (int 2, int 3)) (AutoKeyField ==. k)
+  [Array [1..4]] @=?? project (SingleField `Arr.append` int 4) (AutoKeyField ==. k)
+  [Array [0..3]] @=?? project (int 0 `Arr.prepend` SingleField) (AutoKeyField ==. k)
+  [Array [1..6]] @=?? project (SingleField `arrayCat` Array [int 4..6]) (AutoKeyField ==. k)
+  ["[1:3]"] @=?? project (arrayDims SingleField) (AutoKeyField ==. k)
+  [1] @=?? project (arrayNDims SingleField) (AutoKeyField ==. k)
+  [1] @=?? project (arrayLower SingleField 1) (AutoKeyField ==. k)
+  [3] @=?? project (arrayUpper SingleField 1) (AutoKeyField ==. k)
+  [3] @=?? project (arrayLength SingleField 1) (AutoKeyField ==. k)
+  ["1|2|3"] @=?? project (arrayToString SingleField "|") (AutoKeyField ==. k)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.any (int 2) SingleField)
+  [] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.any (int 0) SingleField)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.all (int 2) (SingleField !: (int 2, int 2)))
+  [] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.all (int 2) SingleField)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. SingleField @> Array [int 2, 1])
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Array [int 2, 1] <@ SingleField)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Array [int 3..10] `overlaps` SingleField)
+  -- test escaping/unescaping
+  let myString = ['\1'..'\255'] :: String
+  let val2 = Single (Array[myString], Array[Array[myString]])
+  migr val2
+  Just val2 @=?? (insert val2 >>= get)
  
 -- TODO: write test which inserts data before adding new columns
 

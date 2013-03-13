@@ -34,15 +34,16 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.ByteString.Char8 (ByteString, pack, unpack, copy)
+import Data.Char (toUpper)
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (groupBy, intercalate)
+import Data.Maybe (fromMaybe)
 import Data.Monoid
 import Data.Conduit.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
-import System.IO.Unsafe (unsafePerformIO)
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 newtype Postgresql = Postgresql PG.Connection
@@ -129,11 +130,11 @@ insert' v = do
   liftM fst $ if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let query = insertIntoConstructorTable False name constr
+      let RenderS query vals' = insertIntoConstructorTable False name constr (tail vals)
       case constrAutoKeyName constr of
-        Nothing -> executeRaw' query (tail vals) >> pureFromPersistValue []
+        Nothing -> executeRaw' query (vals' []) >> pureFromPersistValue []
         Just _  -> do
-          x <- queryRaw' query (tail vals) id
+          x <- queryRaw' query (vals' []) id
           case x of
             Just xs -> pureFromPersistValue xs
             Nothing -> pureFromPersistValue []
@@ -142,18 +143,19 @@ insert' v = do
       let cName = name ++ [delim] ++ constrName constr
       let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)RETURNING(id)"
       rowid <- queryRaw' query (take 1 vals) getKey
-      let cQuery = insertIntoConstructorTable True cName constr
-      executeRaw' cQuery $ rowid:(tail vals)
+      let RenderS cQuery vals' = insertIntoConstructorTable True cName constr (rowid:tail vals)
+      executeRaw' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> Utf8
-insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning where
+insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> [PersistValue] -> RenderS db r
+insertIntoConstructorTable withId tName c vals = RenderS query vals' where
+  query = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning
   (fields, returning) = case constrAutoKeyName c of
     Just idName | withId    -> ((idName, dbType (0 :: Int64)):constrParams c, mempty)
                 | otherwise -> (constrParams c, "RETURNING(" <> escapeS (fromString idName) <> ")")
     _                       -> (constrParams c, mempty)
   fieldNames   = renderFields escapeS fields
-  placeholders = renderFields (const $ fromChar '?') fields
+  RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' (l :: [a]) = do
@@ -323,7 +325,17 @@ checkTable name = do
   case table of
     Just _ -> do
       -- omit primary keys
-      cols <- queryRaw' "SELECT c.column_name, c.is_nullable, c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.datetime_precision, c.interval_type, c.column_default FROM information_schema.columns c WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?) ORDER BY c.ordinal_position" [toPrimitivePersistValue proxy name, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
+      let colQuery = "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.datetime_precision, c.interval_type, a.attndims AS array_dims, te.typname AS array_elem\
+\  FROM pg_catalog.pg_attribute a\
+\  INNER JOIN pg_catalog.pg_class tc ON tc.oid = a.attrelid\
+\  INNER JOIN pg_catalog.pg_namespace n ON n.oid = tc.relnamespace\
+\  INNER JOIN information_schema.columns c ON c.column_name = a.attname AND c.table_name = tc.relname AND c.table_schema = n.nspname\
+\  INNER JOIN pg_catalog.pg_type t ON t.oid = a.atttypid\
+\  LEFT JOIN pg_catalog.pg_type te ON te.oid = t.typelem\
+\  WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?)\
+\  ORDER BY c.ordinal_position"
+
+      cols <- queryRaw' colQuery [toPrimitivePersistValue proxy name, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
       let (col_errs, cols') = partitionEithers cols
       
       uniqConstraints <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
@@ -349,9 +361,9 @@ checkPrimaryKey name = do
     [(_, primaryKeyName)] -> Left $ Just primaryKeyName
     us -> Right $ mkUniq us
 
-getColumn :: String -> (String, String, String, (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String), Maybe String) -> Either String Column
-getColumn _ (column_name, is_nullable, udt_name, modifiers, d) = Right $ Column column_name (is_nullable == "YES") t d where
-  t = readSqlType udt_name modifiers
+getColumn :: String -> ((String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String), (Int, Maybe String)) -> Either String Column
+getColumn _ ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Right $ Column column_name (is_nullable == "YES") t d where
+  t = readSqlType udt_name modifiers arr_info
 
 checkTableReferences :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m [(Maybe String, Reference)]
 checkTableReferences tableName = do
@@ -488,8 +500,8 @@ showAlterColumn table (n, UpdateValue s) = (False, defaultPriority, concat
   ])
 
 -- | udt_name, character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type
-readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> DbType
-readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, _) = (case typ of
+readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> (Int, Maybe String) -> DbType
+readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, _) (array_ndims, array_elem) = (case typ of
   "int4" -> DbInt32
   "int8" -> DbInt64
   "varchar" -> maybe DbString (dbOther . ("varchar"++) . wrap . show) character_maximum_length
@@ -503,6 +515,8 @@ readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, dat
   "float4" -> DbReal
   "float8" -> DbReal
   "bytea" -> DbBlob
+  _ | array_ndims > 0 -> dbOther $ arr ++ concat (replicate array_ndims "[]") where
+    arr = fromMaybe (error "readSqlType: array with elem type Nothing") array_elem
   a -> dbOther a) where
     dbOther = DbOther . OtherTypeDef . const
     wrap x = "(" ++ x ++ ")"
@@ -535,7 +549,8 @@ compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape 
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
 compareTypes :: DbType -> DbType -> Bool
-compareTypes type1 type2 = showSqlType (simplifyType type1) == showSqlType (simplifyType type2)
+compareTypes type1 type2 = f type1 == f type2 where
+  f = map toUpper . showSqlType . simplifyType
 
 -- | Converts complex datatypes that reference other data to id type DbInt64. Does not handle DbEmbedded
 simplifyType :: DbType -> DbType
@@ -601,10 +616,13 @@ queryRaw' query vals f = do
         getters <- forM [0..cols-1] $ \col -> do
           oid <- LibPQ.ftype ret col
           case PG.oid2builtin oid of
-            Nothing -> fail $ "Postgresql.withStmt': could not " ++
-                              "recognize Oid of column " ++
+            -- TODO: this is a temporary hack until postgresql-simple supports arrays and has more builtin types. Restore fail clause then.
+            Nothing -> return $ getGetter PG.Unknown $
+                       PG.Field ret col $ PG.builtin2typname PG.Unknown
+             {- fail $ "Postgresql.withStmt': could not " ++
+                              "recognize " ++ show oid ++ " of column " ++
                               show (let LibPQ.Col i = col in i) ++
-                              " (counting from zero)"
+                              " (counting from zero)" -}
             Just bt -> return $ getGetter bt $
                        PG.Field ret col $
                        PG.builtin2typname bt
@@ -625,7 +643,7 @@ queryRaw' query vals f = do
             Errors (exc:_) -> throw exc
             Errors [] -> error "Got an Errors, but no exceptions"
             Ok v  -> return v
-    
+
 -- | Avoid orphan instances.
 newtype P = P PersistValue
 
@@ -640,6 +658,7 @@ instance PGTF.ToField P where
   toField (P (PersistUTCTime t))        = PGTF.toField t
   toField (P (PersistZonedTime (ZT t))) = PGTF.toField t
   toField (P PersistNull)               = PGTF.toField PG.Null
+  toField (P (PersistCustom _ _))       = error "toField: unexpected PersistCustom"
 
 type Getter a = PG.Field -> Maybe ByteString -> Ok a
 
@@ -674,11 +693,7 @@ getGetter PG.Numeric               = convertPV (PersistDouble . fromRational)
 getGetter PG.Void                  = \_ _ -> Ok PersistNull
 getGetter _ = \f dat -> fmap (PersistByteString . unBinary) $ case dat of
   Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
-  Just str -> case PGFF.format f of
-    LibPQ.Text -> case unsafePerformIO (LibPQ.unescapeBytea str) of
-      Nothing  -> PGFF.returnError PGFF.ConversionFailed f "unescapeBytea failed"
-      Just str' -> return $ PG.Binary str'
-    LibPQ.Binary -> return $ PG.Binary $ copy $ str
+  Just str -> return $ PG.Binary $ copy $ str
 
 unBinary :: PG.Binary a -> a
 unBinary (PG.Binary x) = x

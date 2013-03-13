@@ -324,8 +324,8 @@ insert' v = do
   liftM fst $ if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let query = insertIntoConstructorTable False name constr
-      executeRawCached' query (tail vals)
+      let RenderS query vals' = insertIntoConstructorTable False name constr (tail vals)
+      executeRawCached' query (vals' [])
       case constrAutoKeyName constr of
         Nothing -> pureFromPersistValue []
         Just _  -> getLastInsertRowId >>= \rowid -> pureFromPersistValue [rowid]
@@ -335,18 +335,19 @@ insert' v = do
       let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)"
       executeRawCached' query $ take 1 vals
       rowid <- getLastInsertRowId
-      let cQuery = insertIntoConstructorTable True cName constr
-      executeRawCached' cQuery $ rowid:(tail vals)
+      let RenderS cQuery vals' = insertIntoConstructorTable True cName constr (rowid:tail vals)
+      executeRawCached' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
 -- TODO: In Sqlite we can insert null to the id column. If so, id will be generated automatically. Check performance change from this.
-insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> Utf8
-insertIntoConstructorTable withId tName c = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" where
+insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> [PersistValue] -> RenderS db r
+insertIntoConstructorTable withId tName c vals = RenderS query vals' where
+  query = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")"
   fields = case constrAutoKeyName c of
     Just idName | withId -> (idName, dbType (0 :: Int64)):constrParams c
     _                    -> constrParams c
   fieldNames   = renderFields escapeS fields
-  placeholders = renderFields (const $ fromChar '?') fields
+  RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
 insertList' l = do
@@ -389,16 +390,17 @@ bind stmt = go 1 where
   go _ [] = return ()
   go i (x:xs) = do
     case x of
-      PersistInt64 int64     -> S.bindInt64 stmt i int64
-      PersistString text     -> S.bindText stmt i $ T.pack text
-      PersistDouble double   -> S.bindDouble stmt i double
-      PersistBool b          -> S.bindInt64 stmt i $ if b then 1 else 0
-      PersistByteString blob -> S.bindBlob stmt i blob
-      PersistNull            -> S.bindNull stmt i
-      PersistDay d           -> S.bindText stmt i $ T.pack $ show d
-      PersistTimeOfDay d     -> S.bindText stmt i $ T.pack $ show d
-      PersistUTCTime d       -> S.bindText stmt i $ T.pack $ show d
-      PersistZonedTime (ZT d)-> S.bindText stmt i $ T.pack $ show d
+      PersistInt64 int64      -> S.bindInt64 stmt i int64
+      PersistString text      -> S.bindText stmt i $ T.pack text
+      PersistDouble double    -> S.bindDouble stmt i double
+      PersistBool b           -> S.bindInt64 stmt i $ if b then 1 else 0
+      PersistByteString blob  -> S.bindBlob stmt i blob
+      PersistNull             -> S.bindNull stmt i
+      PersistDay d            -> S.bindText stmt i $ T.pack $ show d
+      PersistTimeOfDay d      -> S.bindText stmt i $ T.pack $ show d
+      PersistUTCTime d        -> S.bindText stmt i $ T.pack $ show d
+      PersistZonedTime (ZT d) -> S.bindText stmt i $ T.pack $ show d
+      PersistCustom _ _       -> error "bind: unexpected PersistCustom"
     go (i + 1) xs
 
 executeRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()

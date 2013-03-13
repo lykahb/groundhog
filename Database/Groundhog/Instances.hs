@@ -128,6 +128,7 @@ instance PrimitivePersistField String where
   fromPrimitivePersistValue _ (PersistZonedTime z) = show z
   fromPrimitivePersistValue _ (PersistBool b) = show b
   fromPrimitivePersistValue _ PersistNull = error "Unexpected NULL"
+  fromPrimitivePersistValue _ (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 instance PrimitivePersistField T.Text where
   toPrimitivePersistValue _ a = PersistString (T.unpack a)

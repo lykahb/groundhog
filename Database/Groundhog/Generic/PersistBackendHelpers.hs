@@ -178,8 +178,8 @@ count escape queryFunc renderCond' cond = do
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
-replace :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
-        => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (Utf8 -> [PersistValue] -> m ()) -> (Bool -> String -> ConstructorDef -> Utf8)
+replace :: forall m db r v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
+        => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (Utf8 -> [PersistValue] -> m ()) -> (Bool -> String -> ConstructorDef -> [PersistValue] -> RenderS db r)
         -> Key v BackendSpecific -> v -> m ()
 replace escape queryFunc execFunc insertIntoConstructorTable k v = do
   vals <- toEntityPersistValues' v
@@ -204,8 +204,8 @@ replace escape queryFunc execFunc insertIntoConstructorTable k v = do
           if discr == constructorNum
             then execFunc (mkQuery cName) (tail vals ++ [toPrimitivePersistValue proxy k])
             else do
-              let insQuery = insertIntoConstructorTable True cName constr
-              execFunc insQuery (toPrimitivePersistValue proxy k:tail vals)
+              let RenderS insQuery vals' = insertIntoConstructorTable True cName constr (toPrimitivePersistValue proxy k:tail vals)
+              execFunc insQuery (vals' [])
 
               let oldCName = fromString $ name ++ [delim] ++ constrName (constructors e !! discr)
               let delQuery = "DELETE FROM " <> escape oldCName <> " WHERE " <> fromJust (constrId escape constr) <> "=?"

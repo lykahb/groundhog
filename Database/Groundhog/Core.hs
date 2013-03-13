@@ -22,6 +22,8 @@ module Database.Groundhog.Core
   , HFalse
   , HTrue
   , ZT (..) -- ZonedTime wrapper
+  , Utf8(..)
+  , fromUtf8
   , delim
   -- * Constructing expressions
   , Cond(..)
@@ -64,6 +66,7 @@ module Database.Groundhog.Core
   , runDbPersist
   ) where
 
+import Blaze.ByteString.Builder (Builder, toByteString)
 import Control.Applicative (Applicative)
 import Control.Monad.Base (MonadBase (liftBase))
 import Control.Monad.Trans.Class (MonadTrans(..))
@@ -384,6 +387,16 @@ instance Show OtherTypeDef where
 -- Value False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
 data EmbeddedDef = EmbeddedDef Bool [(String, DbType)] deriving (Eq, Show)
 
+-- | Datatype for incremental building SQL queries
+newtype Utf8 = Utf8 Builder
+instance Eq Utf8 where
+  a == b = fromUtf8 a == fromUtf8 b
+instance Show Utf8 where
+  show = show . fromUtf8
+
+fromUtf8 :: Utf8 -> ByteString
+fromUtf8 (Utf8 a) = toByteString a
+
 -- | A raw value which can be stored in any backend and can be marshalled to
 -- and from a 'PersistField'.
 data PersistValue = PersistString String
@@ -396,6 +409,8 @@ data PersistValue = PersistString String
                   | PersistUTCTime UTCTime
                   | PersistZonedTime ZT
                   | PersistNull
+                  -- | Creating some datatypes may require calling a function, using a special constructor, or other syntax. The string (which can have placeholders) is included into query without escaping. The recursive constructions are not allowed, i.e., [PersistValue] cannot contain PersistCustom values.
+                  | PersistCustom Utf8 [PersistValue]
   deriving (Eq, Show)
 
 -- | Avoid orphan instances.
