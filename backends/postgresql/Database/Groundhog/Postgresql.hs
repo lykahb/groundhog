@@ -31,6 +31,7 @@ import Control.Arrow ((***))
 import Control.Exception (throw)
 import Control.Monad (forM, liftM, liftM2)
 import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.ByteString.Char8 (ByteString, pack, unpack, copy)
@@ -40,7 +41,7 @@ import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (groupBy, intercalate)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid
 import Data.Conduit.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
@@ -81,7 +82,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgre
 
 --{-# SPECIALIZE withPostgresqlPool :: String -> Int -> (Pool Postgresql -> IO a) -> IO a #-}
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
-               => String
+               => String -- ^ connection string
                -> Int -- ^ number of connections to open
                -> (Pool Postgresql -> m a)
                -> m a
@@ -90,7 +91,7 @@ withPostgresqlPool s connCount f = liftIO (createPool (open' s) close' 1 20 conn
 {-# SPECIALIZE withPostgresqlConn :: String -> (Postgresql -> IO a) -> IO a #-}
 {-# INLINE withPostgresqlConn #-}
 withPostgresqlConn :: (MonadBaseControl IO m, MonadIO m)
-               => String
+               => String -- ^ connection string
                -> (Postgresql -> m a)
                -> m a
 withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO . close')
@@ -124,13 +125,12 @@ insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
   let e = entityDef v
-  let name = persistName v
   let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   liftM fst $ if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let RenderS query vals' = insertIntoConstructorTable False name constr (tail vals)
+      let RenderS query vals' = insertIntoConstructorTable False (tableName escapeS e constr) constr (tail vals)
       case constrAutoKeyName constr of
         Nothing -> executeRaw' query (vals' []) >> pureFromPersistValue []
         Just _  -> do
@@ -140,16 +140,15 @@ insert' v = do
             Nothing -> pureFromPersistValue []
     else do
       let constr = constructors e !! constructorNum
-      let cName = name ++ [delim] ++ constrName constr
-      let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)RETURNING(id)"
+      let query = "INSERT INTO " <> mainTableName escapeS e <> "(discr)VALUES(?)RETURNING(id)"
       rowid <- queryRaw' query (take 1 vals) getKey
-      let RenderS cQuery vals' = insertIntoConstructorTable True cName constr (rowid:tail vals)
+      let RenderS cQuery vals' = insertIntoConstructorTable True (tableName escapeS e constr) constr (rowid:tail vals)
       executeRaw' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> [PersistValue] -> RenderS db r
+insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
 insertIntoConstructorTable withId tName c vals = RenderS query vals' where
-  query = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning
+  query = "INSERT INTO " <> tName <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning
   (fields, returning) = case constrAutoKeyName c of
     Just idName | withId    -> ((idName, dbType (0 :: Int64)):constrParams c, mempty)
                 | otherwise -> (constrParams c, "RETURNING(" <> escapeS (fromString idName) <> ")")
@@ -214,14 +213,17 @@ toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 --- MIGRATION
 
 migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Postgresql m)
-migrate' = migrateRecursively (migrateEntity migrationPack) (migrateList migrationPack)
+migrate' v = do
+  x <- lift $ queryRaw' "SELECT current_schema()" [] id
+  let schema = fst $ fromPurePersistValues proxy $ fromJust x
+  migrateRecursively (migrateEntity $ migrationPack schema) (migrateList $ migrationPack schema) v
 
-migrationPack :: (MonadBaseControl IO m, MonadIO m) => GM.MigrationPack (DbPersist Postgresql m)
-migrationPack = GM.MigrationPack
+migrationPack :: (MonadBaseControl IO m, MonadIO m) => String -> GM.MigrationPack (DbPersist Postgresql m)
+migrationPack currentSchema = GM.MigrationPack
   compareTypes
-  compareRefs
+  (compareRefs currentSchema)
   compareUniqs
-  checkTable
+  examineTable
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
@@ -319,42 +321,44 @@ migTriggerOnUpdate name fieldName del = do
             else [DropTrigger trigName name, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
   
-checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe (Either [String] TableInfo))
-checkTable name = do
-  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_name=?" [toPrimitivePersistValue proxy name] id
+examineTable :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either [String] (Maybe TableInfo))
+examineTable schema name = do
+  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
     Just _ -> do
       -- omit primary keys
       let colQuery = "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.datetime_precision, c.interval_type, a.attndims AS array_dims, te.typname AS array_elem\
 \  FROM pg_catalog.pg_attribute a\
-\  INNER JOIN pg_catalog.pg_class tc ON tc.oid = a.attrelid\
-\  INNER JOIN pg_catalog.pg_namespace n ON n.oid = tc.relnamespace\
-\  INNER JOIN information_schema.columns c ON c.column_name = a.attname AND c.table_name = tc.relname AND c.table_schema = n.nspname\
+\  INNER JOIN pg_catalog.pg_class cl ON cl.oid = a.attrelid\
+\  INNER JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace\
+\  INNER JOIN information_schema.columns c ON c.column_name = a.attname AND c.table_name = cl.relname AND c.table_schema = n.nspname\
 \  INNER JOIN pg_catalog.pg_type t ON t.oid = a.atttypid\
 \  LEFT JOIN pg_catalog.pg_type te ON te.oid = t.typelem\
-\  WHERE c.table_name=? AND c.column_name NOT IN (SELECT c.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name INNER JOIN information_schema.columns c ON u.table_catalog=c.table_catalog AND u.table_schema=c.table_schema AND u.table_name=c.table_name AND u.column_name=c.column_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?)\
+\  LEFT JOIN information_schema.table_constraints tc ON tc.table_schema = c.table_schema AND tc.table_name = c.table_name AND tc.constraint_type='PRIMARY KEY'\
+\  LEFT JOIN information_schema.constraint_column_usage u ON u.constraint_schema = tc.constraint_schema AND u.constraint_name = tc.constraint_name AND u.column_name = c.column_name\
+\  WHERE c.table_schema = coalesce(?, current_schema()) AND c.table_name=? AND u.column_name IS NULL\
 \  ORDER BY c.ordinal_position"
 
-      cols <- queryRaw' colQuery [toPrimitivePersistValue proxy name, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
+      cols <- queryRaw' colQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
       let (col_errs, cols') = partitionEithers cols
       
-      uniqConstraints <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-      uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid WHERE tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      uniqConstraints <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.table_schema=coalesce(?,current_schema()) AND u.table_name=? AND tc.constraint_type='UNIQUE' ORDER BY u.constraint_name, u.column_name" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace WHERE sch.nspname = coalesce(?, current_schema()) AND tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
       let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes
-      references <- checkTableReferences name
-      primaryKeyResult <- checkPrimaryKey name
+      references <- examineTableReferences schema name
+      primaryKeyResult <- checkPrimaryKey schema name
       let (primaryKey, uniqs') = case primaryKeyResult of
             (Left primaryKeyName) -> (primaryKeyName, uniqs)
             (Right u) -> (Nothing, u:uniqs)
-      return $ Just $ case col_errs of
-        []   -> Right $ TableInfo primaryKey cols' uniqs' references
+      return $ case col_errs of
+        []   -> Right $ Just $ TableInfo primaryKey cols' uniqs' references
         errs -> Left errs
-    Nothing -> return Nothing
+    Nothing -> return $ Right Nothing
 
-checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
-checkPrimaryKey name = do
-  uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
+checkPrimaryKey schema name = do
+  uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=coalesce(?, current_schema()) AND tc.table_name=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   let mkUniq us = UniqueDef' (fst $ head us) UniqueConstraint (map snd us)
   return $ case uniqRows of
     [] -> Left Nothing
@@ -365,19 +369,29 @@ getColumn :: String -> ((String, String, String, Maybe String), (Maybe Int, Mayb
 getColumn _ ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Right $ Column column_name (is_nullable == "YES") t d where
   t = readSqlType udt_name modifiers arr_info
 
-checkTableReferences :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m [(Maybe String, Reference)]
-checkTableReferences tableName = do
-  let sql = "SELECT c.conname, c.foreign_table || '', a_child.attname AS child, a_parent.attname AS parent FROM (SELECT r.confrelid::regclass AS foreign_table, r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname FROM pg_catalog.pg_constraint r WHERE r.conrelid = ?::regclass AND r.contype = 'f') AS c INNER JOIN pg_attribute a_parent ON a_parent.attnum = c.confkey AND a_parent.attrelid = c.confrelid INNER JOIN pg_attribute a_child ON a_child.attnum = c.conkey AND a_child.attrelid = c.conrelid ORDER BY c.conname"
-  x <- queryRaw' sql [toPrimitivePersistValue proxy $ escape tableName] $ mapAllRows (return . fst . fromPurePersistValues proxy)
-  -- (refName, (parentTable, (childColumn, parentColumn)))
-  let mkReference xs = (Just refName, (parentTable, map (snd . snd) xs)) where
-        (refName, (parentTable, _)) = head xs
+examineTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m [(Maybe String, Reference)]
+examineTableReferences schema tName = do
+  let sql = "SELECT c.conname, sch_parent.nspname, cl_parent.relname, a_child.attname AS child, a_parent.attname AS parent FROM\
+\  (SELECT r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname\
+\    FROM pg_catalog.pg_constraint r WHERE r.contype = 'f'\
+\  ) AS c\
+\  INNER JOIN pg_attribute a_parent ON a_parent.attnum = c.confkey AND a_parent.attrelid = c.confrelid\
+\  INNER JOIN pg_class cl_parent ON cl_parent.oid = c.confrelid\
+\  INNER JOIN pg_namespace sch_parent ON sch_parent.oid = cl_parent.relnamespace\
+\  INNER JOIN pg_attribute a_child ON a_child.attnum = c.conkey AND a_child.attrelid = c.conrelid\
+\  INNER JOIN pg_class cl_child ON cl_child.oid = c.conrelid AND cl_child.relname = ?\
+\  INNER JOIN pg_namespace sch_child ON sch_child.oid = cl_child.relnamespace AND sch_child.nspname = coalesce(?, current_schema())\
+\  ORDER BY c.conname"
+  x <- queryRaw' sql [toPrimitivePersistValue proxy tName, toPrimitivePersistValue proxy schema] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+  -- (refName, ((parentTableSchema, parentTable), (childColumn, parentColumn)))
+  let mkReference xs = (Just refName, (parentSchema, parentTable, map (snd . snd) xs)) where
+        (refName, ((parentSchema, parentTable), _)) = head xs
       references = map mkReference $ groupBy ((==) `on` fst) x
   return references
 
 showAlterDb :: AlterDB -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
-showAlterDb (AlterTable t _ _ _ alts) = Right $ map (showAlterTable t) alts
+showAlterDb (AlterTable sch t _ _ _ alts) = Right $ map (showAlterTable $ maybe "" (\x -> escape x ++ ".") sch ++ escape t) alts
 showAlterDb (DropTrigger trigName tName) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape trigName ++ " ON " ++ escape tName)]
 showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER DELETE ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
 showAlterDb (AddTriggerOnUpdate trigName tName fName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER UPDATE OF " ++ escape fName ++ " ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
@@ -388,7 +402,7 @@ showAlterTable :: String -> AlterTable -> (Bool, Int, String)
 showAlterTable table (AlterColumn alt) = showAlterColumn table alt
 showAlterTable table (AddUnique (UniqueDef' uName UniqueConstraint cols)) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ADD CONSTRAINT "
   , escape uName
   , " UNIQUE("
@@ -399,14 +413,14 @@ showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = (False, d
   [ "CREATE UNIQUE INDEX "
   , escape uName
   , " ON "
-  , escape table
+  , table
   , "("
   , intercalate "," $ map escape cols
   , ")"
   ])
 showAlterTable table (DropConstraint uName) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " DROP CONSTRAINT "
   , escape uName
   ])
@@ -414,13 +428,13 @@ showAlterTable _ (DropIndex uName) = (False, defaultPriority, concat
   [ "DROP INDEX "
   , escape uName
   ])
-showAlterTable table (AddReference (tName, columns)) = (False, referencePriority, concat
+showAlterTable table (AddReference (schema, tName, columns)) = (False, referencePriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ADD FOREIGN KEY("
   , our
   , ") REFERENCES "
-  , escape tName
+  , maybe "" (\x -> escape x ++ ".") schema ++ escape tName
   , "("
   , foreign
   , ")"
@@ -428,12 +442,12 @@ showAlterTable table (AddReference (tName, columns)) = (False, referencePriority
   (our, foreign) = f *** f $ unzip columns
   f = intercalate ", " . map escape
 showAlterTable table (DropReference name) = (False, defaultPriority,
-    "ALTER TABLE " ++ escape table ++ " DROP CONSTRAINT " ++ name)
+    "ALTER TABLE " ++ table ++ " DROP CONSTRAINT " ++ name)
 
 showAlterColumn :: String -> AlterColumn' -> (Bool, Int, String)
 showAlterColumn table (n, Type t) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ALTER COLUMN "
   , escape n
   , " TYPE "
@@ -441,40 +455,40 @@ showAlterColumn table (n, Type t) = (False, defaultPriority, concat
   ])
 showAlterColumn table (n, IsNull) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ALTER COLUMN "
   , escape n
   , " DROP NOT NULL"
   ])
 showAlterColumn table (n, NotNull) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ALTER COLUMN "
   , escape n
   , " SET NOT NULL"
   ])
 showAlterColumn table (_, Add col) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ADD COLUMN "
   , showColumn col
   ])
 showAlterColumn table (n, Drop) = (True, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " DROP COLUMN "
   , escape n
   ])
 showAlterColumn table (n, AddPrimaryKey) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ADD COLUMN "
   , escape n
   , " SERIAL PRIMARY KEY UNIQUE"
   ])
 showAlterColumn table (n, Default s) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ALTER COLUMN "
   , escape n
   , " SET DEFAULT "
@@ -482,14 +496,14 @@ showAlterColumn table (n, Default s) = (False, defaultPriority, concat
   ])
 showAlterColumn table (n, NoDefault) = (False, defaultPriority, concat
   [ "ALTER TABLE "
-  , escape table
+  , table
   , " ALTER COLUMN "
   , escape n
   , " DROP DEFAULT"
   ])
 showAlterColumn table (n, UpdateValue s) = (False, defaultPriority, concat
   [ "UPDATE "
-  , escape table
+  , table
   , " SET "
   , escape n
   , "="
@@ -544,8 +558,12 @@ showSqlType t = error $ "showSqlType: DbType does not have corresponding databas
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
 compareUniqs (UniqueDef' name1 typ1 cols1) (UniqueDef' name2 typ2 cols2) = name1 == name2 && typ1 == typ2 && haveSameElems (==) cols1 cols2
 
-compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
+compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
+compareRefs currentSchema (_, (sch1, tbl1, pairs1)) (_, (sch2, tbl2, pairs2)) =
+     fromMaybe currentSchema sch1 == fromMaybe currentSchema sch2
+  && unescape tbl1 == unescape tbl2
+  && haveSameElems (==) pairs1 pairs2 where
+  
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
 compareTypes :: DbType -> DbType -> Bool

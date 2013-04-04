@@ -126,7 +126,7 @@ migrationPack = GM.MigrationPack
   compareTypes
   compareRefs
   compareUniqs
-  checkTable
+  examineTable
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
@@ -186,25 +186,25 @@ checkSqliteMaster vtype name = do
       err               -> throwErr $ "column sql is not string: " ++ show err
     Just xs -> throwErr $ "requested 1 column, returned " ++ show xs
 
-checkTable :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe (Either [String] TableInfo))
-checkTable tableName = do
+examineTable :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Either [String] (Maybe TableInfo))
+examineTable Nothing tName = do
   let fromName = escapeS . fromString
-  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tableName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   case tableInfo of
-    [] -> return Nothing
-    xs -> liftM Just $ do
+    [] -> return $ Right Nothing
+    xs -> do
       let rawColumns = filter (\(_ , (_, _, _, _, isPrimary)) -> isPrimary == 0) xs
       let mkColumn :: (Int, (String, String, Int, Maybe String, Int)) -> Column
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
       let columns = map mkColumn rawColumns
-      indexList <- queryRaw' ("pragma index_list(" <> fromName tableName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
         uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
         sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue proxy name] id
         let uType = if sql == Just [PersistNull] then UniqueConstraint else UniqueIndex
         return $ UniqueDef' name uType $ map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
-      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tableName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       (foreigns :: [(Maybe String, Reference)]) <- do
           let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
               foreigns = groupBy ((==) `on` fst) . sort $ foreignKeyList -- sort by foreign key number and column number inside key (first and second integers)
@@ -213,15 +213,16 @@ checkTable tableName = do
             refs <- forM rows $ \(_, (_, _, (child, parent), _)) -> case parent of
               Nothing -> checkPrimaryKey foreignTable >>= \x -> case x of
                 Just primaryKeyName -> return (child, primaryKeyName)
-                Nothing -> error $ "checkTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
+                Nothing -> error $ "examineTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
               Just columnName -> return (child, columnName)
-            return (Nothing, (foreignTable, refs))
-      primaryKey <- checkPrimaryKey tableName
-      return $ Right $ TableInfo primaryKey columns uniques foreigns
+            return (Nothing, (Nothing, foreignTable, refs))
+      primaryKey <- checkPrimaryKey tName
+      return $ Right $ Just $ TableInfo primaryKey columns uniques foreigns
+examineTable (Just _) _ = return $ Left ["examineTable: Sqlite does not support schemas"]
 
 checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
-checkPrimaryKey tableName = do
-  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tableName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+checkPrimaryKey tName = do
+  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   let rawColumns :: [(Int, (String, String, Int, Maybe String, Int))]
       rawColumns = filter (\(_ , (_, _, _, _, isPrimary)) -> isPrimary == 1) tableInfo
   return $ case rawColumns of
@@ -299,7 +300,7 @@ showColumn (Column name isNull typ _) = escape name ++ " " ++ showSqlType typ ++
            else ""
 
 sqlReference :: Reference -> String
-sqlReference (tname, columns) = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape tname ++ "(" ++ foreign ++ ")" where
+sqlReference (_, tname, columns) = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape tname ++ "(" ++ foreign ++ ")" where
   (our, foreign) = f *** f $ unzip columns
   f = intercalate ", " . map escape
 
@@ -318,31 +319,29 @@ insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
   let e = entityDef v
-  let name = persistName v
   let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   liftM fst $ if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let RenderS query vals' = insertIntoConstructorTable False name constr (tail vals)
+      let RenderS query vals' = insertIntoConstructorTable False (tableName escapeS e constr) constr (tail vals)
       executeRawCached' query (vals' [])
       case constrAutoKeyName constr of
         Nothing -> pureFromPersistValue []
         Just _  -> getLastInsertRowId >>= \rowid -> pureFromPersistValue [rowid]
     else do
       let constr = constructors e !! constructorNum
-      let cName = name ++ [delim] ++ constrName constr
-      let query = "INSERT INTO " <> escapeS (fromString name) <> "(discr)VALUES(?)"
+      let query = "INSERT INTO " <> mainTableName escapeS e <> "(discr)VALUES(?)"
       executeRawCached' query $ take 1 vals
       rowid <- getLastInsertRowId
-      let RenderS cQuery vals' = insertIntoConstructorTable True cName constr (rowid:tail vals)
+      let RenderS cQuery vals' = insertIntoConstructorTable True (tableName escapeS e constr) constr (rowid:tail vals)
       executeRawCached' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
 -- TODO: In Sqlite we can insert null to the id column. If so, id will be generated automatically. Check performance change from this.
-insertIntoConstructorTable :: Bool -> String -> ConstructorDef -> [PersistValue] -> RenderS db r
+insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
 insertIntoConstructorTable withId tName c vals = RenderS query vals' where
-  query = "INSERT INTO " <> escapeS (fromString tName) <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")"
+  query = "INSERT INTO " <> tName <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")"
   fields = case constrAutoKeyName c of
     Just idName | withId -> (idName, dbType (0 :: Int64)):constrParams c
     _                    -> constrParams c
@@ -515,7 +514,7 @@ compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
 compareUniqs (UniqueDef' _ type1 cols1) (UniqueDef' _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-compareRefs (_, (tbl1, pairs1)) (_, (tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
+compareRefs (_, (_, tbl1, pairs1)) (_, (_, tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
 compareTypes :: DbType -> DbType -> Bool
@@ -527,7 +526,7 @@ mainTableId = "id"
 
 showAlterDb :: AlterDB -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
-showAlterDb (AlterTable table createTable (TableInfo oldId oldCols _ _) (TableInfo newId newCols _ _) alts) = case mapM (showAlterTable table) alts of
+showAlterDb (AlterTable _ table createTable (TableInfo oldId oldCols _ _) (TableInfo newId newCols _ _) alts) = case mapM (showAlterTable table) alts of
   Just alts' -> Right alts'
   Nothing -> (Right
     [ (False, defaultPriority, "CREATE TEMP TABLE " ++ escape tableTmp ++ "(" ++ columnsTmp ++ ")")
@@ -543,10 +542,10 @@ showAlterDb (AlterTable table createTable (TableInfo oldId oldCols _ _) (TableIn
       columnsTmp = intercalate "," $ map escape $ maybeToList (newId >> oldId) ++ map (colName . snd) commonColumns
       columnsNew = intercalate "," $ map escape $ maybeToList (oldId >> newId) ++ map (colName . snd) commonColumns
 showAlterDb (DropTrigger name _) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
-showAlterDb (AddTriggerOnDelete trigName tableName body) = Right [(False, triggerPriority,
-  "CREATE TRIGGER " ++ escape trigName ++ " DELETE ON " ++ escape tableName ++ " BEGIN " ++ body ++ "END")]
-showAlterDb (AddTriggerOnUpdate trigName tableName fieldName body) = Right [(False, triggerPriority,
-  "CREATE TRIGGER " ++ escape trigName ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape tableName ++ " BEGIN " ++ body ++ "END")]
+showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPriority,
+  "CREATE TRIGGER " ++ escape trigName ++ " DELETE ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")]
+showAlterDb (AddTriggerOnUpdate trigName tName fieldName body) = Right [(False, triggerPriority,
+  "CREATE TRIGGER " ++ escape trigName ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")]
 showAlterDb alt = error $ "showAlterDb: does not support " ++ show alt
 
 showAlterTable :: String -> AlterTable -> Maybe (Bool, Int, String)

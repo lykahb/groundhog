@@ -187,6 +187,7 @@ mkPersist CodegenConfig{..} (PersistDefinitions defs) = do
 applyEntitySettings :: NamingStyle -> PSEntityDef -> THEntityDef -> THEntityDef
 applyEntitySettings style PSEntityDef{..} def@(THEntityDef{..}) =
   def { thDbEntityName = fromMaybe thDbEntityName psDbEntityName
+      , thEntitySchema = psEntitySchema
       , thAutoKey = thAutoKey'
       , thUniqueKeys = maybe thUniqueKeys (map mkUniqueKey') psUniqueKeys
       , thConstructors = thConstructors'
@@ -313,7 +314,7 @@ validateEmbedded def = do
 
 mkTHEntityDefWith :: NamingStyle -> Dec -> THEntityDef
 mkTHEntityDefWith NamingStyle{..} (DataD _ dName typeVars cons _) =
-  THEntityDef dName (mkDbEntityName dName') (Just $ THAutoKeyDef (mkEntityKeyName dName') True) [] typeVars constrs where
+  THEntityDef dName (mkDbEntityName dName') Nothing (Just $ THAutoKeyDef (mkEntityKeyName dName') True) [] typeVars constrs where
   constrs = zipWith mkConstr [0..] cons
   dName' = nameBase dName
 

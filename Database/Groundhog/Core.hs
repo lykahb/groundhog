@@ -237,8 +237,7 @@ runDbPersist = runReaderT . unDbPersist
 class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   -- | Type of the database default autoincremented key. For example, Sqlite has Int64
   type AutoKeyType db
-  -- TODO: write better comment
-  -- | This is a query snippet that can be used as a raw part of a query. For example, it can be RenderS with SQL and PersistValues for relational databases, or part of BSON for MongoDB.
+  -- | Value of this type can be used as a part of a query. For example, it can be RenderS for relational databases, or BSON for MongoDB.
   type QueryRaw db :: * -> *
 
 class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
@@ -308,6 +307,8 @@ type SingleMigration = Either [String] [(Bool, Int, String)]
 data EntityDef = EntityDef {
   -- | Entity name. @entityName (entityDef v) == persistName v@
     entityName   :: String
+  -- | Database schema for the entity table and tables of its constructors
+  , entitySchema :: Maybe String
   -- | Named types of the instantiated polymorphic type parameters
   , typeParams   :: [DbType]
   -- | List of entity constructors definitions

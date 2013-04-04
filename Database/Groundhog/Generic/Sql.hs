@@ -30,9 +30,12 @@ module Database.Groundhog.Generic.Sql
     , Snippet(..)
     , SqlDb
     , liftExpr
+    , tableName
+    , mainTableName
     ) where
 
 import Database.Groundhog.Core
+import Database.Groundhog.Generic (isSimple)
 import Database.Groundhog.Instances ()
 import qualified Blaze.ByteString.Builder.Char.Utf8 as B
 import Data.Int (Int64)
@@ -268,3 +271,21 @@ liftExpr a = liftExpr' a
 
 liftExpr' :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a) => a -> Expr db r b
 liftExpr' a = Expr $ Snippet $ \esc pr -> renderExprExtended esc pr (toExpr a)
+
+-- | Returns escaped table name optionally qualified with schema
+{-# SPECIALIZE tableName :: (Utf8 -> Utf8) -> EntityDef -> ConstructorDef -> Utf8 #-}
+tableName :: StringLike s => (s -> s) -> EntityDef -> ConstructorDef -> s
+tableName esc e c = qualifySchema esc e tName where
+  tName = esc $ if isSimple (constructors e)
+    then fromString $ entityName e
+    else fromString (entityName e) <> fromChar delim <> fromString (constrName c)
+
+-- | Returns escaped main table name optionally qualified with schema
+{-# SPECIALIZE mainTableName :: (Utf8 -> Utf8) -> EntityDef -> Utf8 #-}
+mainTableName :: StringLike s => (s -> s) -> EntityDef -> s
+mainTableName esc e = qualifySchema esc e tName where
+  tName = esc $ fromString $ entityName e
+
+{-# SPECIALIZE qualifySchema :: (Utf8 -> Utf8) -> EntityDef -> Utf8 -> Utf8 #-}
+qualifySchema :: StringLike s => (s -> s) -> EntityDef -> s -> s
+qualifySchema esc e name = maybe name (\sch -> esc (fromString sch) <> fromChar '.' <> name) $ entitySchema e

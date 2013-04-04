@@ -35,6 +35,7 @@ data PersistDefinitions = PersistDefinitions {definitions :: [Either PSEntityDef
 data THEntityDef = THEntityDef {
     thDataName :: Name -- SomeData
   , thDbEntityName :: String  -- SQLSomeData
+  , thEntitySchema :: Maybe String
   , thAutoKey :: Maybe THAutoKeyDef
   , thUniqueKeys :: [THUniqueKeyDef]
   , thTypeParams :: [TyVarBndr]
@@ -91,6 +92,7 @@ data THUniqueKeyDef = THUniqueKeyDef {
 data PSEntityDef = PSEntityDef {
     psDataName :: String -- SomeData
   , psDbEntityName :: Maybe String  -- SQLSomeData
+  , psEntitySchema :: Maybe String
   , psAutoKey :: Maybe (Maybe PSAutoKeyDef) -- SomeDataKey. Nothing - default key. Just Nothing - no autokey. Just (Just _) - specify autokey settings
   , psUniqueKeys :: Maybe [PSUniqueKeyDef]
   , psConstructors :: Maybe [PSConstructorDef]
@@ -144,7 +146,7 @@ instance Lift PersistDefinitions where
   lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift definitions) |]
 
 instance Lift PSEntityDef where
-  lift (PSEntityDef {..}) = [| PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors) |]
+  lift (PSEntityDef {..}) = [| PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psEntitySchema) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors) |]
 
 instance Lift PSEmbeddedDef where
   lift (PSEmbeddedDef {..}) = [| PSEmbeddedDef $(lift psEmbeddedName) $(lift psDbEmbeddedName) $(lift psEmbeddedFields) |]
@@ -202,7 +204,7 @@ instance FromJSON (Either PSEntityDef PSEmbeddedDef) where
   parseJSON _          = mzero
 
 instance FromJSON PSEntityDef where
-  parseJSON (Object v) = PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> optional (v .: "autoKey") <*> v .:? "keys" <*> v .:? "constructors"
+  parseJSON (Object v) = PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> v .:? "schema" <*> optional (v .: "autoKey") <*> v .:? "keys" <*> v .:? "constructors"
   parseJSON _          = mzero
 
 instance FromJSON PSEmbeddedDef where

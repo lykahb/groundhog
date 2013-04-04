@@ -462,7 +462,7 @@ mkPersistEntityInstance def = do
          True  -> [| $(stringE $ thDbEntityName def) |]
          False -> [| $(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames) |]
 
-    let body = normalB [| EntityDef $fullEntityName $typeParams' $constrs |]
+    let body = normalB [| EntityDef $fullEntityName $(lift $ thEntitySchema def) $typeParams' $constrs |]
     let pat = if null $ thTypeParams def then wildP else varP v
     funD 'entityDef $ [ clause [pat] body [] ]
 

@@ -2,7 +2,7 @@
 --module Main where
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
-import Control.Monad (replicateM_, liftM, forM_, (>=>), unless)
+import Control.Monad (replicateM_, liftM, mapM_, forM_, (>=>), unless)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Database.Groundhog.Core
@@ -36,9 +36,16 @@ data Settable = Settable {settable1 :: String, settable2 :: String, settableTupl
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String) BackendSpecific, refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String) BackendSpecific)}
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
 data UniqueKeySample = UniqueKeySample { uniqueKey1 :: String, uniqueKey2 :: Int, uniqueKey3 :: String } deriving (Eq, Show)
+data InCurrentSchema = InCurrentSchema { inCurrentSchema :: Maybe (Key InAnotherSchema BackendSpecific) }
+data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific) }
+
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
 deriving instance Show Keys
+deriving instance Eq InCurrentSchema
+deriving instance Show InCurrentSchema
+deriving instance Eq InAnotherSchema
+deriving instance Show InAnotherSchema
 
 mkPersist defaultCodegenConfig [groundhog|
 - entity: Number
@@ -94,6 +101,9 @@ mkPersist defaultCodegenConfig [groundhog|
           fields: [uniqueKey1]
         - name: unique_key_two_columns
           fields: [uniqueKey2, uniqueKey3]
+- entity: InCurrentSchema
+- entity: InAnotherSchema
+  schema: myschema
 |]
 
 data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
@@ -180,6 +190,7 @@ postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Postgres
 postgresqlTestSuite run = testGroup "Database.Groundhog.Postgresql"
   [ testCase "testGeometry" $ run testGeometry
   , testCase "testArrays" $ run testArrays
+  , testCase "testSchemas" $ run testSchemas
   ]
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
@@ -720,7 +731,15 @@ testArrays = do
   let val2 = Single (Array[myString], Array[Array[myString]])
   migr val2
   Just val2 @=?? (insert val2 >>= get)
- 
+
+testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testSchemas = do
+  let val = InCurrentSchema Nothing
+  migr val -- InAnotherSchema will be migrated automatically
+  k <- insert val
+  let val2 = InAnotherSchema (Just k)
+  Just val2 @=?? (insert val2 >>= get)
+
 -- TODO: write test which inserts data before adding new columns
 
 firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
@@ -738,10 +757,11 @@ createTruncateTables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN V
 \$$ LANGUAGE plpgsql"
 
 clean :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-clean = do
-  executeRaw True "drop schema public cascade" []
-  executeRaw True "create schema public" []
-  executeRaw True "alter schema public owner to test" []
+clean = mapM_ clean' ["public", "myschema"] where
+  clean' schema = do
+    executeRaw True ("drop schema " ++ schema ++ " cascade") []
+    executeRaw True ("create schema " ++ schema) []
+    executeRaw True ("alter schema " ++ schema ++ " owner to test") []
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()
 assertExc err m = do

@@ -20,6 +20,7 @@ module Database.Groundhog.Generic.Migration
 
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Sql (mainTableName, tableName)
 
 import Control.Arrow ((***), (&&&))
 import Control.Monad (liftM)
@@ -38,8 +39,8 @@ data Column = Column
     , colDefault :: Maybe String
     } deriving (Eq, Show)
 
--- | Foreign table name and names of the corresponding columns
-type Reference = (String, [(String, String)])
+-- | Foreign table schema, table name, and names of the corresponding columns
+type Reference = (Maybe String, String, [(String, String)])
 
 data TableInfo = TableInfo {
     tablePrimaryKeyName :: Maybe String
@@ -62,8 +63,8 @@ data AlterTable = AddUnique UniqueDef'
                 | AlterColumn AlterColumn' deriving Show
 
 data AlterDB = AddTable String
-             -- | Table name, create statement, structure of table from DB, structure of table from datatype, alters
-             | AlterTable String String TableInfo TableInfo [AlterTable]
+             -- | Table schema, table name, create statement, structure of table from DB, structure of table from datatype, alters
+             | AlterTable (Maybe String) String String TableInfo TableInfo [AlterTable]
              -- | Trigger name, table name
              | DropTrigger String String
              -- | Trigger name, table name, body
@@ -80,10 +81,10 @@ data MigrationPack m = MigrationPack {
     compareTypes :: DbType -> DbType -> Bool
   , compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
   , compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-  , checkTable :: String -> m (Maybe (Either [String] TableInfo))
+  , examineTable :: Maybe String -> String -> m (Either [String] (Maybe TableInfo))
   , migTriggerOnDelete :: String -> [(String, String)] -> m (Bool, [AlterDB])
   , migTriggerOnUpdate :: String -> String -> String -> m (Bool, [AlterDB])
-  , migConstr :: MigrationPack m -> Bool -> String -> ConstructorDef -> m (Bool, SingleMigration)
+  , migConstr :: MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
   , escape :: String -> String
   , primaryKeyType :: String
   , foreignKeyType :: String
@@ -95,8 +96,8 @@ data MigrationPack m = MigrationPack {
   , showAlterDb :: AlterDB -> SingleMigration
 }
 
-mkColumns :: (DbType -> DbType) -> String -> DbType -> ([Column], [Reference])
-mkColumns mkType columnName dbtype = go "" (columnName, dbtype) where
+mkColumns :: String -> DbType -> ([Column], [Reference])
+mkColumns columnName dbtype = go "" (columnName, dbtype) where
   go prefix (fname, typ) = (case typ of
     DbEmbedded (EmbeddedDef False ts) -> concatMap' (go $ prefix ++ fname ++ [delim]) ts
     DbEmbedded (EmbeddedDef True  ts) -> concatMap' (go "") ts
@@ -105,21 +106,22 @@ mkColumns mkType columnName dbtype = go "" (columnName, dbtype) where
       _ -> error $ "mkColumns: datatype inside DbMaybe must be one column " ++ show a
     DbEntity (Just (emb, uName)) e  -> (cols, ref:refs) where
       (cols, refs) = go prefix (fname, DbEmbedded emb)
-      ref = (entityName e, zipWith' (curry $ colName *** colName) cols foreignColumns)
+      ref = (entitySchema e, entityName e, zipWith' (curry $ colName *** colName) cols foreignColumns)
       cDef = case constructors e of
         [cDef'] -> cDef'
         _       -> error "mkColumns: datatype with unique key cannot have more than one constructor"
       UniqueDef _ _ uFields = findOne "unique" id uniqueName uName $ constrUniques cDef
       fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) uFields
       (foreignColumns, _) = concatMap' (go "") fields
-    t@(DbEntity Nothing e) -> ([Column name False (mkType t) Nothing], refs) where
-      refs = [(entityName e, [(name, keyName)])]
+    t@(DbEntity Nothing e) -> ([Column name False t Nothing], refs) where
+      refs = [(entitySchema e, entityName e, [(name, keyName)])]
       keyName = case constructors e of
         [cDef] -> fromMaybe (error "mkColumns: autokey name is Nothing") $ constrAutoKeyName cDef
         _      -> "id"
-    t@(DbList lName _) -> ([Column name False (mkType t) Nothing], refs) where
-      refs = [(lName, [(name, "id")])]
-    t -> ([Column name False (mkType t) Nothing], [])) where
+    t@(DbList lName _) -> ([Column name False t Nothing], refs) where
+      -- TODO: schema
+      refs = [(Nothing, lName, [(name, "id")])]
+    t -> ([Column name False t Nothing], [])) where
       name = prefix ++ fname
       concatMap' f xs = concat *** concat $ unzip $ map f xs
       zipWith' _ [] [] = []
@@ -156,25 +158,25 @@ migrateEntity m@MigrationPack{..} e = do
 
   if isSimple constrs
     then do
-      x <- checkTable name
+      x <- examineTable (entitySchema e) name
       -- check whether the table was created for multiple constructors before
       case x of
-        Just (Right old) | haveSameElems (compareColumns m) (tableColumns old) mainTableColumns -> do
+        Right (Just old) | haveSameElems (compareColumns m) (tableColumns old) mainTableColumns -> do
           return $ Left ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
-        Just (Left errs) -> return (Left errs)
-        _ -> liftM snd $ migConstr m True name $ head constrs
+        Right _ -> liftM snd $ migConstr m e $ head constrs
+        Left errs -> return (Left errs)
     else do
-      maincolumns <- checkTable name
+      maincolumns <- examineTable (entitySchema e) name
       let constrTable c = name ++ [delim] ++ constrName c
-      res <- mapM (\c -> migConstr m False name c) constrs
+      res <- mapM (migConstr m e) constrs
       case maincolumns of
-        Nothing -> do
+        Right Nothing -> do
           -- no constructor tables can exist if there is no main data table
           let orphans = filter (fst . fst) $ zip res constrs
           return $ if null orphans
             then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
             else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
-        Just (Right (TableInfo (Just _) columns [] [])) -> do
+        Right (Just (TableInfo (Just _) columns [] [])) -> do
           if haveSameElems (compareColumns m) columns mainTableColumns
             then do
               -- the datatype had also many constructors before
@@ -186,40 +188,41 @@ migrateEntity m@MigrationPack{..} e = do
               return $ mergeMigrations $ updateDiscriminators: (map snd res)
             else do
               return $ Left ["Migration from one constructor to many will be implemented soon. Datatype: " ++ name]
-        Just (Right structure) -> do
+        Right (Just structure) -> do
           return $ Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show structure]
-        Just (Left errs) -> return (Left errs)
+        Left errs -> return (Left errs)
 
 migrateList :: Monad m => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valuesName = mainName ++ delim : "values"
-  let (valueCols, valueRefs) = mkColumns id "value" t
+  let (valueCols, valueRefs) = mkColumns "value" t
   let mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ primaryKeyType ++ ")"
   let (addInCreate, addInAlters) = addUniquesReferences [] valueRefs
   let items = ("id " ++ foreignKeyType ++ " NOT NULL REFERENCES " ++ escape mainName ++ " ON DELETE CASCADE"):"ord INTEGER NOT NULL" : map showColumn valueCols ++ addInCreate
   let valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " items ++ ")"
   let expectedMainStructure = TableInfo (Just "id") [] [] []
   let valueColumns = Column "id" False DbInt64 Nothing : Column "ord" False DbInt32 Nothing : valueCols
-  let expectedValuesStructure = TableInfo Nothing valueColumns [] (map (\x -> (Nothing, x)) $ (mainName, [("id", "id")]) : valueRefs)
-  mainStructure <- checkTable mainName
-  valuesStructure <- checkTable valuesName
+  let expectedValuesStructure = TableInfo Nothing valueColumns [] (map (\x -> (Nothing, x)) $ (Nothing, mainName, [("id", "id")]) : valueRefs)
+  -- TODO: handle case when outer entity has a schema
+  mainStructure <- examineTable Nothing mainName
+  valuesStructure <- examineTable Nothing valuesName
   let triggerMain = []
   (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletes m valueCols
   return $ case (mainStructure, valuesStructure) of
-    (Nothing, Nothing) -> let
-      rest = [AlterTable valuesName valuesQuery expectedValuesStructure expectedValuesStructure addInAlters]
+    (Right Nothing, Right Nothing) -> let
+      rest = [AlterTable Nothing valuesName valuesQuery expectedValuesStructure expectedValuesStructure addInAlters]
       in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ rest ++ triggerMain ++ triggerValues
-    (Just (Right mainStructure'), Just (Right valuesStructure')) -> let
+    (Right (Just mainStructure'), Right (Just valuesStructure')) -> let
       f name a@(TableInfo id1 cols1 uniqs1 refs1) b@(TableInfo id2 cols2 uniqs2 refs2) = if id1 == id2 && haveSameElems (compareColumns m) cols1 cols2 && haveSameElems compareUniqs uniqs1 uniqs2 && haveSameElems compareRefs refs1 refs2
         then []
         else ["List table " ++ name ++ " error. Expected: " ++ show b ++ ". Found: " ++ show a]
       errors = f mainName mainStructure' expectedMainStructure ++ f valuesName valuesStructure' expectedValuesStructure
       in if null errors then Right [] else Left errors
-    (Just (Left errs1), Just (Left errs2)) -> Left $ errs1 ++ errs2
-    (Just (Left errs), Just _) -> Left errs
-    (Just _, Just (Left errs)) -> Left errs
-    (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
-    (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
+    (Left errs1, Left errs2) -> Left $ errs1 ++ errs2
+    (Left errs, Right _) -> Left errs
+    (Right _, Left errs) -> Left errs
+    (_, Right Nothing) -> Left ["Found orphan main list table " ++ mainName]
+    (Right Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 migrateList _ t = fail $ "migrateList: expected DbList, got " ++ show t
 
 -- from database, from datatype
@@ -266,44 +269,45 @@ migrateUniq (UniqueDef' name1 _ cols1, u2@(UniqueDef' _ typ2 cols2)) = if haveSa
   then []
   else [if typ2 == UniqueConstraint then DropConstraint name1 else DropIndex name1, AddUnique u2]
   
-defaultMigConstr :: Monad m => MigrationPack m -> Bool -> String -> ConstructorDef -> m (Bool, SingleMigration)
-defaultMigConstr migPack@MigrationPack{..} simple name constr = do
-  let cName = if simple then name else name ++ [delim] ++ constrName constr
-  let mkColumns' xs = concat *** concat $ unzip $ map (uncurry $ mkColumns id) xs
-  let (columns, refs) = mkColumns' $ constrParams constr
-  tableStructure <- checkTable cName
+defaultMigConstr :: Monad m => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
+defaultMigConstr migPack@MigrationPack{..} e constr = do
+  let simple = isSimple $ constructors e
+      name = entityName e
+      cName = if simple then name else name ++ [delim] ++ constrName constr
+      mkColumns' xs = concat *** concat $ unzip $ map (uncurry mkColumns) xs
+      (columns, refs) = mkColumns' $ constrParams constr
+  tableStructure <- examineTable (entitySchema e) cName
   let dels = mkDeletes migPack columns
   (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
   updTriggers <- liftM concat $ mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) dels
   
-  let mainTableName = if simple then Nothing else Just name
-      refs' = maybeToList (fmap (\x -> (x, [(fromJust $ constrAutoKeyName constr, mainTableId)])) mainTableName) ++ refs
+  let refs' = refs ++ if simple then [] else [(entitySchema e, name, [(fromJust $ constrAutoKeyName constr, mainTableId)])]
 
-      mainRef = maybe "" (\x -> " REFERENCES " ++ escape x ++ " ON DELETE CASCADE ") mainTableName
+      mainRef = if simple then "" else " REFERENCES " ++ mainTableName escape e ++ " ON DELETE CASCADE "
       autoKey = fmap (\x -> escape x ++ " " ++ primaryKeyType ++ mainRef) $ constrAutoKeyName constr
 
       uniques = map (\(UniqueDef uName uType cols) -> UniqueDef' uName uType (map colName $ fst $ mkColumns' cols)) $ constrUniques constr
-      (addInCreate, addInAlters) = addUniquesReferences uniques refs
       -- refs instead of refs' because the reference to the main table id is hardcoded in mainRef
+      (addInCreate, addInAlters) = addUniquesReferences uniques refs
       items = maybeToList autoKey ++ map showColumn columns ++ addInCreate
-      addTable = "CREATE TABLE " ++ escape cName ++ " (" ++ intercalate ", " items ++ ")"
+      addTable = "CREATE TABLE " ++ tableName escape e constr ++ " (" ++ intercalate ", " items ++ ")"
 
       expectedTableStructure = TableInfo (constrAutoKeyName constr) columns uniques (map (\r -> (Nothing, r)) refs')
       (migErrs, constrExisted, mig) = case tableStructure of
-        Nothing  -> let
-          rest = AlterTable cName addTable expectedTableStructure expectedTableStructure addInAlters
+        Right Nothing  -> let
+          rest = AlterTable (entitySchema e) cName addTable expectedTableStructure expectedTableStructure addInAlters
           in ([], False, [AddTable addTable, rest])
-        Just (Right oldTableStructure) -> let
+        Right (Just oldTableStructure) -> let
           alters = getAlters migPack oldTableStructure expectedTableStructure
-          in ([], True, [AlterTable cName addTable oldTableStructure expectedTableStructure alters])
-        Just (Left x) -> (x, True, [])
+          in ([], True, [AlterTable (entitySchema e) cName addTable oldTableStructure expectedTableStructure alters])
+        Left errs -> (errs, True, [])
       -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
-      errs = if constrExisted == triggerExisted || (constrExisted && null dels)
+      allErrs = if constrExisted == triggerExisted || (constrExisted && null dels)
         then migErrs
         else ["Both trigger and constructor table must exist: " ++ cName] ++ migErrs
-  return $ (constrExisted, if null errs
+  return $ (constrExisted, if null allErrs
     then mergeMigrations $ map showAlterDb $ mig ++ delTrigger ++ updTriggers
-    else Left errs)
+    else Left allErrs)
 
 -- on delete removes all ephemeral data
 -- returns column name and delete statement for the referenced table
