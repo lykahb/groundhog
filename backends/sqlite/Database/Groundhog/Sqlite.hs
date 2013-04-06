@@ -45,7 +45,8 @@ instance DbDescriptor Sqlite where
   type AutoKeyType Sqlite = Int64
   type QueryRaw Sqlite = Snippet Sqlite
 
-instance SqlDb Sqlite
+instance SqlDb Sqlite where
+  append a b = Expr $ operator 50 "||" a b
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}

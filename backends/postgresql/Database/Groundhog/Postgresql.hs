@@ -53,7 +53,8 @@ instance DbDescriptor Postgresql where
   type AutoKeyType Postgresql = Int64
   type QueryRaw Postgresql = Snippet Postgresql
 
-instance SqlDb Postgresql
+instance SqlDb Postgresql where
+  append a b = Expr $ operator 50 "||" a b
 
 instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgresql m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}

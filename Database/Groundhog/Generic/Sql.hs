@@ -28,7 +28,7 @@ module Database.Groundhog.Generic.Sql
     , operator
     , parens
     , Snippet(..)
-    , SqlDb
+    , SqlDb(..)
     , liftExpr
     , tableName
     , mainTableName
@@ -66,8 +66,10 @@ instance StringLike Utf8 where
 -- | Escape function, priority of the outer operator. The result is a list for the embedded data which may expand to several RenderS.
 newtype Snippet db r = Snippet ((Utf8 -> Utf8) -> Int -> [RenderS db r])
 
--- Alas, GHC before 7.2 does not support superclass equality constraints (QueryRaw db ~ Snippet db). 
-class DbDescriptor db => SqlDb db
+-- Alas, GHC before 7.2 does not support superclass equality constraints (QueryRaw db ~ Snippet db).
+-- | This class distinguishes databases which support SQL-specific expressions. It contains ad hoc members for features whose syntax differs across the databases.
+class DbDescriptor db => SqlDb db where
+  append :: (ExpressionOf db r a String, ExpressionOf db r b String) => a -> b -> Expr db r String
 
 renderExpr :: (DbDescriptor db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> UntypedExpr db r -> RenderS db r
 renderExpr esc expr = renderExprPriority esc 0 expr

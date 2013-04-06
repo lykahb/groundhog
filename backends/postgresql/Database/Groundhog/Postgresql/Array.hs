@@ -26,8 +26,8 @@ module Database.Groundhog.Postgresql.Array
 import Database.Groundhog.Core
 import Database.Groundhog.Expression
 import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Sql
-import Database.Groundhog.Postgresql hiding (append)
+import Database.Groundhog.Generic.Sql hiding (append)
+import Database.Groundhog.Postgresql
 
 import Blaze.ByteString.Builder (fromByteString, toByteString)
 import Blaze.ByteString.Builder.Word (fromWord8)
