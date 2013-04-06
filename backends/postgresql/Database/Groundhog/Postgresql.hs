@@ -81,6 +81,21 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgre
   insertList l = insertList' l
   getList k = getList' k
 
+instance (MonadBaseControl IO m, MonadIO m) => SchemaAnalyzer (DbPersist Postgresql m) where
+  listTables schema = queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue proxy schema] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTableTriggers schema name = queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  analyzeTable = analyzeTable'
+  analyzeTrigger schema name = do
+    x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,current_schema()) AND trigger_name=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
+    case x of
+      Nothing  -> return Nothing
+      Just src -> return (fst $ fromPurePersistValues proxy src)
+  analyzeFunction schema name = do
+    x <- queryRaw' "SELECT p.prosrc FROM pg_catalog.pg_namespace n INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid WHERE n.nspname = coalesce(?,current_schema()) AND p.proname = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
+    case x of
+      Nothing  -> return Nothing
+      Just src -> return (fst $ fromPurePersistValues proxy src)
+
 --{-# SPECIALIZE withPostgresqlPool :: String -> Int -> (Pool Postgresql -> IO a) -> IO a #-}
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
                => String -- ^ connection string
@@ -224,7 +239,6 @@ migrationPack currentSchema = GM.MigrationPack
   compareTypes
   (compareRefs currentSchema)
   compareUniqs
-  examineTable
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
@@ -249,27 +263,12 @@ showColumn (Column n nu t def) = concat
         Just s  -> " DEFAULT " ++ s
     ]
 
-checkFunction :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe String)
-checkFunction name = do
-  x <- queryRaw' "SELECT p.prosrc FROM pg_catalog.pg_namespace n INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = ?" [toPrimitivePersistValue proxy name] id
-  case x of
-    Nothing  -> return Nothing
-    Just src -> return (fst $ fromPurePersistValues proxy src)
-
-checkTrigger :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Postgresql m (Maybe String)
-checkTrigger name = do
-  x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_name = ?" [toPrimitivePersistValue proxy name] id
-  case x of
-    Nothing  -> return Nothing
-    Just src -> return (fst $ fromPurePersistValues proxy src)
-
--- it handles only delete operations. So far when list or tuple replace is not allowed, it is ok
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB])
-migTriggerOnDelete name deletes = do
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB])
+migTriggerOnDelete schema name deletes = do
   let funcName = name
   let trigName = name
-  func <- checkFunction funcName
-  trig <- checkTrigger trigName
+  func <- analyzeFunction schema funcName
+  trig <- analyzeTrigger schema trigName
   let funcBody = "BEGIN " ++ concatMap snd deletes ++ "RETURN NEW;END;"
       addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ escape funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
       funcMig = case func of
@@ -297,12 +296,12 @@ migTriggerOnDelete name deletes = do
       
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB])
-migTriggerOnUpdate name fieldName del = do
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> String -> String -> DbPersist Postgresql m (Bool, [AlterDB])
+migTriggerOnUpdate schema name fieldName del = do
   let funcName = name ++ delim : fieldName
   let trigName = name ++ delim : fieldName
-  func <- checkFunction funcName
-  trig <- checkTrigger trigName
+  func <- analyzeFunction schema funcName
+  trig <- analyzeTrigger schema trigName
   let funcBody = "BEGIN " ++ del ++ "RETURN NEW;END;"
       addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ escape funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
       funcMig = case func of
@@ -322,8 +321,8 @@ migTriggerOnUpdate name fieldName del = do
             else [DropTrigger trigName name, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
   
-examineTable :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either [String] (Maybe TableInfo))
-examineTable schema name = do
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either [String] (Maybe TableInfo))
+analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
     Just _ -> do
@@ -347,8 +346,8 @@ examineTable schema name = do
       uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace WHERE sch.nspname = coalesce(?, current_schema()) AND tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
       let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes
-      references <- examineTableReferences schema name
-      primaryKeyResult <- checkPrimaryKey schema name
+      references <- analyzeTableReferences schema name
+      primaryKeyResult <- analyzePrimaryKey schema name
       let (primaryKey, uniqs') = case primaryKeyResult of
             (Left primaryKeyName) -> (primaryKeyName, uniqs)
             (Right u) -> (Nothing, u:uniqs)
@@ -357,8 +356,8 @@ examineTable schema name = do
         errs -> Left errs
     Nothing -> return $ Right Nothing
 
-checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
-checkPrimaryKey schema name = do
+analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either (Maybe String) UniqueDef')
+analyzePrimaryKey schema name = do
   uniqRows <- queryRaw' "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog = u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=coalesce(?, current_schema()) AND tc.table_name=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   let mkUniq us = UniqueDef' (fst $ head us) UniqueConstraint (map snd us)
   return $ case uniqRows of
@@ -370,8 +369,8 @@ getColumn :: String -> ((String, String, String, Maybe String), (Maybe Int, Mayb
 getColumn _ ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Right $ Column column_name (is_nullable == "YES") t d where
   t = readSqlType udt_name modifiers arr_info
 
-examineTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m [(Maybe String, Reference)]
-examineTableReferences schema tName = do
+analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m [(Maybe String, Reference)]
+analyzeTableReferences schema tName = do
   let sql = "SELECT c.conname, sch_parent.nspname, cl_parent.relname, a_child.attname AS child, a_parent.attname AS parent FROM\
 \  (SELECT r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname\
 \    FROM pg_catalog.pg_constraint r WHERE r.contype = 'f'\
@@ -398,7 +397,7 @@ showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPri
 showAlterDb (AddTriggerOnUpdate trigName tName fName body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ escape trigName ++ " AFTER UPDATE OF " ++ escape fName ++ " ON " ++ escape tName ++ " FOR EACH ROW " ++ body)]
 showAlterDb (CreateOrReplaceFunction s) = Right [(False, functionPriority, s)]
 showAlterDb (DropFunction funcName) = Right [(False, functionPriority, "DROP FUNCTION " ++ escape funcName ++ "()")]
-                 
+
 showAlterTable :: String -> AlterTable -> (Bool, Int, String)
 showAlterTable table (AlterColumn alt) = showAlterColumn table alt
 showAlterTable table (AddUnique (UniqueDef' uName UniqueConstraint cols)) = (False, defaultPriority, concat
@@ -569,13 +568,7 @@ compareRefs currentSchema (_, (sch1, tbl1, pairs1)) (_, (sch2, tbl2, pairs2)) =
 
 compareTypes :: DbType -> DbType -> Bool
 compareTypes type1 type2 = f type1 == f type2 where
-  f = map toUpper . showSqlType . simplifyType
-
--- | Converts complex datatypes that reference other data to id type DbInt64. Does not handle DbEmbedded
-simplifyType :: DbType -> DbType
-simplifyType (DbEntity Nothing _) = DbInt64
-simplifyType (DbList _ _) = DbInt64
-simplifyType x = x
+  f = map toUpper . showSqlType
 
 defaultPriority :: Int
 defaultPriority = 0

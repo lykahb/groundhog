@@ -10,6 +10,7 @@ module Database.Groundhog.Generic.Migration
   , AlterTable(..)
   , AlterDB(..)
   , MigrationPack(..)
+  , SchemaAnalyzer(..)
   , mkColumns
   , migrateRecursively
   , migrateEntity
@@ -81,9 +82,8 @@ data MigrationPack m = MigrationPack {
     compareTypes :: DbType -> DbType -> Bool
   , compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
   , compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-  , examineTable :: Maybe String -> String -> m (Either [String] (Maybe TableInfo))
-  , migTriggerOnDelete :: String -> [(String, String)] -> m (Bool, [AlterDB])
-  , migTriggerOnUpdate :: String -> String -> String -> m (Bool, [AlterDB])
+  , migTriggerOnDelete :: Maybe String -> String -> [(String, String)] -> m (Bool, [AlterDB])
+  , migTriggerOnUpdate :: Maybe String -> String -> String -> String -> m (Bool, [AlterDB])
   , migConstr :: MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
   , escape :: String -> String
   , primaryKeyType :: String
@@ -149,7 +149,7 @@ migrateRecursively migE migL = go . dbType where
       _ -> return ()
   allSubtypes = map snd . concatMap constrParams . constructors
 
-migrateEntity :: Monad m => MigrationPack m -> EntityDef -> m SingleMigration
+migrateEntity :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> m SingleMigration
 migrateEntity m@MigrationPack{..} e = do
   let name = entityName e
   let constrs = constructors e
@@ -158,7 +158,7 @@ migrateEntity m@MigrationPack{..} e = do
 
   if isSimple constrs
     then do
-      x <- examineTable (entitySchema e) name
+      x <- analyzeTable (entitySchema e) name
       -- check whether the table was created for multiple constructors before
       case x of
         Right (Just old) | haveSameElems (compareColumns m) (tableColumns old) mainTableColumns -> do
@@ -166,7 +166,7 @@ migrateEntity m@MigrationPack{..} e = do
         Right _ -> liftM snd $ migConstr m e $ head constrs
         Left errs -> return (Left errs)
     else do
-      maincolumns <- examineTable (entitySchema e) name
+      maincolumns <- analyzeTable (entitySchema e) name
       let constrTable c = name ++ [delim] ++ constrName c
       res <- mapM (migConstr m e) constrs
       case maincolumns of
@@ -192,7 +192,7 @@ migrateEntity m@MigrationPack{..} e = do
           return $ Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show structure]
         Left errs -> return (Left errs)
 
-migrateList :: Monad m => MigrationPack m -> DbType -> m SingleMigration
+migrateList :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valuesName = mainName ++ delim : "values"
   let (valueCols, valueRefs) = mkColumns "value" t
@@ -204,10 +204,10 @@ migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valueColumns = Column "id" False DbInt64 Nothing : Column "ord" False DbInt32 Nothing : valueCols
   let expectedValuesStructure = TableInfo Nothing valueColumns [] (map (\x -> (Nothing, x)) $ (Nothing, mainName, [("id", "id")]) : valueRefs)
   -- TODO: handle case when outer entity has a schema
-  mainStructure <- examineTable Nothing mainName
-  valuesStructure <- examineTable Nothing valuesName
+  mainStructure <- analyzeTable Nothing mainName
+  valuesStructure <- analyzeTable Nothing valuesName
   let triggerMain = []
-  (_, triggerValues) <- migTriggerOnDelete valuesName $ mkDeletes m valueCols
+  (_, triggerValues) <- migTriggerOnDelete Nothing valuesName $ mkDeletes m valueCols
   return $ case (mainStructure, valuesStructure) of
     (Right Nothing, Right Nothing) -> let
       rest = [AlterTable Nothing valuesName valuesQuery expectedValuesStructure expectedValuesStructure addInAlters]
@@ -269,19 +269,20 @@ migrateUniq (UniqueDef' name1 _ cols1, u2@(UniqueDef' _ typ2 cols2)) = if haveSa
   then []
   else [if typ2 == UniqueConstraint then DropConstraint name1 else DropIndex name1, AddUnique u2]
   
-defaultMigConstr :: Monad m => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
+defaultMigConstr :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
 defaultMigConstr migPack@MigrationPack{..} e constr = do
   let simple = isSimple $ constructors e
       name = entityName e
+      schema = entitySchema e
       cName = if simple then name else name ++ [delim] ++ constrName constr
       mkColumns' xs = concat *** concat $ unzip $ map (uncurry mkColumns) xs
       (columns, refs) = mkColumns' $ constrParams constr
-  tableStructure <- examineTable (entitySchema e) cName
+  tableStructure <- analyzeTable schema cName
   let dels = mkDeletes migPack columns
-  (triggerExisted, delTrigger) <- migTriggerOnDelete cName dels
-  updTriggers <- liftM concat $ mapM (liftM snd . uncurry (migTriggerOnUpdate cName)) dels
+  (triggerExisted, delTrigger) <- migTriggerOnDelete schema cName dels
+  updTriggers <- liftM concat $ mapM (liftM snd . uncurry (migTriggerOnUpdate schema cName)) dels
   
-  let refs' = refs ++ if simple then [] else [(entitySchema e, name, [(fromJust $ constrAutoKeyName constr, mainTableId)])]
+  let refs' = refs ++ if simple then [] else [(schema, name, [(fromJust $ constrAutoKeyName constr, mainTableId)])]
 
       mainRef = if simple then "" else " REFERENCES " ++ mainTableName escape e ++ " ON DELETE CASCADE "
       autoKey = fmap (\x -> escape x ++ " " ++ primaryKeyType ++ mainRef) $ constrAutoKeyName constr
@@ -295,11 +296,11 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
       expectedTableStructure = TableInfo (constrAutoKeyName constr) columns uniques (map (\r -> (Nothing, r)) refs')
       (migErrs, constrExisted, mig) = case tableStructure of
         Right Nothing  -> let
-          rest = AlterTable (entitySchema e) cName addTable expectedTableStructure expectedTableStructure addInAlters
+          rest = AlterTable schema cName addTable expectedTableStructure expectedTableStructure addInAlters
           in ([], False, [AddTable addTable, rest])
         Right (Just oldTableStructure) -> let
           alters = getAlters migPack oldTableStructure expectedTableStructure
-          in ([], True, [AlterTable (entitySchema e) cName addTable oldTableStructure expectedTableStructure alters])
+          in ([], True, [AlterTable schema cName addTable oldTableStructure expectedTableStructure alters])
         Left errs -> (errs, True, [])
       -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
       allErrs = if constrExisted == triggerExisted || (constrExisted && null dels)
@@ -322,3 +323,19 @@ mkDeletes MigrationPack{..} columns = mapMaybe delField columns where
 compareColumns :: MigrationPack m -> Column -> Column -> Bool
 compareColumns MigrationPack{..} (Column name1 isNull1 type1 def1) (Column name2 isNull2 type2 def2) =
   name1 == name2 && isNull1 == isNull2 && compareTypes type1 type2 && def1 == def2
+  
+class SchemaAnalyzer m where
+  listTables :: Maybe String -- ^ Schema name
+             -> m [String]
+  listTableTriggers :: Maybe String -- ^ Schema name
+                    -> String -- ^ Table name
+                    -> m [String]
+  analyzeTable :: Maybe String -- ^ Schema name
+               -> String -- ^ Table name
+               -> m (Either [String] (Maybe TableInfo))
+  analyzeTrigger :: Maybe String -- ^ Schema name
+                 -> String -- ^ Trigger name
+                 -> m (Maybe String)
+  analyzeFunction :: Maybe String -- ^ Schema name
+                  -> String -- ^ Function name
+                  -> m (Maybe String)

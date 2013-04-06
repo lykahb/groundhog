@@ -75,6 +75,17 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   insertList l = insertList' l
   getList k = getList' k
 
+instance (MonadBaseControl IO m, MonadIO m) => SchemaAnalyzer (DbPersist Sqlite m) where
+  listTables _ = queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTableTriggers _ name = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  analyzeTable = analyzeTable'
+  analyzeTrigger _ name = do
+    x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue proxy name] id
+    case x of
+      Nothing  -> return Nothing
+      Just src -> return (fst $ fromPurePersistValues proxy src)
+  analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
+
 --{-# SPECIALIZE INLINE H.get :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a) -> Key v BackendSpecific -> DbPersist Sqlite m (Maybe v) #-}
 
 --{-# SPECIALIZE withSqlitePool :: String -> Int -> (Pool Sqlite -> IO a) -> IO a #-}
@@ -127,7 +138,6 @@ migrationPack = GM.MigrationPack
   compareTypes
   compareRefs
   compareUniqs
-  examineTable
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
@@ -144,11 +154,10 @@ addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
   (constraints, indexes) = partition (\(UniqueDef' _ uType _) -> uType == UniqueConstraint) uniques
 
--- it handles only delete operations. So far when list replace is not allowed, it is ok
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
-migTriggerOnDelete name deletes = do
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
+migTriggerOnDelete schema name deletes = do
   let addTrigger = AddTriggerOnDelete name name (concatMap snd deletes)
-  x <- checkTrigger name
+  x <- analyzeTrigger schema name
   return $ case x of
     Nothing | null deletes -> (False, [])
     Nothing -> (False, [addTrigger])
@@ -159,36 +168,21 @@ migTriggerOnDelete name deletes = do
         -- this can happen when an ephemeral field was added or removed.
         else [DropTrigger name name, addTrigger])
         
--- | Table name and a  list of field names and according delete statements
+-- | Schema name, table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => String -> String -> String -> DbPersist Sqlite m (Bool, [AlterDB])
-migTriggerOnUpdate name fieldName del = do
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> String -> String -> DbPersist Sqlite m (Bool, [AlterDB])
+migTriggerOnUpdate schema name fieldName del = do
   let trigName = name ++ delim : fieldName
   let addTrigger = AddTriggerOnUpdate trigName name fieldName del
-  x <- checkTrigger trigName
+  x <- analyzeTrigger schema trigName
   return $ case x of
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
         else [DropTrigger trigName name, addTrigger])
-  
-checkTrigger :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
-checkTrigger = checkSqliteMaster "trigger"
 
-checkSqliteMaster :: (MonadBaseControl IO m, MonadIO m) => String -> String -> DbPersist Sqlite m (Maybe String)
-checkSqliteMaster vtype name = do
-  let query = "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?"
-  x <- queryRawTyped query [DbString] [toPrimitivePersistValue proxy vtype, toPrimitivePersistValue proxy name] id
-  let throwErr = error . ("Unexpected result from sqlite_master: " ++)
-  case x of
-    Nothing -> return Nothing
-    Just [hsql] -> case hsql of
-      PersistString sql -> return $ Just sql
-      err               -> throwErr $ "column sql is not string: " ++ show err
-    Just xs -> throwErr $ "requested 1 column, returned " ++ show xs
-
-examineTable :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Either [String] (Maybe TableInfo))
-examineTable Nothing tName = do
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Either [String] (Maybe TableInfo))
+analyzeTable' _ tName = do
   let fromName = escapeS . fromString
   tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   case tableInfo of
@@ -212,17 +206,16 @@ examineTable Nothing tName = do
           forM foreigns $ \rows -> do 
             let (_, (_, foreignTable, _, _)) = head rows
             refs <- forM rows $ \(_, (_, _, (child, parent), _)) -> case parent of
-              Nothing -> checkPrimaryKey foreignTable >>= \x -> case x of
+              Nothing -> analyzePrimaryKey foreignTable >>= \x -> case x of
                 Just primaryKeyName -> return (child, primaryKeyName)
-                Nothing -> error $ "examineTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
+                Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
               Just columnName -> return (child, columnName)
             return (Nothing, (Nothing, foreignTable, refs))
-      primaryKey <- checkPrimaryKey tName
+      primaryKey <- analyzePrimaryKey tName
       return $ Right $ Just $ TableInfo primaryKey columns uniques foreigns
-examineTable (Just _) _ = return $ Left ["examineTable: Sqlite does not support schemas"]
 
-checkPrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
-checkPrimaryKey tName = do
+analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
+analyzePrimaryKey tName = do
   tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   let rawColumns :: [(Int, (String, String, Int, Maybe String, Int))]
       rawColumns = filter (\(_ , (_, _, _, _, isPrimary)) -> isPrimary == 1) tableInfo

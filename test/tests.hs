@@ -7,6 +7,7 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Migration (SchemaAnalyzer(..))
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
@@ -16,7 +17,7 @@ import qualified Database.Groundhog.Postgresql.Array as Arr
 import Database.Groundhog.Postgresql.Geometry
 import Data.ByteString.Char8 (unpack)
 import Data.Int
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, sort)
 import qualified Data.Map as Map
 import qualified Data.Time as Time
 import qualified Data.Traversable as T
@@ -124,7 +125,7 @@ main = do
   let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ m
   let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
   -- we need clean db before each migration test
-  defaultMain [ sqliteMigrationTestSuite $ runSqlite
+  defaultMain [ sqliteTestSuite $ runSqlite
               , postgresqlTestSuite $ runPSQL
               , testGroup "Database.Groundhog.Sqlite" $ mkTestSuite runSqlite ++ mkSqlTestSuite runSqlite
               , testGroup "Database.Groundhog.Postgresql" $ mkTestSuite runPSQL ++ mkSqlTestSuite runPSQL
@@ -181,9 +182,10 @@ mkTestSuite run =
   ]
 --  [testCase "testPersistSettings" $ run testPersistSettings]
 
-sqliteMigrationTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> Test
-sqliteMigrationTestSuite run = testGroup "Database.Groundhog.Sqlite.Migration"
+sqliteTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Sqlite m () -> IO ()) -> Test
+sqliteTestSuite run = testGroup "Database.Groundhog.Sqlite"
   [ testCase "testMigrateOrphanConstructors" $ run testMigrateOrphanConstructors
+  , testCase "testSchemaAnalysisSqlite" $ run testSchemaAnalysisSqlite
   ]
 
 postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Postgresql m () -> IO ()) -> Test
@@ -191,6 +193,7 @@ postgresqlTestSuite run = testGroup "Database.Groundhog.Postgresql"
   [ testCase "testGeometry" $ run testGeometry
   , testCase "testArrays" $ run testArrays
   , testCase "testSchemas" $ run testSchemas
+  , testCase "testSchemaAnalysisPostgresql" $ run testSchemaAnalysisPostgresql
   ]
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
@@ -739,6 +742,34 @@ testSchemas = do
   k <- insert val
   let val2 = InAnotherSchema (Just k)
   Just val2 @=?? (insert val2 >>= get)
+
+testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m ()
+testSchemaAnalysisSqlite = do
+  let val = Single (Single "abc")
+  migr val
+  let action = "select * from \"Single#String\";"
+  executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW BEGIN " ++ action ++ " END") []
+  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
+  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
+  sql <- analyzeTrigger Nothing "myTrigger"
+  let sql' = maybe (error "No trigger found") id sql
+  liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
+
+testSchemaAnalysisPostgresql :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+testSchemaAnalysisPostgresql = do
+  let val = Single (Single "abc")
+  migr val
+  let action = "EXECUTE PROCEDURE \"myFunction\"()"
+  executeRaw False "CREATE OR REPLACE FUNCTION \"myFunction\"() RETURNS trigger AS $$ BEGIN RETURN NEW;END; $$ LANGUAGE plpgsql" []
+  executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW " ++ action) []
+  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
+  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
+  trigSql <- analyzeTrigger Nothing "myTrigger"
+  let trigSql' = maybe (error "No trigger found") id trigSql
+  liftIO $ action `isInfixOf` trigSql' H.@? "Trigger does not contain action statement"
+  funcSql <- analyzeFunction Nothing "myFunction"
+  let funcSql' = maybe (error "No function found") id funcSql
+  liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
 
 -- TODO: write test which inserts data before adding new columns
 
