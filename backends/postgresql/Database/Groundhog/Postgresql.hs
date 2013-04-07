@@ -60,9 +60,10 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgre
   {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
   type PhantomDb (DbPersist Postgresql m) = Postgresql
   insert v = insert' v
+  insert_ v = insert_' v
   insertBy u v = H.insertBy escapeS queryRawTyped' u v
   insertByAll v = H.insertByAll escapeS queryRawTyped' v
-  replace k v = H.replace escapeS queryRawTyped' executeRaw' insertIntoConstructorTable k v
+  replace k v = H.replace escapeS queryRawTyped' executeRaw' (insertIntoConstructorTable False) k v
   select options = H.select escapeS queryRawTyped' "" renderCond' options
   selectAll = H.selectAll escapeS queryRawTyped'
   get k = H.get escapeS queryRawTyped' k
@@ -146,7 +147,7 @@ insert' v = do
   liftM fst $ if isSimple (constructors e)
     then do
       let constr = head $ constructors e
-      let RenderS query vals' = insertIntoConstructorTable False (tableName escapeS e constr) constr (tail vals)
+      let RenderS query vals' = insertIntoConstructorTable True False (tableName escapeS e constr) constr (tail vals)
       case constrAutoKeyName constr of
         Nothing -> executeRaw' query (vals' []) >> pureFromPersistValue []
         Just _  -> do
@@ -158,17 +159,39 @@ insert' v = do
       let constr = constructors e !! constructorNum
       let query = "INSERT INTO " <> mainTableName escapeS e <> "(discr)VALUES(?)RETURNING(id)"
       rowid <- queryRaw' query (take 1 vals) getKey
-      let RenderS cQuery vals' = insertIntoConstructorTable True (tableName escapeS e constr) constr (rowid:tail vals)
+      let RenderS cQuery vals' = insertIntoConstructorTable False True (tableName escapeS e constr) constr (rowid:tail vals)
       executeRaw' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
-insertIntoConstructorTable withId tName c vals = RenderS query vals' where
+{-# SPECIALIZE insert_' :: PersistEntity v => v -> DbPersist Postgresql IO () #-}
+{-# INLINE insert_' #-}
+insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Postgresql m ()
+insert_' v = do
+  -- constructor number and the rest of the field values
+  vals <- toEntityPersistValues' v
+  let e = entityDef v
+  let constructorNum = fromPrimitivePersistValue proxy (head vals)
+
+  if isSimple (constructors e)
+    then do
+      let constr = head $ constructors e
+      let RenderS query vals' = insertIntoConstructorTable False False (tableName escapeS e constr) constr (tail vals)
+      executeRaw' query (vals' [])
+    else do
+      let constr = constructors e !! constructorNum
+      let query = "INSERT INTO " <> mainTableName escapeS e <> "(discr)VALUES(?)RETURNING(id)"
+      rowid <- queryRaw' query (take 1 vals) getKey
+      let RenderS cQuery vals' = insertIntoConstructorTable False True (tableName escapeS e constr) constr (rowid:tail vals)
+      executeRaw' cQuery (vals' [])
+
+insertIntoConstructorTable :: Bool -> Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
+insertIntoConstructorTable withRet withId tName c vals = RenderS query vals' where
   query = "INSERT INTO " <> tName <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning
   (fields, returning) = case constrAutoKeyName c of
-    Just idName | withId    -> ((idName, dbType (0 :: Int64)):constrParams c, mempty)
-                | otherwise -> (constrParams c, "RETURNING(" <> escapeS (fromString idName) <> ")")
-    _                       -> (constrParams c, mempty)
+    Just idName -> (fields', returning') where
+      fields' = if withId then (idName, dbType (0 :: Int64)):constrParams c else constrParams c
+      returning' = if withRet then "RETURNING(" <> escapeS (fromString idName) <> ")" else mempty
+    _           -> (constrParams c, mempty)
   fieldNames   = renderFields escapeS fields
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 

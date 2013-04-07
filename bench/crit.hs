@@ -93,4 +93,5 @@ main =
       , bgroup "deleteByKey" $ mkBench (G.deleteByKey gKey) (P.delete pKey)
       , bgroup "deleteWhere" $ mkBench (G.delete gCond) (P.deleteWhere pCond)
       , bgroup "insert" $ mkBench (G.insert gPerson) (P.insert pPerson)
+      , bgroup "insert_" $ mkBench (G.insert_ gPerson) (P.insert_ pPerson)
       ]

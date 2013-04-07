@@ -253,11 +253,16 @@ testEmbedded = do
 
 testInsert :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testInsert = do
-  migr (undefined :: Single String)
   let val = Single "abc"
-  k <- insert val
-  val' <- get k
-  Just val @=? val'
+  let multi = Second "abc"
+  migr val
+  migr multi
+  Just val @=?? (insert val >>= get)
+  Just multi @=?? (insert multi >>= get)
+  insert_ val
+  insert_ multi
+  [val, val] @=?? liftM (map snd) selectAll
+  [multi, multi] @=?? liftM (map snd) selectAll
 
 -- There is a weird bug in GHC 7.4.1 which causes program to hang if there is a type class constraint which is not used. See ticket 7126. It may arise with maybes
 -- instance (PersistField a, NeverNull a) => PersistField (Maybe a) where -- OK

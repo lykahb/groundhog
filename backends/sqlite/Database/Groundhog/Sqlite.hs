@@ -52,6 +52,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
   type PhantomDb (DbPersist Sqlite m) = Sqlite
   insert v = insert' v
+  insert_ v = insert_' v
   insertBy u v = H.insertBy escapeS queryRawTyped u v
   insertByAll v = H.insertByAll escapeS queryRawTyped v
   replace k v = H.replace escapeS queryRawTyped executeRawCached' insertIntoConstructorTable k v
@@ -331,6 +332,27 @@ insert' v = do
       let RenderS cQuery vals' = insertIntoConstructorTable True (tableName escapeS e constr) constr (rowid:tail vals)
       executeRawCached' cQuery (vals' [])
       pureFromPersistValue [rowid]
+
+{-# SPECIALIZE insert_' :: PersistEntity v => v -> DbPersist Sqlite IO () #-}
+insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Sqlite m ()
+insert_' v = do
+  -- constructor number and the rest of the field values
+  vals <- toEntityPersistValues' v
+  let e = entityDef v
+  let constructorNum = fromPrimitivePersistValue proxy (head vals)
+
+  if isSimple (constructors e)
+    then do
+      let constr = head $ constructors e
+      let RenderS query vals' = insertIntoConstructorTable False (tableName escapeS e constr) constr (tail vals)
+      executeRawCached' query (vals' [])
+    else do
+      let constr = constructors e !! constructorNum
+      let query = "INSERT INTO " <> mainTableName escapeS e <> "(discr)VALUES(?)"
+      executeRawCached' query $ take 1 vals
+      rowid <- getLastInsertRowId
+      let RenderS cQuery vals' = insertIntoConstructorTable True (tableName escapeS e constr) constr (rowid:tail vals)
+      executeRawCached' cQuery (vals' [])
 
 -- TODO: In Sqlite we can insert null to the id column. If so, id will be generated automatically. Check performance change from this.
 insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
