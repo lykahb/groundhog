@@ -18,7 +18,7 @@ mkPersist (defaultCodegenConfig {migrationFunction = Just "migrateAll"}) [ground
 - entity: Product
 |]
 
-main = withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   -- Customer is also migrated because Product references it.
   -- It is possible to migrate schema for given type, e.g. migrate (undefined :: Customer String), or run migrateAll
   runMigration defaultMigrationLogger migrateAll

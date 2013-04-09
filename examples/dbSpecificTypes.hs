@@ -36,7 +36,7 @@ mkPersist defaultCodegenConfig [groundhog|
           type: inet
 |]
 
-main = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ do
+main = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runDbConn $ do
   let phone = MobilePhone "+1900 654 321" "100.456" (Point 4 6) "127.0.0.1"
   runMigration defaultMigrationLogger (migrate phone)
   k <- insert phone

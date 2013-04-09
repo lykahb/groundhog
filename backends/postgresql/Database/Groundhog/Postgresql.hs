@@ -1,9 +1,8 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, MultiParamTypeClasses #-}
 module Database.Groundhog.Postgresql
     ( withPostgresqlPool
     , withPostgresqlConn
-    , runPostgresqlPool
-    , runPostgresqlConn
+    , runDbConn
     , Postgresql
     , module Database.Groundhog
     , module Database.Groundhog.Generic.Sql.Functions
@@ -12,6 +11,7 @@ module Database.Groundhog.Postgresql
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Connection
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
 import Database.Groundhog.Generic.Sql
@@ -113,18 +113,23 @@ withPostgresqlConn :: (MonadBaseControl IO m, MonadIO m)
                -> m a
 withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO . close')
 
-{-# SPECIALIZE runPostgresqlPool :: DbPersist Postgresql IO a -> Pool Postgresql -> IO a #-}
-runPostgresqlPool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Pool Postgresql -> m a
-runPostgresqlPool f pconn = withResource pconn $ runPostgresqlConn f
+instance Savepoint Postgresql where
+  withConnSavepoint name m (Postgresql c) = do
+    let name' = fromString name
+    liftIO $ PG.execute_ c $ "SAVEPOINT " <> name'
+    x <- onException m (liftIO $ PG.execute_ c $ "ROLLBACK TO SAVEPOINT " <> name')
+    liftIO $ PG.execute_ c $ "RELEASE SAVEPOINT" <> name'
+    return x
 
-{-# SPECIALIZE runPostgresqlConn :: DbPersist Postgresql IO a -> Postgresql -> IO a #-}
-{-# INLINE runPostgresqlConn #-}
-runPostgresqlConn :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m a -> Postgresql -> m a
-runPostgresqlConn f conn@(Postgresql c) = do
-  liftIO $ PG.begin c
-  x <- onException (runDbPersist f conn) (liftIO $ PG.rollback c)
-  liftIO $ PG.commit c
-  return x
+instance ConnectionManager Postgresql Postgresql where
+  withConn f conn@(Postgresql c) = do
+    liftIO $ PG.begin c
+    x <- onException (f conn) (liftIO $ PG.rollback c)
+    liftIO $ PG.commit c
+    return x
+  withConnNoTransaction f conn = f conn
+
+instance SingleConnectionManager Postgresql Postgresql
 
 open' :: String -> IO Postgresql
 open' s = do

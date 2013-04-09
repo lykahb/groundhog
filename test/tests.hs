@@ -122,8 +122,8 @@ mkPersist defaultCodegenConfig [groundhog|
 
 main :: IO ()
 main = do
-  let runSqlite m = withSqliteConn ":memory:" . runSqliteConn $ m
-  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runPostgresqlConn $ clean >> m
+  let runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
+  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runDbConn $ clean >> m
   -- we need clean db before each migration test
   defaultMain [ sqliteTestSuite $ runSqlite
               , postgresqlTestSuite $ runPSQL

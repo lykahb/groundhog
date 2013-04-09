@@ -42,7 +42,7 @@ definitions:
                                         # Street is not mentioned so it will have default settings.
  |]
 
-main = withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   let address = Address "Sunnyvale" "18144" "El Camino Real"
   let company = Company "Cyberdyne Systems" (False, False) address address address
   runMigration defaultMigrationLogger $ migrate company

@@ -51,7 +51,7 @@ definitions:
 |]
 
 main :: IO ()
-main = withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   let artists = [Artist "John Lennon", Artist "George Harrison"]
       imagineAlbum = Album "Imagine"
   runMigration defaultMigrationLogger $ do
@@ -66,6 +66,6 @@ main = withSqliteConn ":memory:" $ runSqliteConn $ do
   -- print first 3 tracks from any album with John Lennon
   [albumKey'] <- project AlbumField $ (ArtistField ==. ArtistNameKey "John Lennon") `limitTo` 1
   -- order by primary key
-  tracks' <- select $ (AlbumTrackField ==. albumKey') `orderBy` [Asc AutoKeyField] `limitTo` 3
+  tracks' <- select $ (AlbumTrackField ==. albumKey') `orderBy` [Desc AutoKeyField] `limitTo` 3
   liftIO $ print tracks'
 

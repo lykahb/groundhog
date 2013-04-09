@@ -8,6 +8,7 @@ module Database.Groundhog.Generic.Sql.Functions
     , lower
     , upper
     , toArith
+    , SqlDb(..)
     ) where
 
 import Database.Groundhog.Core

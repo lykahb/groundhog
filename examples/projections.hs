@@ -20,7 +20,7 @@ definitions:
 |]
 
 main :: IO ()
-main = withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   let jack = User "Jack" ("+380", "12-345-67-89") (BS.pack "BMP")
       jill = User "Jill" ("+1", "98-765-43-12") (BS.pack "BMP")
   runMigration defaultMigrationLogger $ migrate jack

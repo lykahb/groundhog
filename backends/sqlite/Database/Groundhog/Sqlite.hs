@@ -1,9 +1,8 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, RecordWildCards, Rank2Types #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, RecordWildCards, Rank2Types, MultiParamTypeClasses #-}
 module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
-    , runSqlitePool
-    , runSqliteConn
+    , runDbConn
     , Sqlite
     , module Database.Groundhog
     , module Database.Groundhog.Generic.Sql.Functions
@@ -12,6 +11,7 @@ module Database.Groundhog.Sqlite
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Connection
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
 import Database.Groundhog.Generic.Sql
@@ -25,7 +25,7 @@ import Control.Monad (liftM, forM)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Reader (ask)
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS
 import Data.Char (toUpper)
 import Data.Function (on)
 import Data.Int (Int64)
@@ -87,9 +87,6 @@ instance (MonadBaseControl IO m, MonadIO m) => SchemaAnalyzer (DbPersist Sqlite 
       Just src -> return (fst $ fromPurePersistValues proxy src)
   analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
 
---{-# SPECIALIZE INLINE H.get :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a) -> Key v BackendSpecific -> DbPersist Sqlite m (Maybe v) #-}
-
---{-# SPECIALIZE withSqlitePool :: String -> Int -> (Pool Sqlite -> IO a) -> IO a #-}
 withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> Int -- ^ number of connections to open
@@ -105,19 +102,25 @@ withSqliteConn :: (MonadBaseControl IO m, MonadIO m)
                -> m a
 withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
 
-{-# SPECIALIZE runSqlitePool :: DbPersist Sqlite IO a -> Pool Sqlite -> IO a #-}
-runSqlitePool :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m a -> Pool Sqlite -> m a
-runSqlitePool f pconn = withResource pconn $ runSqliteConn f
+instance Savepoint Sqlite where
+  withConnSavepoint name m (Sqlite c _) = do
+    let runStmt query = S.prepare c query >>= \stmt -> S.step stmt >> S.finalize stmt
+    let name' = fromString name
+    liftIO $ runStmt $ "SAVEPOINT " <> name'
+    x <- onException m (liftIO $ runStmt $ "ROLLBACK TO " <> name')
+    liftIO $ runStmt $ "RELEASE " <> name'
+    return x
 
-{-# SPECIALIZE runSqliteConn :: DbPersist Sqlite IO a -> Sqlite -> IO a #-}
-{-# INLINE runSqliteConn #-}
-runSqliteConn :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m a -> Sqlite -> m a
-runSqliteConn f conn@(Sqlite c _) = do
-  let runStmt query = S.prepare c query >>= \stmt -> S.step stmt >> S.finalize stmt
-  liftIO $ runStmt "BEGIN"
-  x <- onException (runDbPersist f conn) (liftIO $ runStmt "ROLLBACK")
-  liftIO $ runStmt "COMMIT"
-  return x
+instance ConnectionManager Sqlite Sqlite where
+  withConn f conn@(Sqlite c _) = do
+    let runStmt query = S.prepare c query >>= \stmt -> S.step stmt >> S.finalize stmt
+    liftIO $ runStmt "BEGIN"
+    x <- onException (f conn) (liftIO $ runStmt "ROLLBACK")
+    liftIO $ runStmt "COMMIT"
+    return x
+  withConnNoTransaction f conn = f conn
+
+instance SingleConnectionManager Sqlite Sqlite
 
 open' :: String -> IO Sqlite
 open' s = do

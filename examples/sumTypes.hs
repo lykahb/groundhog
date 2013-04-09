@@ -17,7 +17,7 @@ mkPersist defaultCodegenConfig [groundhog|
           exprName: CircleRadius        # The default value defined by naming style was RadiusField
 |]
 
-main = withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   let circle = Circle 5
   -- Both table for Circle and for Triangle of the Shape datatype are migrated.
   runMigration defaultMigrationLogger $ migrate circle

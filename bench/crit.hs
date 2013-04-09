@@ -65,12 +65,12 @@ numberOfOperations = 10
 main = 
   G.withSqliteConn ":memory:" $ \gConn -> 
   P.withSqliteConn ":memory:" $ \pConn -> do
-    gKey <- G.runSqliteConn (gMigrate $ return ()) gConn
+    gKey <- G.runDbConn (gMigrate $ return ()) gConn
     pKey <- runResourceT $ runNoLoggingT $ P.runSqlConn (pMigrate $ return ()) pConn
 {-
   G.withPostgresqlConn "dbname=test user=test password=test host=localhost" $ \gConn ->
   P.withPostgresqlConn "dbname=test user=test password=test host=localhost" $ \pConn -> do
-    gKey <- G.runPostgresqlConn (gMigrate $ G.executeRaw False "truncate table \"GPerson\"" []) gConn
+    gKey <- G.runDbConn (gMigrate $ G.executeRaw False "truncate table \"GPerson\"" []) gConn
     pKey <- runResourceT $ runNoLoggingT $ P.runSqlConn (pMigrate $ P.execute "truncate table \"PPerson\"" []) pConn
 -}
     unless eachStatementInTransaction $ do
@@ -80,7 +80,7 @@ main =
     let mkBench :: (forall m . G.PersistBackend m => m a1) -> P.SqlPersist (NoLoggingT (ResourceT IO)) a2 -> [Benchmark]
         mkBench gm pm = [bench "groundhog" $ whnfIO $ runSqlite gm, bench "persistent" $ whnfIO $ runPersistent pm] where
           (runSqlite, runPersistent) = if eachStatementInTransaction
-            then (\gm -> G.runSqliteConn (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ P.runSqlConn (replicateM_ numberOfOperations pm) pConn)
+            then (\gm -> G.runDbConn (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ P.runSqlConn (replicateM_ numberOfOperations pm) pConn)
             else (\gm -> G.runDbPersist (replicateM_ numberOfOperations gm) gConn, \(P.SqlPersist pm) -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
     defaultMainWith myConfig (return ())
       [ bgroup "get" $ mkBench (G.get gKey) (P.get pKey)

@@ -12,7 +12,7 @@ mkPersist defaultCodegenConfig [groundhog|
 - entity: SomeData
 |]
 
-main = withSqliteConn ":memory:" $ runSqliteConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   runMigration defaultMigrationLogger $ migrate (undefined :: SomeData)
   k1 <- insert $ SomeData 1 (2, "abc")
   k2 <- insert $ SomeData 10 (20, "def")

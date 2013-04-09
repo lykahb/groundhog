@@ -74,6 +74,7 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
 import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
 import Control.Monad.Trans.State (StateT)
+import Control.Monad.Reader (MonadReader(..))
 import Control.Monad (liftM)
 import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
@@ -216,7 +217,7 @@ orderBy opts ord = case getSelectOptions opts of
   SelectOptions c lim off _ -> SelectOptions c lim off ord
 
 newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
-  deriving (Monad, MonadIO, Functor, Applicative, MonadTrans)
+  deriving (Monad, MonadIO, Functor, Applicative, MonadTrans, MonadReader conn)
 
 instance MonadBase IO m => MonadBase IO (DbPersist conn m) where
   liftBase = lift . liftBase
