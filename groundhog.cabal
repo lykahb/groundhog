@@ -28,7 +28,6 @@ library
                      Database.Groundhog.Core
                      Database.Groundhog.Expression
                      Database.Groundhog.Generic
-                     Database.Groundhog.Generic.Connection
                      Database.Groundhog.Generic.Migration
                      Database.Groundhog.Generic.Sql
                      Database.Groundhog.Generic.Sql.Functions

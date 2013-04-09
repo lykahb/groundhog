@@ -11,7 +11,6 @@ module Database.Groundhog.Sqlite
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Connection
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
 import Database.Groundhog.Generic.Sql
@@ -119,6 +118,10 @@ instance ConnectionManager Sqlite Sqlite where
     liftIO $ runStmt "COMMIT"
     return x
   withConnNoTransaction f conn = f conn
+
+instance ConnectionManager (Pool Sqlite) Sqlite where
+  withConn f pconn = withResource pconn (withConn f)
+  withConnNoTransaction f pconn = withResource pconn (withConnNoTransaction f)
 
 instance SingleConnectionManager Sqlite Sqlite
 

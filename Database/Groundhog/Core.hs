@@ -64,6 +64,11 @@ module Database.Groundhog.Core
   , RowPopper
   , DbPersist(..)
   , runDbPersist
+  -- * Connections and transactions
+  , ConnectionManager(..)
+  , SingleConnectionManager
+  , Savepoint(..)
+  , runDbConn
   ) where
 
 import Blaze.ByteString.Builder (Builder, toByteString)
@@ -472,3 +477,21 @@ class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a wher
 
 delim :: Char
 delim = '#'
+
+-- | Connection manager provides connection to the passed function handles transations. Manager can be a connection itself, a pool, Snaplet in Snap, foundation datatype in Yesod, etc.
+class ConnectionManager cm conn | cm -> conn where
+  -- | Extracts the connection from manager and opens the transaction.
+  withConn :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> cm -> m a
+  -- | Extracts the connection.
+  withConnNoTransaction :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> cm -> m a
+
+-- | This connection manager always returns the same connection. This constraint is useful when performing operations which make sense only within one connection, for example, nested savepoints..
+class ConnectionManager cm conn => SingleConnectionManager cm conn
+
+class Savepoint conn where
+  -- | Wraps the passed action into a named savepoint
+  withConnSavepoint :: (MonadBaseControl IO m, MonadIO m) => String -> m a -> conn -> m a
+
+-- | Runs action within connection. It can handle a simple connection, a pool of them, etc.
+runDbConn :: (MonadBaseControl IO m, MonadIO m, ConnectionManager cm conn) => DbPersist conn m a -> cm -> m a
+runDbConn = withConn . runDbPersist

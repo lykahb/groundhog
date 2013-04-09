@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ExistentialQuantification, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, ExistentialQuantification, ScopedTypeVariables, MultiParamTypeClasses, FlexibleInstances #-}
 
 -- | This helper module is intended for use by the backend creators
 module Database.Groundhog.Generic
@@ -14,6 +14,10 @@ module Database.Groundhog.Generic
   , silentMigrationLogger
   , defaultMigrationLogger
   , failMessage
+  -- * Helpers for running Groundhog within custom monads
+  , HasConn
+  , runDb
+  , withSavepoint
   -- * Helper functions for defining *PersistValue instances
   , primToPersistValue
   , primFromPersistValue
@@ -49,6 +53,7 @@ import Control.Monad.Trans.State (StateT (..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
 import qualified Control.Exception as E
 import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.Reader.Class (MonadReader(..))
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.List (partition, sortBy)
@@ -254,3 +259,15 @@ phantomDb = return $ error "phantomDb"
 isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True
 isSimple _   = False
+
+-- | This class helps to shorten the type signatures of user monadic code.
+class (MonadIO m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
+instance (MonadIO m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
+
+-- | It helps to run database operations within your application monad.
+runDb :: HasConn m cm conn => DbPersist conn IO a -> m a
+runDb f = ask >>= liftIO . runDbConn f
+
+-- | It helps to run 'withConnSavepoint' within a monad.
+withSavepoint :: (HasConn m cm conn, SingleConnectionManager cm conn, Savepoint conn) => String -> m a -> m a
+withSavepoint name m = ask >>= withConnNoTransaction (withConnSavepoint name m)
