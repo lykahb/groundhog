@@ -289,6 +289,12 @@ validateEntity def = do
          let uniqueNames = map thUniqueName $ thConstrUniques $ head constrs
          in  forM_ (thUniqueKeys def) $ \cKey -> unless (thUniqueKeyName cKey `elem` uniqueNames) $
              fail $ "Unique key mentions unknown unique: " ++ thUniqueKeyName cKey ++ " in datatype " ++ show (thDataName def)
+  let primaryConstraints = length $ filter ((== UniquePrimary) . thUniqueType) $ concatMap thConstrUniques constrs 
+  if length constrs > 1
+    then when (primaryConstraints > 0) $
+           fail $ "Custom primary keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
+    else when (primaryConstraints + maybe 0 (const 1) (thAutoKey def) > 1) $
+           fail $ "A datatype may have either an auto key or one custom primary key constraint : " ++ show (thDataName def)
   -- check that if unique keys = [] there is auto key
   when (null (thUniqueKeys def) && isNothing (thAutoKey def)) $
     fail $ "A datatype must have either an auto key or unique keys: " ++ show (thDataName def)
@@ -396,6 +402,7 @@ firstLetter f s = f (head s):tail s
 --                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space. See full definition at http://yaml.org/spec/1.2/spec.html.
 --  - entity: Settable                   # Mandatory. Entity datatype name
 --    dbName: Settable                   # Name of the main table
+--    schema: myschema                   # Name of the schema to which the table belongs
 --    autoKey:                           # Description of the autoincremented key for data family Key instance
 --      constrName: SettableKey          # Name of constructor
 --      default: true                    # The default key is used when entity is referenced without key wrapper. E.g., \"field :: SomeData\" instead of \"field :: Key SomeData keytype\"
@@ -422,7 +429,7 @@ firstLetter f s = f (head s):tail s
 --                                       # For some databases \"type: integer\" would be appropriate
 --        uniques:
 --          - name: someconstraint
---            type: constraint           # The type can be either \"constraint\" or \"index\"
+--            type: constraint           # The type can be be \"constraint\", \"index\", or \"primary\"
 --            fields: [foo, bar]         # List of constructor parameter names. Not DB names(!)
 -- |]
 -- @

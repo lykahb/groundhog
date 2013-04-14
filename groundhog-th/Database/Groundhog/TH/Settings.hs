@@ -160,6 +160,7 @@ instance Lift PSUniqueDef where
 instance Lift UniqueType where
   lift UniqueConstraint = [| UniqueConstraint |]
   lift UniqueIndex = [| UniqueIndex |]
+  lift UniquePrimary = [| UniquePrimary |]
 
 instance Lift PSFieldDef where
   lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) |]
@@ -225,7 +226,8 @@ instance FromJSON UniqueType where
     case (x :: String) of
       "constraint" -> return UniqueConstraint
       "index" -> return UniqueIndex
-      _ -> fail "parseJSON: UniqueType must be either \"constraint\" or \"index\""
+      "primary" -> return UniquePrimary
+      _ -> fail $ "parseJSON: UniqueType expected \"constraint\", \"index\", or \"primary\", but got " ++ x
 
 instance FromJSON PSFieldDef where
   parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType"

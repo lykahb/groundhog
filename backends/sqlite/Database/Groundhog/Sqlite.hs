@@ -31,7 +31,7 @@ import Data.Int (Int64)
 import Data.List (groupBy, intercalate, isInfixOf, partition, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
-import Data.Maybe (maybeToList)
+import Data.Maybe (fromMaybe)
 import Data.Conduit.Pool
 import qualified Data.Text as T
 
@@ -43,6 +43,7 @@ data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
 instance DbDescriptor Sqlite where
   type AutoKeyType Sqlite = Int64
   type QueryRaw Sqlite = Snippet Sqlite
+  backendName _ = "sqlite"
 
 instance SqlDb Sqlite where
   append a b = Expr $ operator 50 "||" a b
@@ -149,7 +150,8 @@ migrationPack = GM.MigrationPack
   migTriggerOnUpdate
   GM.defaultMigConstr
   escape
-  "INTEGER PRIMARY KEY"
+  DbInt64
+  "INTEGER PRIMARY KEY NOT NULL"
   "INTEGER"
   mainTableId
   defaultPriority
@@ -159,34 +161,34 @@ migrationPack = GM.MigrationPack
 
 addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
-  (constraints, indexes) = partition (\(UniqueDef' _ uType _) -> uType == UniqueConstraint) uniques
+  (constraints, indexes) = partition ((/= UniqueIndex) . uniqueDefType) uniques
 
 migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
 migTriggerOnDelete schema name deletes = do
-  let addTrigger = AddTriggerOnDelete name name (concatMap snd deletes)
+  let addTrigger = AddTriggerOnDelete Nothing name Nothing name (concatMap snd deletes)
   x <- analyzeTrigger schema name
   return $ case x of
     Nothing | null deletes -> (False, [])
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
-      then [DropTrigger name name]
+      then [DropTrigger Nothing name Nothing name]
       else if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
         -- this can happen when an ephemeral field was added or removed.
-        else [DropTrigger name name, addTrigger])
+        else [DropTrigger Nothing name Nothing name, addTrigger])
         
 -- | Schema name, table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> String -> String -> DbPersist Sqlite m (Bool, [AlterDB])
-migTriggerOnUpdate schema name fieldName del = do
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m [(Bool, [AlterDB])]
+migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
   let trigName = name ++ delim : fieldName
-  let addTrigger = AddTriggerOnUpdate trigName name fieldName del
+  let addTrigger = AddTriggerOnUpdate Nothing trigName Nothing name (Just fieldName) del
   x <- analyzeTrigger schema trigName
   return $ case x of
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
-        else [DropTrigger trigName name, addTrigger])
+        else [DropTrigger Nothing trigName Nothing name, addTrigger])
 
 analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Either [String] (Maybe TableInfo))
 analyzeTable' _ tName = do
@@ -194,32 +196,36 @@ analyzeTable' _ tName = do
   tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   case tableInfo of
     [] -> return $ Right Nothing
-    xs -> do
-      let rawColumns = filter (\(_ , (_, _, _, _, isPrimary)) -> isPrimary == 0) xs
+    rawColumns -> do
       let mkColumn :: (Int, (String, String, Int, Maybe String, Int)) -> Column
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
+      let primaryKeyColumnNames = foldr (\(_ , (name, _, _, _, isPrimary)) xs -> if isPrimary == 1 then name:xs else xs) [] rawColumns
       let columns = map mkColumn rawColumns
       indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
         uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
         sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue proxy name] id
-        let uType = if sql == Just [PersistNull] then UniqueConstraint else UniqueIndex
-        return $ UniqueDef' name uType $ map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
+        let columnNames = map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
+        let uType = if sql == Just [PersistNull]
+              then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary else UniqueConstraint
+              else UniqueIndex
+        return $ UniqueDef' (Just name) uType columnNames
       foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       (foreigns :: [(Maybe String, Reference)]) <- do
           let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
               foreigns = groupBy ((==) `on` fst) . sort $ foreignKeyList -- sort by foreign key number and column number inside key (first and second integers)
+              mkAction c = Just $ fromMaybe (error $ "unknown reference action type: " ++ c) $ readReferenceAction c
           forM foreigns $ \rows -> do 
-            let (_, (_, foreignTable, _, _)) = head rows
+            let (_, (_, foreignTable, _, (onUpdate, onDelete, _))) = head rows
             refs <- forM rows $ \(_, (_, _, (child, parent), _)) -> case parent of
               Nothing -> analyzePrimaryKey foreignTable >>= \x -> case x of
                 Just primaryKeyName -> return (child, primaryKeyName)
                 Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
               Just columnName -> return (child, columnName)
-            return (Nothing, (Nothing, foreignTable, refs))
-      primaryKey <- analyzePrimaryKey tName
-      return $ Right $ Just $ TableInfo primaryKey columns uniques foreigns
+            return (Nothing, Reference Nothing foreignTable refs (mkAction onDelete) (mkAction onUpdate))
+      let uniques' = uniques ++ if length primaryKeyColumnNames == 1 then [UniqueDef' Nothing UniquePrimary primaryKeyColumnNames] else []
+      return $ Right $ Just $ TableInfo columns uniques' foreigns
 
 analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
 analyzePrimaryKey tName = do
@@ -301,18 +307,23 @@ showColumn (Column name isNull typ _) = escape name ++ " " ++ showSqlType typ ++
            else ""
 
 sqlReference :: Reference -> String
-sqlReference (_, tname, columns) = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape tname ++ "(" ++ foreign ++ ")" where
-  (our, foreign) = f *** f $ unzip columns
+sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape referencedTableName ++ "(" ++ foreign ++ ")" ++ actions where
+  actions = maybe "" ((" ON DELETE " ++) . showReferenceAction) referenceOnDelete
+         ++ maybe "" ((" ON UPDATE " ++) . showReferenceAction) referenceOnUpdate
+  (our, foreign) = f *** f $ unzip referencedColumns
   f = intercalate ", " . map escape
 
 sqlUnique :: UniqueDef' -> String
-sqlUnique (UniqueDef' name _ cols) = concat
-    [ "CONSTRAINT "
-    , escape name
-    , " UNIQUE ("
-    , intercalate "," $ map escape cols
-    , ")"
-    ]
+sqlUnique (UniqueDef' name typ cols) = concat [
+    maybe "" ((" CONSTRAINT " ++) . escape) name
+  , constraintType
+  , intercalate "," $ map escape cols
+  , ")"
+  ] where
+    constraintType = case typ of
+      UniquePrimary -> " PRIMARY KEY("
+      UniqueConstraint -> " UNIQUE("
+      UniqueIndex -> error "sqlUnique: does not handle indexes"
 
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Sqlite IO (AutoKey v) #-}
 insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Sqlite m (AutoKey v)
@@ -517,10 +528,8 @@ renderCond' = renderCond escapeS renderEquals renderNotEquals where
   renderEquals a b = a <> " IS " <> b
   renderNotEquals a b = a <> " IS NOT " <> b
 
-defaultPriority :: Int
+defaultPriority, triggerPriority :: Int
 defaultPriority = 0
-
-triggerPriority :: Int
 triggerPriority = 1
 
 proxy :: Proxy Sqlite
@@ -533,10 +542,15 @@ toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) =>
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
+compareUniqs (UniqueDef' _ UniquePrimary cols1) (UniqueDef' _ UniquePrimary cols2) = haveSameElems (==) cols1 cols2
+-- only one of the uniques is primary
+compareUniqs (UniqueDef' _ type1 _) (UniqueDef' _ type2 _) | UniquePrimary `elem` [type1, type2] = False
 compareUniqs (UniqueDef' _ type1 cols1) (UniqueDef' _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-compareRefs (_, (_, tbl1, pairs1)) (_, (_, tbl2, pairs2)) = unescape tbl1 == unescape tbl2 && haveSameElems (==) pairs1 pairs2 where
+compareRefs (_, Reference _ tbl1 pairs1 _ _) (_, Reference _ tbl2 pairs2 _ _) =
+     unescape tbl1 == unescape tbl2
+  && haveSameElems (==) pairs1 pairs2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
 compareTypes :: DbType -> DbType -> Bool
@@ -548,7 +562,7 @@ mainTableId = "id"
 
 showAlterDb :: AlterDB -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
-showAlterDb (AlterTable _ table createTable (TableInfo oldId oldCols _ _) (TableInfo newId newCols _ _) alts) = case mapM (showAlterTable table) alts of
+showAlterDb (AlterTable _ table createTable (TableInfo oldCols _ _) (TableInfo newCols _ _) alts) = case mapM (showAlterTable table) alts of
   Just alts' -> Right alts'
   Nothing -> (Right
     [ (False, defaultPriority, "CREATE TEMP TABLE " ++ escape tableTmp ++ "(" ++ columnsTmp ++ ")")
@@ -561,20 +575,37 @@ showAlterDb (AlterTable _ table createTable (TableInfo oldId oldCols _ _) (Table
       tableTmp = table ++ "_backup"
       copy (from, fromCols) (to, toCols) = "INSERT INTO " ++ escape to ++ "(" ++ toCols ++ ") SELECT " ++ fromCols ++ " FROM " ++ escape from
       (oldOnlyColumns, _, commonColumns) = matchElements ((==) `on` colName) oldCols newCols
-      columnsTmp = intercalate "," $ map escape $ maybeToList (newId >> oldId) ++ map (colName . snd) commonColumns
-      columnsNew = intercalate "," $ map escape $ maybeToList (oldId >> newId) ++ map (colName . snd) commonColumns
-showAlterDb (DropTrigger name _) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
-showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPriority,
+      columnsTmp = intercalate "," $ map (escape . colName . snd) commonColumns
+      columnsNew = intercalate "," $ map (escape . colName . snd) commonColumns
+showAlterDb (DropTrigger _ name _ _) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
+showAlterDb (AddTriggerOnDelete _ trigName _ tName body) = Right [(False, triggerPriority,
   "CREATE TRIGGER " ++ escape trigName ++ " DELETE ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")]
-showAlterDb (AddTriggerOnUpdate trigName tName fieldName body) = Right [(False, triggerPriority,
-  "CREATE TRIGGER " ++ escape trigName ++ " UPDATE OF " ++ escape fieldName ++ " ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")]
+showAlterDb (AddTriggerOnUpdate _ trigName _ tName fieldName body) = Right [(False, triggerPriority,
+  "CREATE TRIGGER " ++ escape trigName ++ " UPDATE OF " ++ fieldName' ++ " ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")] where
+    fieldName' = maybe (error $ "showAlterDb: AddTriggerOnUpdate does not have fieldName for trigger " ++ trigName) escape fieldName
 showAlterDb alt = error $ "showAlterDb: does not support " ++ show alt
 
 showAlterTable :: String -> AlterTable -> Maybe (Bool, Int, String)
-showAlterTable table (AlterColumn alt) = showAlterColumn table alt
+showAlterTable table (AddColumn col) = Just (False, defaultPriority, concat
+  [ "ALTER TABLE "
+  , escape table
+  , " ADD COLUMN "
+  , showColumn col
+  ])
+showAlterTable table (AlterColumn col [UpdateValue s]) = Just (False, defaultPriority, concat
+  [ "UPDATE "
+  , escape table
+  , " SET "
+  , escape (colName col)
+  , "="
+  , s
+  , " WHERE "
+  , escape (colName col)
+  , " IS NULL"
+  ])
 showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = Just (False, defaultPriority, concat
   [ "CREATE UNIQUE INDEX "
-  , escape uName
+  , maybe (error $ "showAlterTable: index for table " ++ table ++ " does not have a name") escape uName
   , " ON "
   , escape table
   , "("
@@ -586,23 +617,3 @@ showAlterTable _ (DropIndex uName) = Just (False, defaultPriority, concat
   , escape uName
   ])
 showAlterTable _ _ = Nothing
-
-showAlterColumn :: String -> AlterColumn' -> Maybe (Bool, Int, String)
-showAlterColumn table (_, Add col) = Just (False, defaultPriority, concat
-    [ "ALTER TABLE "
-    , escape table
-    , " ADD COLUMN "
-    , showColumn col
-    ])
-showAlterColumn table (n, UpdateValue s) = Just (False, defaultPriority, concat
-    [ "UPDATE "
-    , escape table
-    , " SET "
-    , escape n
-    , "="
-    , s
-    , " WHERE "
-    , escape n
-    , " IS NULL"
-    ])
-showAlterColumn _ _ = Nothing

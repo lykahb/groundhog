@@ -245,6 +245,8 @@ class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   type AutoKeyType db
   -- | Value of this type can be used as a part of a query. For example, it can be RenderS for relational databases, or BSON for MongoDB.
   type QueryRaw db :: * -> *
+  -- | Name of backend
+  backendName :: Proxy db -> String
 
 class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | A token which defines the DB type. For example, different monads working with Sqlite, return Sqlite type.
@@ -359,7 +361,7 @@ data UniqueDef = UniqueDef {
 } deriving (Show, Eq)
 
 -- | Defines how to treat the unique set of fields for a datatype
-data UniqueType = UniqueConstraint | UniqueIndex deriving (Show, Eq)
+data UniqueType = UniqueConstraint | UniqueIndex | UniquePrimary deriving (Show, Eq)
 
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
 -- datatypes, eg DbString instead of DbVarchar. Different databases may
