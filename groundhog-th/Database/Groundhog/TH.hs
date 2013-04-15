@@ -402,7 +402,7 @@ firstLetter f s = f (head s):tail s
 --                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space. See full definition at http://yaml.org/spec/1.2/spec.html.
 --  - entity: Settable                   # Mandatory. Entity datatype name
 --    dbName: Settable                   # Name of the main table
---    schema: myschema                   # Name of the schema to which the table belongs
+--    schema: null                       # Name of the schema to which the table belongs
 --    autoKey:                           # Description of the autoincremented key for data family Key instance
 --      constrName: SettableKey          # Name of constructor
 --      default: true                    # The default key is used when entity is referenced without key wrapper. E.g., \"field :: SomeData\" instead of \"field :: Key SomeData keytype\"
