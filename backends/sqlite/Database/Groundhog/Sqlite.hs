@@ -548,9 +548,11 @@ compareUniqs (UniqueDef' _ type1 _) (UniqueDef' _ type2 _) | UniquePrimary `elem
 compareUniqs (UniqueDef' _ type1 cols1) (UniqueDef' _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-compareRefs (_, Reference _ tbl1 pairs1 _ _) (_, Reference _ tbl2 pairs2 _ _) =
+compareRefs (_, Reference _ tbl1 pairs1 onDel1 onUpd1) (_, Reference _ tbl2 pairs2 onDel2 onUpd2) =
      unescape tbl1 == unescape tbl2
-  && haveSameElems (==) pairs1 pairs2 where
+  && haveSameElems (==) pairs1 pairs2
+  && fromMaybe NoAction onDel1 == fromMaybe NoAction onDel2
+  && fromMaybe NoAction onUpd1 == fromMaybe NoAction onUpd2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
 compareTypes :: DbType -> DbType -> Bool

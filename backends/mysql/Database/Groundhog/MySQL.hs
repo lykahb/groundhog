@@ -510,10 +510,12 @@ compareUniqs (UniqueDef' _ type1 _) (UniqueDef' _ type2 _) | UniquePrimary `elem
 compareUniqs (UniqueDef' name1 _ cols1) (UniqueDef' name2 _ cols2) = fromMaybe True (liftM2 (==) name1 name2) && haveSameElems (==) cols1 cols2
 
 compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-compareRefs currentSchema (_, Reference sch1 tbl1 pairs1 _ _) (_, Reference sch2 tbl2 pairs2 _ _) =
+compareRefs currentSchema (_, Reference sch1 tbl1 pairs1 onDel1 onUpd1) (_, Reference sch2 tbl2 pairs2 onDel2 onUpd2) =
      fromMaybe currentSchema sch1 == fromMaybe currentSchema sch2
   && unescape tbl1 == unescape tbl2
-  && haveSameElems (==) pairs1 pairs2 where
+  && haveSameElems (==) pairs1 pairs2
+  && fromMaybe Restrict onDel1 == fromMaybe Restrict onDel2
+  && fromMaybe Restrict onUpd1 == fromMaybe Restrict onUpd2 where
     unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
 compareTypes :: DbType -> DbType -> Bool
