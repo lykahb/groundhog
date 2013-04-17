@@ -42,7 +42,7 @@ import Data.IORef
 import Data.List (groupBy, intercalate)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid
-import Data.Conduit.Pool
+import Data.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE

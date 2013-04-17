@@ -42,7 +42,7 @@ import Data.Function (on)
 import Data.Int (Int64)
 import Data.List (groupBy, intercalate, partition)
 import Data.Maybe (fromJust, fromMaybe)
-import Data.Conduit.Pool
+import Data.Pool
 
 newtype MySQL = MySQL MySQL.Connection
 

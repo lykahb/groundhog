@@ -32,7 +32,7 @@ import Data.List (groupBy, intercalate, isInfixOf, partition, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
 import Data.Maybe (fromMaybe)
-import Data.Conduit.Pool
+import Data.Pool
 import qualified Data.Text as T
 
 import GHC.Exts (inline)
