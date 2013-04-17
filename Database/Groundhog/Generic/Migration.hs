@@ -4,7 +4,6 @@ module Database.Groundhog.Generic.Migration
   ( Column(..)
   , UniqueDef'(..)
   , Reference(..)
-  , ReferenceAction(..)
   , TableInfo(..)
   , AlterColumn(..)
   , AlterTable(..)
@@ -45,16 +44,9 @@ data Reference = Reference {
     referencedTableSchema :: Maybe String
   , referencedTableName :: String
   , referencedColumns :: [(String, String)] -- ^ child column, parent column
-  , referenceOnDelete :: Maybe ReferenceAction
-  , referenceOnUpdate :: Maybe ReferenceAction
+  , referenceOnDelete :: Maybe ReferenceActionType
+  , referenceOnUpdate :: Maybe ReferenceActionType
   } deriving Show
-
-data ReferenceAction = NoAction
-                     | Restrict
-                     | Cascade
-                     | SetNull
-                     | SetDefault
-  deriving (Eq, Show)
 
 data TableInfo = TableInfo {
     tableColumns :: [Column]
@@ -123,17 +115,17 @@ mkColumns columnName dbtype = go "" (columnName, dbtype) where
     DbMaybe a      -> case go prefix (fname, a) of
       ([c], refs) -> ([c {colNull = True}], refs)
       _ -> error $ "mkColumns: datatype inside DbMaybe must be one column " ++ show a
-    DbEntity (Just (emb, uName)) e  -> (cols, ref:refs) where
+    DbEntity (Just (emb, uName)) onDel onUpd e  -> (cols, ref:refs) where
       (cols, refs) = go prefix (fname, DbEmbedded emb)
-      ref = Reference (entitySchema e) (entityName e) (zipWith' (curry $ colName *** colName) cols foreignColumns) Nothing Nothing
+      ref = Reference (entitySchema e) (entityName e) (zipWith' (curry $ colName *** colName) cols foreignColumns) onDel onUpd
       cDef = case constructors e of
         [cDef'] -> cDef'
         _       -> error "mkColumns: datatype with unique key cannot have more than one constructor"
       UniqueDef _ _ uFields = findOne "unique" id uniqueName uName $ constrUniques cDef
       fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) uFields
       (foreignColumns, _) = concatMap' (go "") fields
-    t@(DbEntity Nothing e) -> ([Column name False t Nothing], refs) where
-      refs = [Reference (entitySchema e) (entityName e) [(name, keyName)] Nothing Nothing]
+    t@(DbEntity Nothing onDel onUpd e) -> ([Column name False t Nothing], refs) where
+      refs = [Reference (entitySchema e) (entityName e) [(name, keyName)] onDel onUpd]
       keyName = case constructors e of
         [cDef] -> fromMaybe (error "mkColumns: autokey name is Nothing") $ constrAutoKeyName cDef
         _      -> "id"
@@ -157,7 +149,7 @@ migrateRecursively :: (Monad m, PersistEntity v) =>
   -> StateT NamedMigrations m ()
 migrateRecursively migE migL = go . dbType where
   go l@(DbList lName t) = f lName (migL l) (go t)
-  go (DbEntity _ e)     = f (entityName e) (migE e) (mapM_ go (allSubtypes e))
+  go (DbEntity _ _ _ e) = f (entityName e) (migE e) (mapM_ go (allSubtypes e))
   go (DbMaybe t)        = go t
   go (DbEmbedded (EmbeddedDef _ ts))  = mapM_ (go . snd) ts
   go _                  = return ()    -- ordinary types need not migration
@@ -349,14 +341,14 @@ mkDeletes MigrationPack{..} columns = mapMaybe delField columns where
   ephemeralName (DbList name _) = Just name
   ephemeralName _ = Nothing
 
-showReferenceAction :: ReferenceAction -> String
+showReferenceAction :: ReferenceActionType -> String
 showReferenceAction NoAction = "NO ACTION"
 showReferenceAction Restrict = "RESTRICT"
 showReferenceAction Cascade = "CASCADE"
 showReferenceAction SetNull = "SET NULL"
 showReferenceAction SetDefault = "SET DEFAULT"
 
-readReferenceAction :: String -> Maybe ReferenceAction
+readReferenceAction :: String -> Maybe ReferenceActionType
 readReferenceAction c = case c of
   "NO ACTION" -> Just NoAction
   "RESTRICT" -> Just Restrict

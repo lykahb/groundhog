@@ -231,7 +231,7 @@ flatten esc (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbMaybe t -> go t
     DbEmbedded emb -> handleEmb emb
-    DbEntity (Just (emb, _)) _ -> handleEmb emb
+    DbEntity (Just (emb, _)) _ _ _ -> handleEmb emb
     _            -> esc fullName : acc
   fullName = fromString fname
   handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts
@@ -242,7 +242,7 @@ flattenP esc prefix (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbMaybe t -> go t
     DbEmbedded emb -> handleEmb emb
-    DbEntity (Just (emb, _)) _ -> handleEmb emb
+    DbEntity (Just (emb, _)) _ _ _ -> handleEmb emb
     _            -> esc fullName : acc
   fullName = prefix <> fromChar delim <> fromString fname
   handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts

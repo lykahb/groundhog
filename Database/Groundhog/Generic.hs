@@ -37,6 +37,7 @@ module Database.Groundhog.Generic
   , onException
   , PSEmbeddedFieldDef(..)
   , applyEmbeddedDbTypeSettings
+  , applyReferencesSettings
   , findOne
   , replaceOne
   , matchElements
@@ -160,8 +161,8 @@ data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
 
 applyEmbeddedDbTypeSettings :: [PSEmbeddedFieldDef] -> DbType -> DbType
 applyEmbeddedDbTypeSettings settings typ = (case typ of
-  DbEmbedded emb                 -> DbEmbedded $ applyToDef emb
-  DbEntity (Just (emb, uniq)) e -> DbEntity (Just (applyToDef emb, uniq)) e
+  DbEmbedded emb -> DbEmbedded $ applyToDef emb
+  DbEntity (Just (emb, uniq)) onDel onUpd e -> DbEntity (Just (applyToDef emb, uniq)) onDel onUpd e
   t -> error $ "applyEmbeddedDbTypeSettings: expected DbEmbedded, got " ++ show t) where
   applyToDef (EmbeddedDef _ fields) = EmbeddedDef True $ go settings fields
   go [] fs = fs
@@ -177,6 +178,12 @@ applyEmbeddedDbTypeSettings settings typ = (case typ of
   find _ [] = Nothing
   find name (def:defs) | psEmbeddedFieldName def == name = Just (defs, def)
                        | otherwise = fmap (\(defs', result) -> (def:defs', result)) $ find name defs
+
+applyReferencesSettings :: Maybe ReferenceActionType -> Maybe ReferenceActionType -> DbType -> DbType
+applyReferencesSettings onDel onUpd typ = case typ of
+  DbEntity k _ _ e -> DbEntity k onDel onUpd e
+  DbMaybe (DbEntity k _ _ e) -> DbMaybe (DbEntity k onDel onUpd e)
+  t -> error $ "applyReferencesSettings: expected DbEntity, got " ++ show t
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
 primToPersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a:)

@@ -270,7 +270,7 @@ showSqlType DbBlob = "BLOB"
 showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = showSqlType DbInt64
-showSqlType (DbEntity Nothing _) = showSqlType DbInt64
+showSqlType (DbEntity Nothing _ _ _) = showSqlType DbInt64
 showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
 readSqlType :: String -> DbType
@@ -500,13 +500,13 @@ typeToSqlite DbBlob = Just S.BlobColumn
 typeToSqlite (DbOther _) = Nothing
 typeToSqlite (DbMaybe _) = Nothing
 typeToSqlite (DbList _ _) = Just S.IntegerColumn
-typeToSqlite (DbEntity Nothing _) = Just S.IntegerColumn
+typeToSqlite (DbEntity Nothing _ _ _) = Just S.IntegerColumn
 typeToSqlite t = error $ "typeToSqlite: DbType does not have corresponding database type: " ++ show t
 
 getDbTypes :: DbType -> [DbType] -> [DbType]
 getDbTypes typ acc = case typ of
   DbEmbedded (EmbeddedDef _ ts) -> foldr (getDbTypes . snd) acc ts
-  DbEntity (Just (EmbeddedDef _ ts, _)) _ -> foldr (getDbTypes . snd) acc ts
+  DbEntity (Just (EmbeddedDef _ ts, _)) _ _ _ -> foldr (getDbTypes . snd) acc ts
   t               -> t:acc
 
 pFromSql :: S.SQLData -> PersistValue

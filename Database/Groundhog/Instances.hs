@@ -523,7 +523,7 @@ instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (Unique
 
 instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) db r a') => FieldLike (AutoKeyField v c) db r a' where
   fieldChain a = chain where
-    chain = maybe (error "fieldChain AutoKeyField: constructor constrAutoKeyName == Nothing") (\idName -> ((idName, DbEntity Nothing e), [])) $ constrAutoKeyName constr
+    chain = maybe (error "fieldChain AutoKeyField: constructor constrAutoKeyName == Nothing") (\idName -> ((idName, DbEntity Nothing Nothing Nothing e), [])) $ constrAutoKeyName constr
     e = entityDef ((undefined :: AutoKeyField v c -> v) a)
     cNum = phantomConstrNum ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
     constr = constructors e !! cNum

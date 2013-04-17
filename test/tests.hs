@@ -1,21 +1,31 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
---module Main where
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, CPP #-}
+
+-- ghc --make -fforce-recomp -DWITH_SQLITE -DWITH_POSTGRESQL -DWITH_MYSQL tests.hs
+
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
 import Control.Monad (replicateM_, liftM, mapM_, forM_, (>=>), unless)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control)
+import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration (SchemaAnalyzer(..))
 import Database.Groundhog.Generic.Sql
+import Database.Groundhog.Generic.Sql.Functions
 import Database.Groundhog.TH
+#if WITH_SQLITE
 import Database.Groundhog.Sqlite
+#endif
+#if WITH_POSTGRESQL
 import Database.Groundhog.Postgresql
 import Database.Groundhog.Postgresql.Array hiding (all, any, append)
 import qualified Database.Groundhog.Postgresql.Array as Arr
 import Database.Groundhog.Postgresql.Geometry
+#endif
+#if WITH_MYSQL
 import Database.Groundhog.MySQL
+#endif
 import Data.ByteString.Char8 (unpack)
 import Data.Int
 import Data.List (isInfixOf, sort)
@@ -35,7 +45,7 @@ data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, 
 data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
 data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
-data Settable = Settable {settable1 :: String, settable2 :: Int, settableTuple :: (Int, (String, Double))} deriving (Eq, Show)
+data Settable = Settable {settable1 :: String, settable2 :: Maybe (Key (Single String) BackendSpecific), settableTuple :: (Int, (String, Double))}
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String) BackendSpecific, refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String) BackendSpecific)}
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
 data UniqueKeySample = UniqueKeySample { uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Int } deriving (Eq, Show)
@@ -45,6 +55,8 @@ data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrent
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
 deriving instance Show Keys
+deriving instance Eq Settable
+deriving instance Show Settable
 deriving instance Eq InCurrentSchema
 deriving instance Show InCurrentSchema
 deriving instance Eq InAnotherSchema
@@ -68,6 +80,8 @@ mkPersist defaultCodegenConfig [groundhog|
           dbName: sqlsettable1
           type: varchar(50)
           exprName: Settable1Fld
+        - name: settable2
+          onDelete: cascade
         - name: settableTuple
           embeddedType:
             - name: val0
@@ -124,19 +138,31 @@ mkPersist defaultCodegenConfig [groundhog|
 
 main :: IO ()
 main = do
-  let runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
-  let runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runDbConn $ cleanPostgresql >> m
-  let mySQLConnInfo = defaultConnectInfo
+#if WITH_POSTGRESQL
+  let postgresql = [testGroup "Database.Groundhog.Postgresql" $ concatMap ($ runPSQL) [mkTestSuite, mkSqlTestSuite, postgresqlTestSuite]]
+      runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runDbConn $ cleanPostgresql >> m
+#else
+  let postgresql = []
+#endif
+#if WITH_SQLITE
+  let sqlite = [testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite) [mkTestSuite, mkSqlTestSuite, sqliteTestSuite]]
+      runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
+#else
+  let sqlite = []
+#endif
+#if WITH_MYSQL
+  let mysql = [testGroup "Database.Groundhog.MySQL" $ concatMap ($ runMySQL) [mkTestSuite, mkSqlTestSuite, mysqlTestSuite]]
+      mySQLConnInfo = defaultConnectInfo
                         { connectHost     = "localhost"
                         , connectUser     = "test"
                         , connectPassword = "test"
                         , connectDatabase = "test"
                         }
-  let runMySQL m = withMySQLConn mySQLConnInfo . runDbConn $ cleanMySQL >> m
-  defaultMain [ testGroup "Database.Groundhog.MySQL" $ concatMap ($ runMySQL) [mkTestSuite, mkSqlTestSuite, mysqlTestSuite]
-              , testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite) [mkTestSuite, mkSqlTestSuite, sqliteTestSuite]
-              , testGroup "Database.Groundhog.Postgresql" $ concatMap ($ runPSQL) [mkTestSuite, mkSqlTestSuite, postgresqlTestSuite]
-              ]
+      runMySQL m = withMySQLConn mySQLConnInfo . runDbConn $ cleanMySQL >> m
+#else
+  let mysql = []
+#endif
+  defaultMain $ mysql ++ sqlite ++ postgresql
 
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
 migr v = do
@@ -187,6 +213,7 @@ mkTestSuite run =
   , testCase "testTime" $ run testTime
   ]
 
+#if WITH_SQLITE
 sqliteTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Sqlite m () -> IO ()) -> [Test]
 sqliteTestSuite run = 
   [ testCase "testMigrateOrphanConstructors" $ run testMigrateOrphanConstructors
@@ -194,8 +221,9 @@ sqliteTestSuite run =
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   ]
+#endif
 
-
+#if WITH_POSTGRESQL
 postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Postgresql m () -> IO ()) -> [Test]
 postgresqlTestSuite run =
   [ testCase "testGeometry" $ run testGeometry
@@ -205,8 +233,9 @@ postgresqlTestSuite run =
   , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete
   , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate
   ]
+#endif
 
-
+#if WITH_MYSQL
 mysqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist MySQL m () -> IO ()) -> [Test]
 mysqlTestSuite run =
   [ testCase "testSchemas" $ run testSchemas
@@ -214,6 +243,7 @@ mysqlTestSuite run =
 --  , testCase "testListTriggersOnDelete" $ run testListTriggersOnDelete  -- fails due to MySQL bug #11472
 --  , testCase "testListTriggersOnUpdate" $ run testListTriggersOnUpdate  -- fails due to MySQL bug #11472
   ]
+#endif
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
@@ -239,16 +269,21 @@ testNumber = do
 
 testPersistSettings :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testPersistSettings = do
-  let settable = Settable "abc" 1 (1, ("qqq", 2))
+  let val = Single "def"
+  migr val
+  singleKey <- insert val
+  let settable = Settable "abc" (Just singleKey) (1, ("qqq", 2))
   m <- createMigration $ migrate settable
   let expectedNames = ["settable_id", "sqlsettable1", "firstTupleElement", "secondTupleElement", "thirdTupleElement", "someconstraint", "varchar(50)"]
   liftIO $ all (`isInfixOf` show m) expectedNames H.@? ("Should contain " ++ show expectedNames ++ ": " ++ show m)
   migr settable
-  proxy <- phantomDb
-  Just settable @=?? (insert settable >>= get)
+  k <- insert settable
+  Just settable @=?? get k
   vals <- select $ Settable1Fld ==. "abc" &&. SettableTupleField ~> Tuple2_0Selector ==. (1 :: Int) &&. SettableTupleField ~> Tuple2_1Selector ~> Tuple2_0Selector ==. "qqq"
   [settable] @=? vals
-  assertExc "Uniqueness constraint not enforced" $ insert settable
+  deleteByKey singleKey -- test on delete cascade
+  Nothing @=?? get k
+  assertExc "Uniqueness constraint not enforced" $ insert settable >> insert settable
 
 testEmbedded :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testEmbedded = do
@@ -710,6 +745,34 @@ testTime = do
   val' <- get k
   Just val @=? val'
 
+testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testSchemas = do
+  let val = InCurrentSchema Nothing
+  migr val -- InAnotherSchema will be migrated automatically
+  k <- insert val
+  let val2 = InAnotherSchema (Just k)
+  Just val2 @=?? (insert val2 >>= get)
+
+#if WITH_SQLITE
+testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m ()
+testSchemaAnalysisSqlite = do
+  let val = Single (Single "abc")
+  migr val
+  let action = "select * from \"Single#String\";"
+  executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW BEGIN " ++ action ++ " END") []
+  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
+  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
+  sql <- analyzeTrigger Nothing "myTrigger"
+  let sql' = maybe (error "No trigger found") id sql
+  liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
+#endif
+
+-- TODO: write test which inserts data before adding new columns
+
+firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
+firstRow = id
+
+#if WITH_POSTGRESQL
 testGeometry :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
 testGeometry = do
   let p = Point 1.2 3.45
@@ -758,26 +821,6 @@ testArrays = do
   migr val2
   Just val2 @=?? (insert val2 >>= get)
 
-testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-testSchemas = do
-  let val = InCurrentSchema Nothing
-  migr val -- InAnotherSchema will be migrated automatically
-  k <- insert val
-  let val2 = InAnotherSchema (Just k)
-  Just val2 @=?? (insert val2 >>= get)
-
-testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m ()
-testSchemaAnalysisSqlite = do
-  let val = Single (Single "abc")
-  migr val
-  let action = "select * from \"Single#String\";"
-  executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW BEGIN " ++ action ++ " END") []
-  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
-  sql <- analyzeTrigger Nothing "myTrigger"
-  let sql' = maybe (error "No trigger found") id sql
-  liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
-
 testSchemaAnalysisPostgresql :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
 testSchemaAnalysisPostgresql = do
   let val = Single (Single "abc")
@@ -794,6 +837,14 @@ testSchemaAnalysisPostgresql = do
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
 
+cleanPostgresql :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+cleanPostgresql = forM_ ["public", "myschema"] $ \schema -> do
+  executeRaw True ("drop schema if exists " ++ schema ++ " cascade") []
+  executeRaw True ("create schema " ++ schema) []
+  executeRaw True ("alter schema " ++ schema ++ " owner to test") []
+#endif
+
+#if WITH_MYSQL
 testSchemaAnalysisMySQL :: (MonadBaseControl IO m, MonadIO m) => DbPersist MySQL m ()
 testSchemaAnalysisMySQL = do
   let val = Single (Single "abc")
@@ -810,28 +861,6 @@ testSchemaAnalysisMySQL = do
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN 42" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
 
--- TODO: write test which inserts data before adding new columns
-
-firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
-firstRow = id
-  
-createTruncateTables :: String
-createTruncateTables = "CREATE OR REPLACE FUNCTION truncate_tables(username IN VARCHAR) RETURNS void AS $$\
-\DECLARE\
-\    statements CURSOR FOR SELECT tablename FROM pg_tables WHERE tableowner = username AND schemaname = 'public';\
-\BEGIN\
-\    FOR stmt IN statements LOOP\
-\        EXECUTE 'TRUNCATE TABLE ' || quote_ident(stmt.tablename) || ' CASCADE;';\
-\    END LOOP;\
-\END;\
-\$$ LANGUAGE plpgsql"
-
-cleanPostgresql :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
-cleanPostgresql = forM_ ["public", "myschema"] $ \schema -> do
-  executeRaw True ("drop schema if exists " ++ schema ++ " cascade") []
-  executeRaw True ("create schema " ++ schema) []
-  executeRaw True ("alter schema " ++ schema ++ " owner to test") []
-
 cleanMySQL :: (MonadBaseControl IO m, MonadIO m) => DbPersist MySQL m ()
 cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 0" []
@@ -840,6 +869,7 @@ cleanMySQL = do
     executeRaw True ("create database " ++ schema) []
   executeRaw True ("use test") []
   executeRaw True "SET FOREIGN_KEY_CHECKS = 1" []
+#endif
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()
 assertExc err m = do

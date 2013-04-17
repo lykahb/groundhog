@@ -20,7 +20,7 @@ module Database.Groundhog.TH.Settings
   , PSAutoKeyDef(..)
   ) where
 
-import Database.Groundhog.Core (UniqueType(..))
+import Database.Groundhog.Core (UniqueType(..), ReferenceActionType(..))
 import Database.Groundhog.Generic (PSEmbeddedFieldDef(..))
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
@@ -71,6 +71,8 @@ data THFieldDef = THFieldDef {
   , thExprName :: String -- BarField
   , thFieldType :: Type
   , thEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
+  , thFieldOnDelete :: Maybe ReferenceActionType
+  , thFieldOnUpdate :: Maybe ReferenceActionType
 } deriving Show
 
 data THUniqueDef = THUniqueDef {
@@ -119,6 +121,8 @@ data PSFieldDef = PSFieldDef {
   , psDbTypeName :: Maybe String -- inet, NUMERIC(5,2), VARCHAR(50)
   , psExprName :: Maybe String -- BarField
   , psEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
+  , psFieldOnDelete :: Maybe ReferenceActionType
+  , psFieldOnUpdate :: Maybe ReferenceActionType
 } deriving Show
 
 data PSUniqueDef = PSUniqueDef {
@@ -162,8 +166,15 @@ instance Lift UniqueType where
   lift UniqueIndex = [| UniqueIndex |]
   lift UniquePrimary = [| UniquePrimary |]
 
+instance Lift ReferenceActionType where
+  lift NoAction = [| NoAction |]
+  lift Restrict = [| Restrict |]
+  lift Cascade = [| Cascade |]
+  lift SetNull = [| SetNull |]
+  lift SetDefault = [| SetDefault |]
+
 instance Lift PSFieldDef where
-  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) |]
+  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psFieldOnDelete) $(lift psFieldOnUpdate) |]
 
 instance Lift PSEmbeddedFieldDef where
   lift (PSEmbeddedFieldDef {..}) = [| PSEmbeddedFieldDef $(lift psEmbeddedFieldName) $(lift psDbEmbeddedFieldName) $(lift psDbEmbeddedTypeName) $(lift psSubEmbedded) |]
@@ -223,14 +234,21 @@ instance FromJSON PSUniqueDef where
 instance FromJSON UniqueType where
   parseJSON o = do
     x <- parseJSON o
-    case (x :: String) of
-      "constraint" -> return UniqueConstraint
-      "index" -> return UniqueIndex
-      "primary" -> return UniquePrimary
-      _ -> fail $ "parseJSON: UniqueType expected \"constraint\", \"index\", or \"primary\", but got " ++ x
+    let vals = [("constraint", UniqueConstraint), ("index", UniqueIndex), ("primary", UniquePrimary)]
+    case lookup x vals of
+      Just a -> return a
+      Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
+
+instance FromJSON ReferenceActionType where
+  parseJSON o = do
+    x <- parseJSON o
+    let vals = [("no action", NoAction), ("restrict", Restrict), ("cascade", Cascade), ("set null", SetNull), ("set default", SetDefault)]
+    case lookup x vals of
+      Just a -> return a
+      Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
 instance FromJSON PSFieldDef where
-  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType"
+  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "onDelete" <*> v .:? "onUpdate"
   parseJSON _          = mzero
 
 instance FromJSON PSEmbeddedFieldDef where

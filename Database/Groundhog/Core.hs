@@ -54,6 +54,7 @@ module Database.Groundhog.Core
   , IsUniqueKey(..)
   , UniqueDef(..)
   , UniqueType(..)
+  , ReferenceActionType(..)
   -- * Migration
   , SingleMigration
   , NamedMigrations
@@ -170,8 +171,8 @@ infixl 5 ~>
 (~>) :: (PersistEntity v, Constructor c, FieldLike f db (RestrictionHolder v c) a, Embedded a) => f -> Selector a a' -> SubField v c a'
 field ~> sel = case fieldChain field of
   ((name, typ), prefix) -> case typ of
-    DbEmbedded emb@(EmbeddedDef _ ts)             -> SubField (ts !! selectorNum sel, (name, emb):prefix)
-    DbEntity (Just (emb@(EmbeddedDef _ ts), _)) _ -> SubField (ts !! selectorNum sel, (name, emb):prefix)
+    DbEmbedded emb@(EmbeddedDef _ ts)                 -> SubField (ts !! selectorNum sel, (name, emb):prefix)
+    DbEntity (Just (emb@(EmbeddedDef _ ts), _)) _ _ _ -> SubField (ts !! selectorNum sel, (name, emb):prefix)
     other -> error $ "(~>): cannot get subfield of non-embedded type " ++ show other
 
 newtype SubField v (c :: (* -> *) -> *) a = SubField FieldChain
@@ -363,6 +364,13 @@ data UniqueDef = UniqueDef {
 -- | Defines how to treat the unique set of fields for a datatype
 data UniqueType = UniqueConstraint | UniqueIndex | UniquePrimary deriving (Show, Eq)
 
+data ReferenceActionType = NoAction
+                         | Restrict
+                         | Cascade
+                         | SetNull
+                         | SetDefault
+  deriving (Eq, Show)
+
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
 -- datatypes, eg DbString instead of DbVarchar. Different databases may
 -- have different translations for these types.
@@ -381,8 +389,8 @@ data DbType = DbString
             | DbMaybe DbType
             | DbList String DbType -- ^ List table name and type of its argument
             | DbEmbedded EmbeddedDef
-            -- | Nothing means autokey, Just contains a unique key definition and a name of unique constraint.
-            | DbEntity (Maybe (EmbeddedDef, String)) EntityDef
+            -- | Nothing means autokey, Just contains a unique key definition and a name of unique constraint. Then there are actions on delete and on update.
+            | DbEntity (Maybe (EmbeddedDef, String)) (Maybe ReferenceActionType) (Maybe ReferenceActionType) EntityDef
   deriving (Eq, Show)
 
 -- | Stores name for a database type

@@ -20,6 +20,8 @@ definitions:
       - name: Artist
         uniques:
           - name: ArtistName
+            # Optional parameter type can be constraint (by default), index, or primary
+            type: constraint
             fields: [artistName]
 |]
 
@@ -37,7 +39,14 @@ mkPersist defaultCodegenConfig [groundhog|
 definitions:
   - entity: Album
   - entity: Track
-  # keys of many-to-many relation form a unique key
+    constructors:
+      - name: Track
+        fields:
+          - name: albumTrack
+  # Configure actions on parent table changes
+            onDelete: cascade
+            onUpdate: restrict
+  # Keys of many-to-many relation form a unique key
   - entity: ArtistAlbum
     autoKey: null
     keys:

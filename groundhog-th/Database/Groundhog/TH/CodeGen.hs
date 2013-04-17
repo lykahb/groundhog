@@ -85,10 +85,7 @@ mkEmbeddedPersistFieldInstance def = do
               then let pat = conP (thEmbeddedConstructorName def) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thEmbeddedFields def) - fNum - 1) wildP
                    in caseE (varE v) $ [match pat (normalB $ varE a) []]
               else [| undefined :: $(return $ thFieldType f) |]
-            typ = case (thEmbeddedDef f, thDbTypeName f) of
-              (Just e, _) -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-              (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
-              _ -> [| dbType $nvar |]
+            typ = mkType f nvar
         [| (fname, $typ) |]
     let pat = if null $ thEmbeddedTypeParams def then wildP else varP v
     funD 'dbType $ [ clause [pat] (normalB [| DbEmbedded $ EmbeddedDef False $(listE $ zipWith mkField [0..] (thEmbeddedFields def)) |]) [] ]
@@ -195,7 +192,7 @@ mkAutoKeyPersistFieldInstance def = case thAutoKey def of
     fromPersistValues' <- funD 'fromPersistValues [clause [] (normalB [| primFromPersistValue |]) []]
     dbType' <- do
       a <- newName "a"
-      let body = [| DbEntity Nothing $ entityDef ((undefined :: Key v a -> v) $(varE a)) |]
+      let body = [| DbEntity Nothing Nothing Nothing $ entityDef ((undefined :: Key v a -> v) $(varE a)) |]
       funD 'dbType [clause [varP a] (normalB body) []]
     
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
@@ -267,13 +264,10 @@ mkUniqueKeysPersistFieldInstances def = do
       let mkField f = do
           let fname = thDbFieldName f
               nvar = [| undefined :: $(return $ thFieldType f) |]
-              typ = case (thEmbeddedDef f, thDbTypeName f) of
-                (Just e, _)  -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-                (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
-                _ -> [| dbType $nvar |]
+              typ = mkType f nvar
           [| (fname, $typ) |]
       let embedded = [| EmbeddedDef False $(listE $ map mkField $ thUniqueKeyFields unique) |]
-      let body = [| DbEntity (Just ($embedded, $(lift $ thUniqueKeyName unique))) $ entityDef ((undefined :: Key v a -> v) $(varE a)) |]
+      let body = [| DbEntity (Just ($embedded, $(lift $ thUniqueKeyName unique))) Nothing Nothing $ entityDef ((undefined :: Key v a -> v) $(varE a)) |]
       funD 'dbType [clause [varP a] (normalB body) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [persistName', toPersistValues', fromPersistValues', dbType']
@@ -444,10 +438,7 @@ mkPersistEntityInstance def = do
                        wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
                    in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
               else [| undefined :: $(return $ thFieldType f) |]
-            typ = case (thEmbeddedDef f, thDbTypeName f) of
-              (Just e, _)  -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-              (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
-              _ -> [| dbType $nvar |]
+            typ = mkType f nvar
         [| (fname, $typ) |]
     let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
         mkConstructorDef cNum c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef cNum name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
@@ -520,10 +511,7 @@ mkPersistEntityInstance def = do
     mkChain f = do
         fArg <- newName "f"
         let nvar = [| (undefined :: Field v c a -> a) $(varE fArg) |]
-            typ = case (thEmbeddedDef f, thDbTypeName f) of
-              (Just e, _)  -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar ) |]
-              (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
-              _ -> [| dbType $nvar |]
+            typ = mkType f nvar
         let body = [| (($(lift $ thDbFieldName f), $typ), []) |]
         return (fArg, body)
     in funD 'entityFieldChain clauses
@@ -583,10 +571,7 @@ mkEntityPersistFieldInstance def = do
          _         -> error "mkEntityPersistFieldInstance: key has no unique type"
     funD 'fromPersistValues $ [ clause [] body []]
 
-  dbType' <- do
-    x <- newName "x"
-    let keyType = maybe [t| BackendSpecific |] (\(u, _) -> [t| Unique $u |]) uniqInfo
-    funD 'dbType $ [clause [varP x] (normalB [| dbType $ (undefined :: a -> Key a $keyType) $(varE x) |]) []]
+  dbType' <- funD 'dbType $ [clause [] (normalB [| dbType . (undefined :: a -> DefaultKey a) |]) []]
 
   let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
   let decs = [persistName', toPersistValues', fromPersistValue', dbType']
@@ -711,3 +696,29 @@ spanM p = go  where
         (ys, zs) <- go xs
         return (x:ys, zs)
       else return ([], x:xs)
+{-
+mkType :: THFieldDef -> ExpQ -> ExpQ
+mkType f nvar = case (thEmbeddedDef f, thDbTypeName f) of
+  (Just e, _) -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar) |]
+  (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
+  _ -> [| dbType $nvar |]
+-}
+mkType :: THFieldDef -> ExpQ -> ExpQ
+mkType f nvar = case thDbTypeName f of
+  Just name -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
+  Nothing -> t3 where
+    t1 = [| dbType $nvar |]
+    t2 = case (thFieldOnDelete f, thFieldOnUpdate f) of
+      (Nothing, Nothing) -> t1
+      (onDel, onUpd) -> [| applyReferencesSettings $(lift onDel) $(lift onUpd) $t1 |]
+    t3 = case thEmbeddedDef f of
+      Nothing -> t2
+      Just emb -> [| applyEmbeddedDbTypeSettings $(lift emb) $t2 |]
+  
+  {-
+  
+  applyEmbeddedDbTypeSettings
+  (1, 2) Embedded
+  Key Entity Embedded
+  Entity PersistEntity
+  -}

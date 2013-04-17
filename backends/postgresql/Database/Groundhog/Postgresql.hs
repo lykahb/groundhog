@@ -587,7 +587,7 @@ showSqlType DbBlob = "BYTEA"
 showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
 showSqlType (DbMaybe t) = showSqlType t
 showSqlType (DbList _ _) = showSqlType DbInt64
-showSqlType (DbEntity Nothing _) = showSqlType DbInt64
+showSqlType (DbEntity Nothing _ _ _) = showSqlType DbInt64
 showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool

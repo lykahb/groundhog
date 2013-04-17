@@ -287,7 +287,7 @@ getConstructorTypes = foldr getDbTypes [] . map snd . constrParams where
 getDbTypes :: DbType -> [DbType] -> [DbType]
 getDbTypes typ acc = case typ of
   DbEmbedded (EmbeddedDef _ ts) -> foldr (getDbTypes . snd) acc ts
-  DbEntity (Just (EmbeddedDef _ ts, _)) _ -> foldr (getDbTypes . snd) acc ts
+  DbEntity (Just (EmbeddedDef _ ts, _)) _ _ _ -> foldr (getDbTypes . snd) acc ts
   t -> t:acc
 
 constrId :: (Utf8 -> Utf8) -> ConstructorDef -> Maybe Utf8
