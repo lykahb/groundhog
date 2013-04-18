@@ -380,7 +380,7 @@ firstLetter f s = f (head s):tail s
 -- Unless the property is marked as mandatory, it can be omitted. In this case value created by the NamingStyle will be used.
 --
 -- @
---data Settable = First {foo :: String, bar :: Int} deriving (Eq, Show)
+--data Settable = First {foo :: String, bar :: Int, next :: Maybe (Key Settable BackendSpecific)} deriving (Eq, Show)
 --
 --    \-- The declaration with defaulted names
 --
@@ -429,6 +429,12 @@ firstLetter f s = f (head s):tail s
 --            dbName: bar
 --            thExprName: BarField
 --                                       # For some databases \"type: integer\" would be appropriate
+--          - name: next
+--            dbName: next
+--            thExprName: NextField
+--            \# If these clauses are omitted, the database will define action automatically. Note that it may differ across databases. For example, MySQL has \"restrict\" by default, but in PostgreSQL it is \"no action\"
+--            \# onDelete: cascade        # Defines ON DELETE clause of references. It can have values: no action, restrict, cascade, set null, set default
+--            \# onUpdate: set null       # Defines ON UPDATE
 --        uniques:
 --          - name: someconstraint
 --            type: constraint           # The type can be be \"constraint\", \"index\", or \"primary\"
@@ -520,7 +526,7 @@ mkEntityDecs def = do
     , mkPersistEntityInstance def
     , mkEntityNeverNullInstance def
     ]
---  runIO $ putStrLn $ pprint decs
+  -- runIO $ putStrLn $ pprint decs
   return decs
 
 mkEmbeddedDecs :: THEmbeddedDef -> Q [Dec]
