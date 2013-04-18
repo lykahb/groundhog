@@ -10,8 +10,8 @@ module Database.Groundhog.Postgresql.Geometry
   ) where
 
 import Database.Groundhog.Core
-import Database.Groundhog.Expression
 import Database.Groundhog.Generic
+import Database.Groundhog.Instances ()
 
 import Control.Applicative
 import Data.Attoparsec.Char8

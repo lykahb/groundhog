@@ -607,7 +607,7 @@ mkEntityNeverNullInstance def = do
 mkMigrateFunction :: String -> [THEntityDef] -> Q [Dec]
 mkMigrateFunction name defs = do
   let (normal, polymorhpic) = partition (null . thTypeParams) defs
-  forM_ polymorhpic $ \def -> report False $ "Datatype " ++ show (thDataName def) ++ " will not be migrated automatically by function " ++ name ++ " because it has type parameters"
+  forM_ polymorhpic $ \def -> reportWarning $ "Datatype " ++ show (thDataName def) ++ " will not be migrated automatically by function " ++ name ++ " because it has type parameters"
   let body = doE $ map (\def -> noBindS [| migrate (undefined :: $(conT $ thDataName def)) |]) normal
   sig <- sigD (mkName name) [t| PersistBackend m => Migration m |]
   func <- funD (mkName name) [clause [] (normalB body) []]
@@ -655,6 +655,11 @@ extractType (KindedTV name _) = VarT name
 
 #if MIN_VERSION_template_haskell(2, 7, 0)
 #define isClassInstance isInstance
+#endif
+
+#if !MIN_VERSION_template_haskell(2, 8, 0)
+reportWarning :: String -> Q ()
+reportWarning = report False
 #endif
 
 isPrim :: Type -> Q Bool

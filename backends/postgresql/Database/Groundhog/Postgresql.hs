@@ -106,7 +106,6 @@ withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
 withPostgresqlPool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
 
 {-# SPECIALIZE withPostgresqlConn :: String -> (Postgresql -> IO a) -> IO a #-}
-{-# INLINE withPostgresqlConn #-}
 withPostgresqlConn :: (MonadBaseControl IO m, MonadIO m)
                => String -- ^ connection string
                -> (Postgresql -> m a)
@@ -145,7 +144,6 @@ close' :: Postgresql -> IO ()
 close' (Postgresql conn) = PG.close conn
 
 {-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Postgresql IO (AutoKey v) #-}
-{-# INLINE insert' #-}
 insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Postgresql m (AutoKey v)
 insert' v = do
   -- constructor number and the rest of the field values
@@ -173,7 +171,6 @@ insert' v = do
       pureFromPersistValue [rowid]
 
 {-# SPECIALIZE insert_' :: PersistEntity v => v -> DbPersist Postgresql IO () #-}
-{-# INLINE insert_' #-}
 insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Postgresql m ()
 insert_' v = do
   -- constructor number and the rest of the field values
