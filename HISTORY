@@ -1,3 +1,12 @@
+0.3
+* custom compositional functions and operators
+* ConnectionManager which helps to extract connections from pools, application state, etc.
+* support for savepoints
+* schema qualified tables
+* added unique constraints of type PRIMARY
+* reference clauses ON DELETE and ON UPDATE.
+* exposed database introspection capabilities with class SchemaAnalyzer
+
 0.2
 * database indexes
 * support DB-specific column types

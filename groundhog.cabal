@@ -1,11 +1,11 @@
 name:            groundhog
-version:         0.2.0
+version:         0.3.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
-synopsis:        Type-safe ADT-database mapping library.
-description:     This library provides just the general interface and helper functions. You must use a specific backend in order to make this useful.
+synopsis:        Type-safe datatype-database mapping library.
+description:     This library maps your datatypes to a relational model, in a way similar to what ORM libraries do in OOP. The schema can be configured flexibly which makes integration with existing databases easy. Groundhog supports schema migrations, composite keys, compositional queries, and much more. See the folder with examples for introduction.
 category:        Database
 stability:       Non-stable
 cabal-version:   >= 1.6

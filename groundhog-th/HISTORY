@@ -1,3 +1,8 @@
+0.3
+* reference clauses ON DELETE and ON UPDATE
+* schema qualification
+* added unique constraints of type PRIMARY
+
 0.2
 * improvements of YAML parsing error reporting
 * database indexes

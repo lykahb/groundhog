@@ -1,3 +1,8 @@
+0.3
+* switched from pool-conduit to resource-pool
+* schema qualified tables
+* support for savepoints
+
 0.2.0
 * database indexes
 * support DB-specific column types
