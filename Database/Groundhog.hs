@@ -40,12 +40,11 @@
 --  melon <- select $ (ProductNameField ==. \"Melon\") \`orderBy\` ['Desc' QuantityField]
 --  liftIO $ putStrLn $ \"Melon orders: \" ++ show melon
 -- @
-module Database.Groundhog (module G) where
-
-import Database.Groundhog.Core as G
-  ( PersistBackend(..)
+module Database.Groundhog (
+  -- * Main definitions
+    PersistBackend(..)
   , DbPersist(..)
-  , Key(..)
+  , Key
   , Unique
   , BackendSpecific
   , extractUnique
@@ -56,16 +55,23 @@ import Database.Groundhog.Core as G
   , (~>)
   , limitTo
   , offsetBy
-  , orderBy)
-import Database.Groundhog.Expression as G
-import Database.Groundhog.Generic as G
-  ( createMigration
+  , orderBy
+  -- * Expressions
+  , (=.)
+  , (&&.), (||.)
+  , (==.), (/=.), (<.), (<=.), (>.), (>=.)
+  -- * Migration
+  , createMigration
   , executeMigration
   , executeMigrationUnsafe
   , runMigration
   , runMigrationUnsafe
   , printMigration
   , silentMigrationLogger
-  , defaultMigrationLogger)
+  , defaultMigrationLogger
+) where
 
-import Database.Groundhog.Instances as G
+import Database.Groundhog.Core
+import Database.Groundhog.Expression
+import Database.Groundhog.Generic
+import Database.Groundhog.Instances
