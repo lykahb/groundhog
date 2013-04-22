@@ -457,14 +457,14 @@ mkPersistEntityInstance def = do
     let pat = if null $ thTypeParams def then wildP else varP v
     funD 'entityDef $ [ clause [pat] body [] ]
 
-  toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0..] $ thConstructors def) $ \(cNum, c) -> do
+  toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0 :: Int ..] $ thConstructors def) $ \(cNum, c) -> do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, thFieldType f)) $ thConstrFields c
     let pat = conP (thConstrName c) $ map (varP . fst) vars
     proxy <- newName "p"
     (lastPrims, fields) <- spanM (isPrim . snd) $ reverse vars
     let lastPrims' = map (\(x, _) -> [| toPrimitivePersistValue $(varE proxy) $(varE x) |]) $ reverse $ lastPrims
     let body = if null fields
-        then [| return $ ($(listE $ [|toPrimitivePersistValue $(varE proxy) $(lift (cNum :: Int))|]:lastPrims')++) |]
+        then [| return $ ($(listE $ [|toPrimitivePersistValue $(varE proxy) ($(lift cNum) :: Int) |]:lastPrims')++) |]
         else do
           let go (m, f) (fname, t) = isPrim t >>= \isP -> if isP
               then return (m, [| (toPrimitivePersistValue $(varE proxy) $(varE fname):) |]:f)
@@ -472,7 +472,7 @@ mkPersistEntityInstance def = do
           (stmts, func) <- foldM go ([], []) fields        -- foldM puts reversed fields in normal order
           let nonPrimFields' = foldr1 (\a b -> [|$a . $b|]) func
           let result = if null lastPrims' then nonPrimFields' else [| $nonPrimFields' . ($(listE lastPrims')++) |]
-          doE $ stmts ++ [noBindS [| return $ (toPrimitivePersistValue $(varE proxy) $(lift (cNum :: Int)):) . $result |]]
+          doE $ stmts ++ [noBindS [| return $ (toPrimitivePersistValue $(varE proxy) ($(lift cNum) :: Int):) . $result |]]
     let body' = [| phantomDb >>= $(lamE [varP proxy] body) |]
     clause [pat] (normalB body') []
 
