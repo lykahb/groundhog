@@ -14,6 +14,7 @@ module Database.Groundhog.MySQL
 
 import Database.Groundhog
 import Database.Groundhog.Core
+import Database.Groundhog.Expression
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM

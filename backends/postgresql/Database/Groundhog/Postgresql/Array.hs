@@ -24,6 +24,7 @@ module Database.Groundhog.Postgresql.Array
   ) where
 
 import Database.Groundhog.Core
+import Database.Groundhog.Expression
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql hiding (append)
 import Database.Groundhog.Postgresql hiding (append)
