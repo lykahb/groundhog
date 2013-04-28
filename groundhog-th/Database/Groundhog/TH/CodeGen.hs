@@ -297,42 +297,34 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
 mkKeyEqShowInstances :: THEntityDef -> Q [Dec]
 mkKeyEqShowInstances def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
-  let mkShowInstance typ cName fieldsNum = do
-      showsPrec' <- do
-        p <- newName "p"
-        fields <- replicateM fieldsNum (newName "x")
-        let pat = conP (mkName cName) $ map varP fields
-        --let shownArgs = foldr1 (\a b -> [| $a ++ $b |]) $ map (\a -> [| show $(varE a) |]) fields
-        --let body = [| $(lift $ cName ++ " ") ++ $shownArgs |]
-        
-        let showC = [| showString $(lift $ cName ++ " ") |]
-        let showArgs = foldr1 (\a b -> [| $a . showString " " . $b |]) $ map (\a -> [| showsPrec 11 $(varE a) |]) fields
-        let body = [| showParen ($(varE p) >= (11 :: Int)) ($showC . $showArgs) |]
-        funD 'showsPrec [clause [varP p, pat] (normalB body) []]
-      let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-      let decs = [showsPrec']
-      return $ InstanceD context (AppT (ConT ''Show) typ) decs
-  let mkEqInstance typ cName fieldsNum = do
-      eq' <- do
-        let fields = replicateM fieldsNum (newName "x")
-        (fields1, fields2) <- liftM2 (,) fields fields
-        let mkPat = conP (mkName cName) . map varP
-        let body = foldr1 (\e1 e2 -> [| $e1 && $e2 |]) $ zipWith (\n1 n2 -> [| $(varE n1) == $(varE n2) |]) fields1 fields2
-        funD '(==) [clause [mkPat fields1, mkPat fields2] (normalB body) []]
-      let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-      let decs = [eq']
-      return $ InstanceD context (AppT (ConT ''Eq) typ) decs
+  let forKeys f = maybe [] (\k -> [f (thAutoKeyConstrName k) 1]) (thAutoKey def)
+               ++ map (\k -> f (thUniqueKeyConstrName k) (length $ thUniqueKeyFields k)) (thUniqueKeys def)
+
+  showsPrec' <- let
+    mkClause cName fieldsNum = do
+      p <- newName "p"
+      fields <- replicateM fieldsNum (newName "x")
+      let pat = conP (mkName cName) $ map varP fields
+          showC = [| showString $(lift $ cName ++ " ") |]
+          showArgs = foldr1 (\a b -> [| $a . showString " " . $b |]) $ map (\a -> [| showsPrec 11 $(varE a) |]) fields
+          body = [| showParen ($(varE p) >= (11 :: Int)) ($showC . $showArgs) |]
+      clause [varP p, pat] (normalB body) []
+    in funD 'showsPrec $ forKeys mkClause
     
-  autoKeyInstance <- case thAutoKey def of
-    Nothing -> return []
-    Just autoKey -> do
-      keyType <- [t| Key $(return entity) BackendSpecific |]
-      mapM (\f -> f keyType (thAutoKeyConstrName autoKey) 1) [mkShowInstance, mkEqInstance]
-  uniqsInstances <- forM (thUniqueKeys def) $ \unique -> do
-    uniqKeyType <- [t| Key $(return entity) (Unique $(conT $ mkName $ thUniqueKeyPhantomName unique)) |]
-    let fieldsNum = length $ thUniqueKeyFields unique
-    mapM (\f -> f uniqKeyType (thUniqueKeyConstrName unique) fieldsNum) [mkShowInstance, mkEqInstance]
-  return $ autoKeyInstance ++ concat uniqsInstances
+  eq' <- let
+    mkClause cName fieldsNum = do
+      let fields = replicateM fieldsNum (newName "x")
+      (fields1, fields2) <- liftM2 (,) fields fields
+      let mkPat = conP (mkName cName) . map varP
+          body = foldr1 (\e1 e2 -> [| $e1 && $e2 |]) $ zipWith (\n1 n2 -> [| $(varE n1) == $(varE n2) |]) fields1 fields2
+      clause [mkPat fields1, mkPat fields2] (normalB body) []
+    clauses = forKeys mkClause
+    noMatch = if length clauses > 1 then [clause [wildP, wildP] (normalB [| False |]) []] else []
+    in funD '(==) $ clauses ++ noMatch
+
+  let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
+  typ <- [t| Key $(return entity) $(newName "a" >>= varT) |]
+  return $ [InstanceD context (AppT (ConT ''Eq) typ) [eq'], InstanceD context (AppT (ConT ''Show) typ) [showsPrec']]
 
 mkEmbeddedInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedInstance def = do
@@ -701,13 +693,7 @@ spanM p = go  where
         (ys, zs) <- go xs
         return (x:ys, zs)
       else return ([], x:xs)
-{-
-mkType :: THFieldDef -> ExpQ -> ExpQ
-mkType f nvar = case (thEmbeddedDef f, thDbTypeName f) of
-  (Just e, _) -> [| applyEmbeddedDbTypeSettings $(lift e) (dbType $nvar) |]
-  (_, Just name) -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
-  _ -> [| dbType $nvar |]
--}
+
 mkType :: THFieldDef -> ExpQ -> ExpQ
 mkType f nvar = case thDbTypeName f of
   Just name -> [| DbOther $ OtherTypeDef $ const $(lift name) |]
@@ -719,11 +705,3 @@ mkType f nvar = case thDbTypeName f of
     t3 = case thEmbeddedDef f of
       Nothing -> t2
       Just emb -> [| applyEmbeddedDbTypeSettings $(lift emb) $t2 |]
-  
-  {-
-  
-  applyEmbeddedDbTypeSettings
-  (1, 2) Embedded
-  Key Entity Embedded
-  Entity PersistEntity
-  -}
