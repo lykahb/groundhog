@@ -404,7 +404,7 @@ firstLetter f s = f (head s):tail s
 --                                       # The list elements start with hyphen+space. Keys are separated from values by a colon+space. See full definition at http://yaml.org/spec/1.2/spec.html.
 --  - entity: Settable                   # Mandatory. Entity datatype name
 --    dbName: Settable                   # Name of the main table
---    schema: null                       # Name of the schema to which the table belongs
+--    \# schema: public                   # Name of the schema to which the table belongs
 --    autoKey:                           # Description of the autoincremented key for data family Key instance
 --      constrName: SettableKey          # Name of constructor
 --      default: true                    # The default key is used when entity is referenced without key wrapper. E.g., \"field :: SomeData\" instead of \"field :: Key SomeData keytype\"
@@ -420,18 +420,19 @@ firstLetter f s = f (head s):tail s
 --      - name: First                    # Mandatory. Constructor name
 --        phantomName: FooBarConstructor # Constructor phantom type name used to guarantee type safety
 --        dbName: First                  # Name of constructor table which is created only for datatypes with multiple constructors
+--        keyDbName: id                  # Name for the primary key column
 --        fields:                        # List of constructor fields. If you don't change a field, you can omit it
 --          - name: foo                  # The name as in constructor record. If constructor is not a record, the name is created by 'mkNormalFieldName'. For example, the fields in constructor SomeConstr would have names someConstr0 and someConstr1 by default.
 --            dbName: foo                # Column name
---            thExprName: FooField       # Name of a field used in expressions
+--            exprName: FooField         # Name of a field used in expressions
 --            \# type: varchar            # This would result in having field type DbOther \"varchar\" instead of DbString. Value of this attribute will be used by DB backend for migration
 --          - name: bar
 --            dbName: bar
---            thExprName: BarField
+--            exprName: BarField
 --                                       # For some databases \"type: integer\" would be appropriate
 --          - name: next
 --            dbName: next
---            thExprName: NextField
+--            exprName: NextField
 --            \# If these clauses are omitted, the database will define action automatically. Note that it may differ across databases. For example, MySQL has \"restrict\" by default, but in PostgreSQL it is \"no action\"
 --            \# onDelete: cascade        # Defines ON DELETE clause of references. It can have values: no action, restrict, cascade, set null, set default
 --            \# onUpdate: set null       # Defines ON UPDATE
