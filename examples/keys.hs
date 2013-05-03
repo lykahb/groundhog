@@ -4,15 +4,19 @@ import Control.Monad.IO.Class (liftIO)
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 
--- artistName is a unique key
 data Artist = Artist { artistName :: String } deriving (Eq, Show)
+data Album  = Album  { albumName :: String} deriving (Eq, Show)
+-- We cannot use regular deriving because when it works, the Key Eq and Show instances for (Key Album BackendSpecific) are not created yet
+data Track  = Track  { albumTrack :: Key Album BackendSpecific, trackName :: String }
+deriving instance Eq Track
+deriving instance Show Track
 
 mkPersist defaultCodegenConfig [groundhog|
 definitions:
   - entity: Artist
     autoKey:
       constrName: AutoKey
-      default: false # Defines if this key is used when an entity is stored directly, for example, data Ref = Ref SomeEntity
+      default: false # Defines if this key is used when an entity is stored directly, for example, data Ref = Ref Artist
     keys:
       - name: ArtistName
         default: true
@@ -23,20 +27,6 @@ definitions:
             # Optional parameter type can be constraint (by default), index, or primary
             type: constraint
             fields: [artistName]
-|]
-
-data Album  = Album  { albumName :: String} deriving (Eq, Show)
--- many-to-many relation
-data ArtistAlbum = ArtistAlbum {artist :: Key Artist (Unique ArtistName), album :: Key Album BackendSpecific }
-deriving instance Eq ArtistAlbum
-deriving instance Show ArtistAlbum
--- We cannot use regular deriving because when it works, the Key Eq and Show instances for (Key Album BackendSpecific) are not created yet
-data Track  = Track  { albumTrack :: Key Album BackendSpecific, trackName :: String }
-deriving instance Eq Track
-deriving instance Show Track
-
-mkPersist defaultCodegenConfig [groundhog|
-definitions:
   - entity: Album
   - entity: Track
     constructors:
@@ -46,9 +36,17 @@ definitions:
   # Configure actions on parent table changes
             onDelete: cascade
             onUpdate: restrict
-  # Keys of many-to-many relation form a unique key
+|]
+
+-- Many-to-many relation. It is defined here because ArtistName is available only after the the definitions for Artist are created
+data ArtistAlbum = ArtistAlbum {artist :: Key Artist (Unique ArtistName), album :: Key Album BackendSpecific }
+deriving instance Eq ArtistAlbum
+deriving instance Show ArtistAlbum
+
+mkPersist defaultCodegenConfig [groundhog|
+definitions:
   - entity: ArtistAlbum
-    autoKey: null
+    autoKey: null # Disable creation of the autoincrement integer key
     keys:
       - name: ArtistAlbumKey
         default: true
@@ -77,4 +75,3 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
   -- order by primary key
   tracks' <- select $ (AlbumTrackField ==. albumKey') `orderBy` [Desc AutoKeyField] `limitTo` 3
   liftIO $ print tracks'
-
