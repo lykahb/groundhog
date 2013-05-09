@@ -33,7 +33,7 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
-import Data.ByteString.Char8 (ByteString, pack, unpack, copy)
+import Data.ByteString.Char8 (pack, unpack, copy)
 import Data.Char (toUpper)
 import Data.Either (partitionEithers)
 import Data.Function (on)
@@ -660,14 +660,13 @@ queryRaw' query vals f = do
           case PG.oid2builtin oid of
             -- TODO: this is a temporary hack until postgresql-simple supports arrays and has more builtin types. Restore fail clause then.
             Nothing -> return $ getGetter PG.Unknown $
-                       PG.Field ret col $ PG.builtin2typname PG.Unknown
+                       PG.Field ret col oid
              {- fail $ "Postgresql.withStmt': could not " ++
                               "recognize " ++ show oid ++ " of column " ++
                               show (let LibPQ.Col i = col in i) ++
                               " (counting from zero)" -}
             Just bt -> return $ getGetter bt $
-                       PG.Field ret col $
-                       PG.builtin2typname bt
+                       PG.Field ret col oid
         -- Ready to go!
         rowRef   <- newIORef (LibPQ.Row 0)
         rowCount <- LibPQ.ntuples ret
@@ -681,10 +680,12 @@ queryRaw' query vals f = do
         mbs <-  {-# SCC "getvalue'" #-} LibPQ.getvalue' ret row col
         case mbs of
           Nothing -> return PersistNull
-          Just bs -> bs `seq` case getter mbs of
-            Errors (exc:_) -> throw exc
-            Errors [] -> error "Got an Errors, but no exceptions"
-            Ok v  -> return v
+          Just bs -> do
+            ok <- PGFF.runConversion (getter mbs) conn
+            bs `seq` case ok of
+              Errors (exc:_) -> throw exc
+              Errors [] -> error "Got an Errors, but no exceptions"
+              Ok v  -> return v
 
 -- | Avoid orphan instances.
 newtype P = P PersistValue
@@ -702,7 +703,7 @@ instance PGTF.ToField P where
   toField (P PersistNull)               = PGTF.toField PG.Null
   toField (P (PersistCustom _ _))       = error "toField: unexpected PersistCustom"
 
-type Getter a = PG.Field -> Maybe ByteString -> Ok a
+type Getter a = PGFF.FieldParser a
 
 convertPV :: PGFF.FromField a => (a -> b) -> Getter b
 convertPV f = (fmap f .) . PGFF.fromField
@@ -732,7 +733,7 @@ getGetter PG.TimestampTZ           = convertPV (PersistZonedTime . ZT)
 getGetter PG.Bit                   = convertPV PersistInt64
 getGetter PG.VarBit                = convertPV PersistInt64
 getGetter PG.Numeric               = convertPV (PersistDouble . fromRational)
-getGetter PG.Void                  = \_ _ -> Ok PersistNull
+getGetter PG.Void                  = \_ _ -> return PersistNull
 getGetter _ = \f dat -> fmap (PersistByteString . unBinary) $ case dat of
   Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
   Just str -> return $ PG.Binary $ copy $ str
