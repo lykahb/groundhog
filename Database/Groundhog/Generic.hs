@@ -58,7 +58,6 @@ import Control.Monad.Reader.Class (MonadReader(..))
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.List (partition, sortBy)
-import Data.Maybe (fromMaybe)
 import qualified Data.Map as Map
 
 getCorrectMigrations :: NamedMigrations -> [(Bool, Int, String)]
@@ -164,20 +163,20 @@ applyEmbeddedDbTypeSettings settings typ = (case typ of
   DbEmbedded emb -> DbEmbedded $ applyToDef emb
   DbEntity (Just (emb, uniq)) onDel onUpd e -> DbEntity (Just (applyToDef emb, uniq)) onDel onUpd e
   t -> error $ "applyEmbeddedDbTypeSettings: expected DbEmbedded, got " ++ show t) where
-  applyToDef (EmbeddedDef _ fields) = EmbeddedDef True $ go settings fields
-  go [] fs = fs
+  applyToDef (EmbeddedDef _ fields) = uncurry EmbeddedDef $ go settings fields
+  go [] fs = (False, fs)
   go st [] = error $ "applyEmbeddedDbTypeSettings: embedded datatype does not have following fields: " ++ show st
-  go st (f@(fName, fType):fs) = case find fName st of
-    Just (rest, PSEmbeddedFieldDef _ dbName dbTypeName subs) -> (fromMaybe fName dbName, typ'):go rest fs where
+  go st (f@(fName, fType):fs) = case partition ((== fName) . psEmbeddedFieldName) st of
+    ([PSEmbeddedFieldDef _ dbName dbTypeName subs], rest) -> result where
+      (flag, fields') = go rest fs
+      result = case dbName of
+        Nothing -> (flag, (fName, typ'):fields')
+        Just name' -> (True, (name', typ'):fields')
       typ' = case (subs, dbTypeName) of
         (Just e, _) -> applyEmbeddedDbTypeSettings e fType
         (_, Just typeName) -> DbOther (OtherTypeDef $ const typeName)
         _ -> fType
-    Nothing -> f:go st fs
-  find :: String -> [PSEmbeddedFieldDef] -> Maybe ([PSEmbeddedFieldDef], PSEmbeddedFieldDef)
-  find _ [] = Nothing
-  find name (def:defs) | psEmbeddedFieldName def == name = Just (defs, def)
-                       | otherwise = fmap (\(defs', result) -> (def:defs', result)) $ find name defs
+    _ -> let (flag, fields') = go st fs in (flag, f:fields')
 
 applyReferencesSettings :: Maybe ReferenceActionType -> Maybe ReferenceActionType -> DbType -> DbType
 applyReferencesSettings onDel onUpd typ = case typ of
