@@ -1,3 +1,6 @@
+0.3.0.2
+* updated postgresql-simple dependency
+
 0.3
 * switched from pool-conduit to resource-pool
 * schema qualified tables
