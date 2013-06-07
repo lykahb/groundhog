@@ -72,6 +72,14 @@ instance (ArrayElem a, PersistField a) => PrimitivePersistField (Array a) where
     dimensions = char '[' *> takeWhile1 (/= '=') *> char '='
     parser = optional dimensions *> parseArr p
 
+instance (ArrayElem a, PersistField a) => SinglePersistField (Array a) where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance (ArrayElem a, PersistField a) => PurePersistField (Array a) where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
 parseString :: Parser ByteString
 parseString = (char '"' *> jstring_)
           <|> takeWhile1 (\c -> c /= ',' && c /= '}')

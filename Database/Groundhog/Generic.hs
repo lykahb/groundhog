@@ -21,6 +21,10 @@ module Database.Groundhog.Generic
   -- * Helper functions for defining *PersistValue instances
   , primToPersistValue
   , primFromPersistValue
+  , primToPurePersistValues
+  , primFromPurePersistValues
+  , primToSinglePersistValue
+  , primFromSinglePersistValue
   , pureToPersistValue
   , pureFromPersistValue
   , singleToPersistValue
@@ -190,6 +194,19 @@ primToPersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a:)
 primFromPersistValue :: (PersistBackend m, PrimitivePersistField a) => [PersistValue] -> m (a, [PersistValue])
 primFromPersistValue (x:xs) = phantomDb >>= \p -> return (fromPrimitivePersistValue p x, xs)
 primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
+
+primToPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => Proxy db -> a -> ([PersistValue] -> [PersistValue])
+primToPurePersistValues p a = (toPrimitivePersistValue p a:)
+
+primFromPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => Proxy db -> [PersistValue] -> (a, [PersistValue])
+primFromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
+primFromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
+
+primToSinglePersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m PersistValue
+primToSinglePersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a)
+
+primFromSinglePersistValue :: (PersistBackend m, PrimitivePersistField a) => PersistValue -> m a
+primFromSinglePersistValue a = phantomDb >>= \p -> return (fromPrimitivePersistValue p a)
 
 pureToPersistValue :: (PersistBackend m, PurePersistField a) => a -> m ([PersistValue] -> [PersistValue])
 pureToPersistValue a = phantomDb >>= \p -> return (toPurePersistValues p a)

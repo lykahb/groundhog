@@ -214,8 +214,24 @@ mkAutoKeyPrimitivePersistFieldInstance def = case thAutoKey def of
     fromPrim' <- funD 'fromPrimitivePersistValue [clause [wildP] (normalB $ conE conName) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [toPrim', fromPrim']
-    return [InstanceD context (AppT (ConT ''PrimitivePersistField) keyType) decs]
+    sequence $ [return $ InstanceD context (AppT (ConT ''PrimitivePersistField) keyType) decs
+             , mkDefaultPurePersistFieldInstance context keyType
+             , mkDefaultSinglePersistFieldInstance context keyType]
   _ -> return []
+
+mkDefaultPurePersistFieldInstance :: Cxt -> Type -> Q Dec
+mkDefaultPurePersistFieldInstance context typ = do
+  toPurePersistValues' <- funD 'toPurePersistValues [clause [] (normalB [| primToPurePersistValues |]) []]
+  fromPurePersistValues' <- funD 'fromPurePersistValues [clause [] (normalB [| primFromPurePersistValues |]) []]
+  let decs = [toPurePersistValues', fromPurePersistValues']
+  return $ InstanceD context (AppT (ConT ''PurePersistField) typ) decs
+
+mkDefaultSinglePersistFieldInstance :: Cxt -> Type -> Q Dec
+mkDefaultSinglePersistFieldInstance context typ = do
+  toSinglePersistValue' <- funD 'toSinglePersistValue [clause [] (normalB [| primToSinglePersistValue |]) []]
+  fromSinglePersistValue' <- funD 'fromSinglePersistValue [clause [] (normalB [| primFromSinglePersistValue |]) []]
+  let decs = [toSinglePersistValue', fromSinglePersistValue']
+  return $ InstanceD context (AppT (ConT ''SinglePersistField) typ) decs
 
 mkUniqueKeysIsUniqueInstances :: THEntityDef -> Q [Dec]
 mkUniqueKeysIsUniqueInstances def = do
@@ -291,7 +307,9 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
           funD 'toPrimitivePersistValue [clause [varP proxy, conP conName [varP x]] (normalB [| toPrimitivePersistValue $(varE proxy) $(varE x) |]) []]
         fromPrim' <- funD 'fromPrimitivePersistValue [clause [varP proxy, varP x] (normalB [| $(conE conName) (fromPrimitivePersistValue $(varE proxy) $(varE x)) |]) []]
         let decs = [toPrim', fromPrim']
-        return [InstanceD context (AppT (ConT ''PrimitivePersistField) uniqKeyType) decs]
+        sequence [ return $ InstanceD context (AppT (ConT ''PrimitivePersistField) uniqKeyType) decs
+                 , mkDefaultPurePersistFieldInstance context uniqKeyType
+                 , mkDefaultSinglePersistFieldInstance context uniqKeyType]
       else mkPurePersistFieldInstance uniqKeyType conName (thUniqueKeyFields unique) context
 
 mkKeyEqShowInstances :: THEntityDef -> Q [Dec]

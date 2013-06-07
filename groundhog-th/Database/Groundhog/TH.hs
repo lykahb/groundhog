@@ -527,7 +527,7 @@ mkEntityDecs def = do
     , mkPersistEntityInstance def
     , mkEntityNeverNullInstance def
     ]
-  -- runIO $ putStrLn $ pprint decs
+  --runIO $ putStrLn $ pprint decs
   return decs
 
 mkEmbeddedDecs :: THEmbeddedDef -> Q [Dec]

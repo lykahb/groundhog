@@ -20,6 +20,15 @@ instance PersistField Point where
   fromPersistValues = primFromPersistValue
   dbType _ = DbOther $ OtherTypeDef $ const "point"
 
+-- These two instances of superclasses are necessary boilerplate.
+instance SinglePersistField Point where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance PurePersistField Point where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
 data MobilePhone = MobilePhone {number :: String, prepaidMoney :: String, location :: Point, ipAddress :: String} deriving Show
 
 mkPersist defaultCodegenConfig [groundhog|

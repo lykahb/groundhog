@@ -42,10 +42,11 @@ instance (PersistEntity v, Constructor c, PersistField a, RestrictionHolder v c 
 instance (PersistEntity v, Constructor c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (SubField v c a) where
   toExpr = ExprField . fieldChain
 
-instance (PersistEntity v, Constructor c, PersistField (Key v BackendSpecific), FieldLike (AutoKeyField v c) db r' a') => Expression db r' (AutoKeyField v c) where
+instance (PersistEntity v, Constructor c, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
   toExpr = ExprField . fieldChain
 
-instance (PersistEntity v, FieldLike (u (UniqueMarker v)) db r' a', r' ~ RestrictionHolder v (UniqueConstr (Key v (Unique u))),  IsUniqueKey (Key v (Unique u))) => Expression db r' (u (UniqueMarker v)) where
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v (UniqueConstr k) ~ r')
+      => Expression db r' (u (UniqueMarker v)) where
   toExpr = ExprField . fieldChain
 
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.

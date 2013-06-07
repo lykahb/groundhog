@@ -2,10 +2,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 
-import Control.Monad (liftM)
-
 import Database.Groundhog.Core
-import Database.Groundhog.Generic (failMessage, primToPersistValue, primFromPersistValue, pureFromPersistValue, phantomDb)
+import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, pureFromPersistValue, phantomDb)
 
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -56,27 +54,6 @@ instance (PersistField a', PersistField b', PersistField c', PersistField d', Pe
   selectorNum Tuple5_2Selector = 2
   selectorNum Tuple5_3Selector = 3
   selectorNum Tuple5_4Selector = 4
-  
-instance PrimitivePersistField a => SinglePersistField a where
-  toSinglePersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a)
-  fromSinglePersistValue a = phantomDb >>= \p -> return (fromPrimitivePersistValue p a)
-
-instance (SinglePersistField a, NeverNull a) => SinglePersistField (Maybe a) where
-  toSinglePersistValue Nothing = return PersistNull
-  toSinglePersistValue (Just a) = toSinglePersistValue a
-  fromSinglePersistValue PersistNull = return Nothing
-  fromSinglePersistValue a = liftM Just $ fromSinglePersistValue a
-
-instance PrimitivePersistField a => PurePersistField a where
-  toPurePersistValues p a = (toPrimitivePersistValue p a:)
-  fromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
-  fromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
-
-instance (PrimitivePersistField a, NeverNull a) => PurePersistField (Maybe a) where
-  toPurePersistValues p a = (maybe PersistNull (toPrimitivePersistValue p) a:)
-  fromPurePersistValues _ (PersistNull:xs) = (Nothing, xs)
-  fromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
-  fromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
 
 instance PurePersistField () where
   toPurePersistValues _ _ = id
@@ -225,6 +202,166 @@ instance (PrimitivePersistField a, NeverNull a) => PrimitivePersistField (Maybe 
 instance (DbDescriptor db, PersistEntity v) => PrimitivePersistField (KeyForBackend db v) where
   toPrimitivePersistValue p (KeyForBackend a) = toPrimitivePersistValue p a
   fromPrimitivePersistValue p x = KeyForBackend (fromPrimitivePersistValue p x)
+
+instance SinglePersistField String where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField T.Text where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField ByteString where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Int where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Int8 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Int16 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Int32 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Int64 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Word8 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Word16 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Word32 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Word64 where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Double where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Bool where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField Day where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField TimeOfDay where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField UTCTime where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance SinglePersistField ZonedTime where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance (PrimitivePersistField a, NeverNull a) => SinglePersistField (Maybe a) where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance (DbDescriptor db, PersistEntity v) => SinglePersistField (KeyForBackend db v) where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
+
+instance PurePersistField String where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField T.Text where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField ByteString where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Int where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Int8 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Int16 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Int32 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Int64 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Word8 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Word16 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Word32 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Word64 where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Double where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Bool where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField Day where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField TimeOfDay where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField UTCTime where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance PurePersistField ZonedTime where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance (PrimitivePersistField a, NeverNull a) => PurePersistField (Maybe a) where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
+
+instance (DbDescriptor db, PersistEntity v) => PurePersistField (KeyForBackend db v) where
+  toPurePersistValues = primToPurePersistValues
+  fromPurePersistValues = primFromPurePersistValues
 
 instance NeverNull String
 instance NeverNull T.Text
@@ -460,7 +597,7 @@ instance PersistField a => Projection (Expr db r a) db r a where
   projectionExprs e = (ExprRaw e:)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c, PersistField (Key v BackendSpecific)) => Projection (AutoKeyField v c) db (RestrictionHolder v c) (Key v BackendSpecific) where
+instance (PersistEntity v, Constructor c, a ~ AutoKey v) => Projection (AutoKeyField v c) db (RestrictionHolder v c) a where
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
@@ -471,8 +608,8 @@ instance (PersistEntity v, Constructor c) => Projection (c (ConstructorMarker v)
     constr = constructors e !! phantomConstrNum c
   projectionResult c xs = toSinglePersistValue (phantomConstrNum c) >>= \cNum -> fromEntityPersistValues (cNum:xs)
 
-instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), r ~ RestrictionHolder v (UniqueConstr (Key v (Unique u))))
-      => Projection (u (UniqueMarker v)) db r (Key v (Unique u)) where
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v (UniqueConstr k))
+      => Projection (u (UniqueMarker v)) db r k where
   projectionExprs u = ((map ExprField chains)++) where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chains = map (\f -> (f, [])) uFields
@@ -514,27 +651,27 @@ instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3'
     return ((a, b, c, d, e), rest4)
 
 instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) db r a') => Assignable (AutoKeyField v c) db r a'
-
 instance (PersistEntity v, Constructor c, Projection (SubField v c a) db r a') => Assignable (SubField v c a) db r a'
-
 instance (PersistEntity v, Constructor c, Projection (Field v c a) db r a') => Assignable (Field v c a) db r a'
-
 instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) db r a') => Assignable (u (UniqueMarker v)) db r a'
 
-instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) db r a') => FieldLike (AutoKeyField v c) db r a' where
+instance (PersistEntity v, Constructor c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) db (RestrictionHolder v c) a where
   fieldChain a = chain where
-    chain = maybe (error "fieldChain AutoKeyField: constructor constrAutoKeyName == Nothing") (\idName -> ((idName, DbEntity Nothing Nothing Nothing e), [])) $ constrAutoKeyName constr
+    chain = ((name, dbType k), [])
+    -- if it is Nothing, the name would not be used because the type will be () with no columns
+    name = maybe "will_be_ignored" id $ constrAutoKeyName $ constructors e !! cNum
+    k = (undefined :: AutoKeyField v c -> AutoKey v) a
     e = entityDef ((undefined :: AutoKeyField v c -> v) a)
     cNum = phantomConstrNum ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
-    constr = constructors e !! cNum
 
-instance (PersistEntity v, Constructor c, Projection (SubField v c a) db r a') => FieldLike (SubField v c a) db r a' where
+instance (PersistEntity v, Constructor c, PersistField a) => FieldLike (SubField v c a) db (RestrictionHolder v c) a where
   fieldChain (SubField a) = a
 
-instance (PersistEntity v, Constructor c, Projection (Field v c a) db r a') => FieldLike (Field v c a) db r a' where
+instance (PersistEntity v, Constructor c, PersistField a) => FieldLike (Field v c a) db (RestrictionHolder v c) a where
   fieldChain = entityFieldChain
 
-instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) db r a') => FieldLike (u (UniqueMarker v)) db r a' where
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v (UniqueConstr k))
+      => FieldLike (u (UniqueMarker v)) db r k where
   fieldChain u = chain where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chain = (("will_be_ignored", DbEmbedded $ EmbeddedDef True $ uFields), [])
