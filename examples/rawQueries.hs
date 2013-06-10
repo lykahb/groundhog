@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances #-}
 import Control.Monad (liftM, (>=>))
 import Control.Monad.IO.Class (liftIO)
-import Database.Groundhog.Core (PersistValue, PersistField(..), PrimitivePersistField(..), RowPopper)
+import Database.Groundhog.Core (PersistValue, PersistField(..), PrimitivePersistField(..), RowPopper, PersistEntity(..))
 import Database.Groundhog.Generic (mapAllRows, phantomDb)
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
