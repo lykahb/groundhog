@@ -483,8 +483,8 @@ class PersistField a => PurePersistField a where
   toPurePersistValues :: DbDescriptor db => Proxy db -> a -> ([PersistValue] -> [PersistValue])
   fromPurePersistValues :: DbDescriptor db => Proxy db -> [PersistValue] -> (a, [PersistValue])
 
--- | Datatypes which can be converted directly to 'PersistValue'. The no-value parameter @DbDescriptor db => Proxy db@ allows conversion depend the database details while keeping it pure.
-class (SinglePersistField a, PurePersistField a) => PrimitivePersistField a where
+-- | Datatypes which can be converted directly to 'PersistValue'. The no-value parameter @DbDescriptor db => Proxy db@ allows conversion depend the database details while keeping it pure. A type which has an instance of 'PrimitivePersistField' should be an instance of superclasses 'SinglePersistField' and 'PurePersistField' as well.
+class PersistField a => PrimitivePersistField a where
   toPrimitivePersistValue :: DbDescriptor db => Proxy db -> a -> PersistValue
   fromPrimitivePersistValue :: DbDescriptor db => Proxy db -> PersistValue -> a
 

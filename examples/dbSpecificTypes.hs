@@ -20,7 +20,7 @@ instance PersistField Point where
   fromPersistValues = primFromPersistValue
   dbType _ = DbOther $ OtherTypeDef $ const "point"
 
--- These two instances of superclasses are necessary boilerplate.
+-- These two instances of superclasses are useful but not necessary. They are like Functor and Applicative instances when you implement a Monad.
 instance SinglePersistField Point where
   toSinglePersistValue = primToSinglePersistValue
   fromSinglePersistValue = primFromSinglePersistValue

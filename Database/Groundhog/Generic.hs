@@ -223,7 +223,7 @@ singleFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) un
 
 toSinglePersistValueUnique :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)), PrimitivePersistField (Key v (Unique u)))
                            => u (UniqueMarker v) -> v -> m PersistValue
-toSinglePersistValueUnique u v = insertBy u v >> toSinglePersistValue (extractUnique v :: Key v (Unique u))
+toSinglePersistValueUnique u v = insertBy u v >> primToSinglePersistValue (extractUnique v :: Key v (Unique u))
 
 fromSinglePersistValueUnique :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)), PrimitivePersistField (Key v (Unique u)))
                              => u (UniqueMarker v) -> PersistValue -> m v
@@ -239,7 +239,7 @@ fromPersistValuesUnique _ xs = fromPersistValues xs >>= \(k, xs') -> getBy (k ::
 
 toSinglePersistValueAutoKey :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (AutoKey v))
                             => v -> m PersistValue
-toSinglePersistValueAutoKey a = insertByAll a >>= toSinglePersistValue . either id id
+toSinglePersistValueAutoKey a = insertByAll a >>= primToSinglePersistValue . either id id
 
 fromSinglePersistValueAutoKey :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
                               => PersistValue -> m v
