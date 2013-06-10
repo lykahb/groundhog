@@ -1,3 +1,6 @@
+0.3.1
+* generation of SinglePersistField and PurePersistField instances for keys
+
 0.3
 * reference clauses ON DELETE and ON UPDATE
 * schema qualification
