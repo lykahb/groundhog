@@ -203,165 +203,13 @@ instance (DbDescriptor db, PersistEntity v) => PrimitivePersistField (KeyForBack
   toPrimitivePersistValue p (KeyForBackend a) = toPrimitivePersistValue p a
   fromPrimitivePersistValue p x = KeyForBackend (fromPrimitivePersistValue p x)
 
-instance SinglePersistField String where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField T.Text where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField ByteString where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Int where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Int8 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Int16 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Int32 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Int64 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Word8 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Word16 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Word32 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Word64 where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Double where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Bool where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField Day where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField TimeOfDay where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField UTCTime where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance SinglePersistField ZonedTime where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance (PrimitivePersistField a, NeverNull a) => SinglePersistField (Maybe a) where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance (DbDescriptor db, PersistEntity v) => SinglePersistField (KeyForBackend db v) where
-  toSinglePersistValue = primToSinglePersistValue
-  fromSinglePersistValue = primFromSinglePersistValue
-
-instance PurePersistField String where
+instance PrimitivePersistField a => PurePersistField a where
   toPurePersistValues = primToPurePersistValues
   fromPurePersistValues = primFromPurePersistValues
 
-instance PurePersistField T.Text where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField ByteString where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Int where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Int8 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Int16 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Int32 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Int64 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Word8 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Word16 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Word32 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Word64 where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Double where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Bool where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField Day where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField TimeOfDay where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField UTCTime where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance PurePersistField ZonedTime where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance (PrimitivePersistField a, NeverNull a) => PurePersistField (Maybe a) where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
-
-instance (DbDescriptor db, PersistEntity v) => PurePersistField (KeyForBackend db v) where
-  toPurePersistValues = primToPurePersistValues
-  fromPurePersistValues = primFromPurePersistValues
+instance PrimitivePersistField a => SinglePersistField a where
+  toSinglePersistValue = primToSinglePersistValue
+  fromSinglePersistValue = primFromSinglePersistValue
 
 instance NeverNull String
 instance NeverNull T.Text
@@ -674,5 +522,5 @@ instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionH
       => FieldLike (u (UniqueMarker v)) db r k where
   fieldChain u = chain where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
-    chain = (("will_be_ignored", DbEmbedded $ EmbeddedDef True $ uFields), [])
+    chain = (("will_be_ignored", DbEmbedded $ EmbeddedDef True uFields), [])
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
