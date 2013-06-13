@@ -20,7 +20,7 @@ mkPersist defaultCodegenConfig [groundhog|
 - entity: Product
 |]
 
-main = withSqliteConn "mydb.sqlite" $ runDbConn $ do
+main = withSqliteConn ":memory:" $ runDbConn $ do
   runMigration defaultMigrationLogger $ do
     migrate (undefined :: Customer)
     migrate (undefined :: Product)
