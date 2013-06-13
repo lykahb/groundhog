@@ -12,11 +12,11 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Conduit (ResourceT, runResourceT)
 import qualified Database.Persist as P
 import Database.Persist (PersistEntityBackend)
-import qualified Database.Persist.GenericSql.Raw as P
 import qualified Database.Persist.Sqlite as P
 import qualified Database.Persist.Postgresql as P
+import qualified Database.Persist.Sql as P
 import qualified Database.Persist.TH as P
-import Database.Persist.TH (persist)
+import Database.Persist.TH (persistUpperCase)
 
 --import Database.Esqueleto as E
 
@@ -31,7 +31,7 @@ G.mkPersist G.defaultCodegenConfig [groundhog|
 - entity: GPerson
 |]
 
-P.share [P.mkPersist P.sqlSettings, P.mkMigrate "migrateAll"] [persist|
+P.share [P.mkPersist P.sqlSettings, P.mkMigrate "migrateAll"] [persistUpperCase|
 PPerson
     name String
     age Int
@@ -39,7 +39,7 @@ PPerson
 |]
 
 myConfig = defaultConfig {
-             cfgReport = ljust "PostgreSQLBench.html"
+             cfgReport = ljust "bench.html"
            , cfgPerformGC = ljust True
            }
 
@@ -51,7 +51,7 @@ pCond = [PPersonName P.==. "abc", PPersonAge P.==. 40, PPersonHeight P.==. 160]
 
 gMigrate :: (G.PersistBackend m, MonadIO m) => m () -> m (G.Key GPerson G.BackendSpecific)
 gMigrate truncate = G.runMigration G.defaultMigrationLogger (G.migrate gPerson) >> truncate >> G.insert gPerson
-pMigrate :: P.SqlPersist (NoLoggingT (ResourceT IO)) () -> P.SqlPersist (NoLoggingT (ResourceT IO)) (P.Key PPerson)
+pMigrate :: P.SqlPersistT (NoLoggingT (ResourceT IO)) () -> P.SqlPersistT (NoLoggingT (ResourceT IO)) (P.Key PPerson)
 pMigrate truncate = P.runMigration migrateAll >> truncate >> P.insert pPerson
 
 -- open transaction to reduce execution time on the DB side
@@ -75,13 +75,13 @@ main =
 -}
     unless eachStatementInTransaction $ do
       G.runDbPersist (G.executeRaw False "BEGIN" []) gConn
-      runResourceT $ runNoLoggingT $ runReaderT ((\(P.SqlPersist m) -> m) $ P.execute "BEGIN" []) pConn
+      runResourceT $ runNoLoggingT $ runReaderT ((\(P.SqlPersistT m) -> m) $ P.rawExecute "BEGIN" []) pConn
 
-    let mkBench :: (forall m . G.PersistBackend m => m a1) -> P.SqlPersist (NoLoggingT (ResourceT IO)) a2 -> [Benchmark]
+    let mkBench :: (forall m . G.PersistBackend m => m a1) -> P.SqlPersistT (NoLoggingT (ResourceT IO)) a2 -> [Benchmark]
         mkBench gm pm = [bench "groundhog" $ whnfIO $ runSqlite gm, bench "persistent" $ whnfIO $ runPersistent pm] where
           (runSqlite, runPersistent) = if eachStatementInTransaction
             then (\gm -> G.runDbConn (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ P.runSqlConn (replicateM_ numberOfOperations pm) pConn)
-            else (\gm -> G.runDbPersist (replicateM_ numberOfOperations gm) gConn, \(P.SqlPersist pm) -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
+            else (\gm -> G.runDbPersist (replicateM_ numberOfOperations gm) gConn, \(P.SqlPersistT pm) -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
     defaultMainWith myConfig (return ())
       [ bgroup "get" $ mkBench (G.get gKey) (P.get pKey)
 --      , bgroup "get" [bench "esqueleto" $ whnfIO $  runPers (E.select $ E.from $ \p -> E.where_ (p ^. PPersonId ==. val pKey) >> return p)]
