@@ -38,7 +38,6 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.ByteString.Char8 (ByteString)
 import Data.Char (toUpper)
-import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.List (groupBy, intercalate, partition)
@@ -323,7 +322,7 @@ migTriggerOnUpdate schema name deletes = do
         -- this can happen when an ephemeral field was added or removed.
         else [DropTrigger schema trigName schema name, addTrigger])
   
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist MySQL m (Either [String] (Maybe TableInfo))
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist MySQL m (Maybe TableInfo)
 analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, database()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
@@ -335,7 +334,6 @@ analyzeTable' schema name = do
 \  ORDER BY c.ordinal_position"
 
       cols <- queryRaw' colQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
-      let (col_errs, cols') = partitionEithers cols
       -- MySQL has no difference between unique keys and indexes
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.key_column_usage u USING (constraint_catalog, constraint_schema, constraint_name, table_schema, table_name) WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,database()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
@@ -343,13 +341,11 @@ analyzeTable' schema name = do
       let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
       let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniquePrimary uniqPrimary
       references <- analyzeTableReferences schema name
-      return $ case col_errs of
-        []   -> Right $ Just $ TableInfo cols' uniqs references
-        errs -> Left errs
-    Nothing -> return $ Right Nothing
+      return $ Just $ TableInfo cols uniqs references
+    Nothing -> return Nothing
 
-getColumn :: String -> ((String, String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int)) -> Either String Column
-getColumn _ ((column_name, is_nullable, data_type, column_type, d), modifiers) = Right $ Column column_name (is_nullable == "YES") t d where
+getColumn :: String -> ((String, String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int)) -> Column
+getColumn _ ((column_name, is_nullable, data_type, column_type, d), modifiers) = Column column_name (is_nullable == "YES") t d where
   t = readSqlType data_type column_type modifiers
 
 analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist MySQL m [(Maybe String, Reference)]

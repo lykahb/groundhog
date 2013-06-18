@@ -172,22 +172,21 @@ migrateEntity m@MigrationPack{..} e = do
       x <- analyzeTable (entitySchema e) name
       -- check whether the table was created for multiple constructors before
       case x of
-        Right (Just old) | null $ getAlters m old expectedMainStructure -> do
+        Just old | null $ getAlters m old expectedMainStructure -> do
           return $ Left ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
-        Right _ -> liftM snd $ migConstr m e $ head constrs
-        Left errs -> return (Left errs)
+        Nothing -> liftM snd $ migConstr m e $ head constrs
     else do
       mainStructure <- analyzeTable (entitySchema e) name
       let constrTable c = name ++ [delim] ++ constrName c
       res <- mapM (migConstr m e) constrs
       case mainStructure of
-        Right Nothing -> do
+        Nothing -> do
           -- no constructor tables can exist if there is no main data table
           let orphans = filter (fst . fst) $ zip res constrs
           return $ if null orphans
             then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
             else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
-        Right (Just mainStructure') -> do
+        Just mainStructure' -> do
           if null $ getAlters m mainStructure' expectedMainStructure
             then do
               -- the datatype had also many constructors before
@@ -198,7 +197,6 @@ migrateEntity m@MigrationPack{..} e = do
                   go _ _ = []
               return $ mergeMigrations $ updateDiscriminators: (map snd res)
             else return $ Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show mainStructure']
-        Left errs -> return (Left errs)
 
 migrateList :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
@@ -218,20 +216,17 @@ migrateList m@MigrationPack{..} (DbList mainName t) = do
   let triggerMain = []
   (_, triggerValues) <- migTriggerOnDelete Nothing valuesName $ mkDeletes m valueCols
   return $ case (mainStructure, valuesStructure) of
-    (Right Nothing, Right Nothing) -> let
+    (Nothing, Nothing) -> let
       rest = [AlterTable Nothing valuesName valuesQuery expectedValuesStructure expectedValuesStructure addInAlters]
       in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ rest ++ triggerMain ++ triggerValues
-    (Right (Just mainStructure'), Right (Just valuesStructure')) -> let
+    (Just mainStructure', Just valuesStructure') -> let
       f name a b = if null $ getAlters m a b
         then []
         else ["List table " ++ name ++ " error. Expected: " ++ show b ++ ". Found: " ++ show a]
       errors = f mainName mainStructure' expectedMainStructure ++ f valuesName valuesStructure' expectedValuesStructure
       in if null errors then Right [] else Left errors
-    (Left errs1, Left errs2) -> Left $ errs1 ++ errs2
-    (Left errs, Right _) -> Left errs
-    (Right _, Left errs) -> Left errs
-    (_, Right Nothing) -> Left ["Found orphan main list table " ++ mainName]
-    (Right Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
+    (_, Nothing) -> Left ["Found orphan main list table " ++ mainName]
+    (Nothing, _) -> Left ["Found orphan list values table " ++ valuesName]
 migrateList _ t = fail $ "migrateList: expected DbList, got " ++ show t
 
 getAlters :: MigrationPack m
@@ -316,13 +311,12 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
 -- change primary key and columns depending on isSimple
       expectedTableStructure = TableInfo columns' uniques' (map (\r -> (Nothing, r)) refs')
       (migErrs, constrExisted, mig) = case tableStructure of
-        Right Nothing  -> let
+        Nothing  -> let
           rest = AlterTable schema cName addTable expectedTableStructure expectedTableStructure addInAlters
           in ([], False, [AddTable addTable, rest])
-        Right (Just oldTableStructure) -> let
+        Just oldTableStructure -> let
           alters = getAlters migPack oldTableStructure expectedTableStructure
           in ([], True, [AlterTable schema cName addTable oldTableStructure expectedTableStructure alters])
-        Left errs -> (errs, True, [])
       -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
       allErrs = if constrExisted == triggerExisted || (constrExisted && null dels)
         then migErrs
@@ -357,7 +351,7 @@ readReferenceAction c = case c of
   "SET DEFAULT" -> Just SetDefault
   _ -> Nothing
 
-class SchemaAnalyzer m where
+class Monad m => SchemaAnalyzer m where
   listTables :: Maybe String -- ^ Schema name
              -> m [String]
   listTableTriggers :: Maybe String -- ^ Schema name
@@ -365,7 +359,7 @@ class SchemaAnalyzer m where
                     -> m [String]
   analyzeTable :: Maybe String -- ^ Schema name
                -> String -- ^ Table name
-               -> m (Either [String] (Maybe TableInfo))
+               -> m (Maybe TableInfo)
   analyzeTrigger :: Maybe String -- ^ Schema name
                  -> String -- ^ Trigger name
                  -> m (Maybe String)

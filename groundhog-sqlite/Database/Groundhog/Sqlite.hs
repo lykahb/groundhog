@@ -190,12 +190,12 @@ migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
         then []
         else [DropTrigger Nothing trigName Nothing name, addTrigger])
 
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Either [String] (Maybe TableInfo))
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Maybe TableInfo)
 analyzeTable' _ tName = do
   let fromName = escapeS . fromString
   tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   case tableInfo of
-    [] -> return $ Right Nothing
+    [] -> return Nothing
     rawColumns -> do
       let mkColumn :: (Int, (String, String, Int, Maybe String, Int)) -> Column
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
@@ -225,7 +225,7 @@ analyzeTable' _ tName = do
               Just columnName -> return (child, columnName)
             return (Nothing, Reference Nothing foreignTable refs (mkAction onDelete) (mkAction onUpdate))
       let uniques' = uniques ++ if length primaryKeyColumnNames == 1 then [UniqueDef' Nothing UniquePrimary primaryKeyColumnNames] else []
-      return $ Right $ Just $ TableInfo columns uniques' foreigns
+      return $ Just $ TableInfo columns uniques' foreigns
 
 analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
 analyzePrimaryKey tName = do

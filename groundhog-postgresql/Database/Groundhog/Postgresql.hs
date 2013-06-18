@@ -35,7 +35,6 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.ByteString.Char8 (pack, unpack, copy)
 import Data.Char (toUpper)
-import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
@@ -351,7 +350,7 @@ migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
             else [DropTrigger schema trigName schema name, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
   
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Either [String] (Maybe TableInfo))
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Maybe TableInfo)
 analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
@@ -368,8 +367,6 @@ analyzeTable' schema name = do
 \  ORDER BY c.ordinal_position"
 
       cols <- queryRaw' colQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
-      let (col_errs, cols') = partitionEithers cols
-      
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,current_schema()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
       
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
@@ -378,13 +375,11 @@ analyzeTable' schema name = do
       let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
       let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes ++ mkUniqs UniquePrimary uniqPrimary
       references <- analyzeTableReferences schema name
-      return $ case col_errs of
-        []   -> Right $ Just $ TableInfo cols' uniqs references
-        errs -> Left errs
-    Nothing -> return $ Right Nothing
+      return $ Just $ TableInfo cols uniqs references
+    Nothing -> return Nothing
 
-getColumn :: String -> ((String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String), (Int, Maybe String)) -> Either String Column
-getColumn _ ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Right $ Column column_name (is_nullable == "YES") t d where
+getColumn :: String -> ((String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String), (Int, Maybe String)) -> Column
+getColumn _ ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Column column_name (is_nullable == "YES") t d where
   t = readSqlType udt_name modifiers arr_info
 
 analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m [(Maybe String, Reference)]
