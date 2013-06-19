@@ -174,7 +174,7 @@ migrateEntity m@MigrationPack{..} e = do
       case x of
         Just old | null $ getAlters m old expectedMainStructure -> do
           return $ Left ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
-        Nothing -> liftM snd $ migConstr m e $ head constrs
+        _ -> liftM snd $ migConstr m e $ head constrs
     else do
       mainStructure <- analyzeTable (entitySchema e) name
       let constrTable c = name ++ [delim] ++ constrName c
