@@ -172,31 +172,30 @@ migrateEntity m@MigrationPack{..} e = do
       x <- analyzeTable (entitySchema e) name
       -- check whether the table was created for multiple constructors before
       case x of
-        Just old | null $ getAlters m old expectedMainStructure -> do
-          return $ Left ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
+        Just old | null $ getAlters m old expectedMainStructure -> return $ Left
+          ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
         _ -> liftM snd $ migConstr m e $ head constrs
     else do
       mainStructure <- analyzeTable (entitySchema e) name
       let constrTable c = name ++ [delim] ++ constrName c
       res <- mapM (migConstr m e) constrs
-      case mainStructure of
-        Nothing -> do
+      return $ case mainStructure of
+        Nothing -> 
           -- no constructor tables can exist if there is no main data table
           let orphans = filter (fst . fst) $ zip res constrs
-          return $ if null orphans
+          in if null orphans
             then mergeMigrations $ Right [(False, defaultPriority, mainTableQuery)]:map snd res
             else Left $ map (\(_, c) -> "Orphan constructor table found: " ++ constrTable c) orphans
-        Just mainStructure' -> do
-          if null $ getAlters m mainStructure' expectedMainStructure
-            then do
-              -- the datatype had also many constructors before
-              -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
-              let updateDiscriminators = Right . go 0 . map (head &&& length) . group . map fst $ res where
+        Just mainStructure' -> if null $ getAlters m mainStructure' expectedMainStructure
+          then let
+               -- the datatype had also many constructors before
+               -- check whether any new constructors appeared and increment older discriminators, which were shifted by newer constructors inserted not in the end
+               updateDiscriminators = go 0 . map (head &&& length) . group . map fst $ res where
                   go acc ((False, n):(True, n2):xs) = (False, defaultPriority, "UPDATE " ++ escape name ++ " SET discr = discr + " ++ show n ++ " WHERE discr >= " ++ show acc) : go (acc + n + n2) xs
                   go acc ((True, n):xs) = go (acc + n) xs
                   go _ _ = []
-              return $ mergeMigrations $ updateDiscriminators: (map snd res)
-            else return $ Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show mainStructure']
+               in mergeMigrations $ Right updateDiscriminators: map snd res
+          else Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show mainStructure']
 
 migrateList :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
