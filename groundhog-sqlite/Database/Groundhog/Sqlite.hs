@@ -224,7 +224,10 @@ analyzeTable' _ tName = do
                 Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
               Just columnName -> return (child, columnName)
             return (Nothing, Reference Nothing foreignTable refs (mkAction onDelete) (mkAction onUpdate))
-      let uniques' = uniques ++ if length primaryKeyColumnNames == 1 then [UniqueDef' Nothing UniquePrimary primaryKeyColumnNames] else []
+      let uniques' = uniques ++ 
+            if all ((/= UniquePrimary) . uniqueDefType) uniques && not (null primaryKeyColumnNames)
+              then  [UniqueDef' Nothing UniquePrimary primaryKeyColumnNames]
+              else []
       return $ Just $ TableInfo columns uniques' foreigns
 
 analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
