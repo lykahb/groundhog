@@ -22,10 +22,11 @@ module Database.Groundhog.Expression
 import Database.Groundhog.Core
 import Database.Groundhog.Instances ()
 
--- | Instances of this type can be converted to 'Expr'. It is useful for uniform manipulation over fields and plain values
+-- | Instances of this type can be converted to 'UntypedExpr'. It is useful for uniform manipulation over fields, constant values, etc.
 class Expression db r a where
   toExpr :: a -> UntypedExpr db r
 
+-- | This helper class can make type signatures more concise
 class (Expression db r a, Unifiable a a') => ExpressionOf db r a a'
 
 instance (Expression db r a, Unifiable a a') => ExpressionOf db r a a'
