@@ -84,7 +84,7 @@ instance (TypeEq (DefaultKey a) (Key a u) isDef,
 instance r ~ (HTrue, a) => NormalizeValue' a r
 
 class TypeEq x y b | x y -> b
-instance (b ~ HFalse) => TypeEq x y b	 
+instance (b ~ HFalse) => TypeEq x y b
 instance TypeEq x x HTrue
 
 type family NormalizeKey isDef key
@@ -107,7 +107,7 @@ f =. b = Update f (toExpr b)
 -- | Boolean \"and\" operator.
 (&&.) :: Cond db r -> Cond db r -> Cond db r
 
--- | Boolean \"or\" operator.  
+-- | Boolean \"or\" operator.
 (||.) :: Cond db r -> Cond db r -> Cond db r
 
 infixr 3 &&.
