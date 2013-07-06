@@ -17,7 +17,8 @@ import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Generic.Sql.Functions
 import qualified Database.Groundhog.Generic.PersistBackendHelpers as H
 
-import qualified Database.Sqlite as S
+import qualified Database.SQLite3 as S
+import qualified Database.SQLite3.Direct as SD
 
 import Control.Arrow ((***))
 import Control.Monad (liftM, forM)
@@ -94,8 +95,6 @@ withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
                -> m a
 withSqlitePool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
 
-{-# SPECIALIZE withSqliteConn :: String -> (Sqlite -> IO a) -> IO a #-}
-{-# INLINE withSqliteConn #-}
 withSqliteConn :: (MonadBaseControl IO m, MonadIO m)
                => String
                -> (Sqlite -> m a)
@@ -128,7 +127,7 @@ instance SingleConnectionManager Sqlite Sqlite
 
 open' :: String -> IO Sqlite
 open' s = do
-  conn <- S.open s
+  conn <- S.open $ T.pack s
   S.prepare conn "PRAGMA foreign_keys = ON" >>= \stmt -> S.step stmt >> S.finalize stmt
   cache <- newIORef Map.empty
   return $ Sqlite conn cache
@@ -249,7 +248,7 @@ getStatementCached sql = do
     let sql' = fromUtf8 sql
     case Map.lookup sql' smap' of
       Nothing -> do
-        stmt <- S.prepare conn sql'
+        stmt <- S.prepareUtf8 conn $ SD.Utf8 sql'
         writeIORef smap (Map.insert sql' stmt smap')
         return stmt
       Just stmt -> return stmt
@@ -257,7 +256,7 @@ getStatementCached sql = do
 getStatement :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> DbPersist Sqlite m S.Statement
 getStatement sql = do
   Sqlite conn _ <- DbPersist ask
-  liftIO $ S.prepare conn (fromUtf8 sql)
+  liftIO $ S.prepareUtf8 conn $ SD.Utf8 $ fromUtf8 sql
 
 showSqlType :: DbType -> String
 showSqlType DbString = "VARCHAR"
@@ -412,11 +411,8 @@ getList' k = do
 {-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO PersistValue #-}
 getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m PersistValue
 getLastInsertRowId = do
-  stmt <- getStatementCached "SELECT last_insert_rowid()"
-  liftIO $ flip finally (liftIO $ S.reset stmt) $ do
-    S.step stmt
-    x <- S.column stmt 0
-    return $ pFromSql x
+  Sqlite conn _ <- DbPersist ask
+  liftIO (SD.lastInsertRowId conn) >>= toSinglePersistValue
 
 ----------
 
@@ -487,7 +483,7 @@ queryRawTyped query types vals f = do
       x <- S.step stmt
       case x of
         S.Done -> return Nothing
-        S.Row  -> fmap (Just . map pFromSql) $ S.unsafeColumns stmt types'
+        S.Row  -> fmap (Just . map pFromSql) $ S.typedColumns stmt types'
 
 typeToSqlite :: DbType -> Maybe S.ColumnType
 typeToSqlite DbString = Just S.TextColumn

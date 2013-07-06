@@ -5,15 +5,11 @@ license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        Sqlite3 backend for the groundhog library
-description:     This package includes a thin sqlite3 wrapper based on the direct-sqlite package, as well as the entire C library, so there are no system dependencies.
+description:     It depends on direct-sqlite library which includes Sqlite C sources, so there are no system dependencies.
 category:        Database
 stability:       Non-stable
 cabal-version:   >= 1.6
 build-type:      Simple
-
-flag systemlib
-  description: Use the system-wide sqlite library
-  default: False
 
 library
     build-depends:   base                    >= 4         && < 5
@@ -23,15 +19,11 @@ library
                    , monad-control           >= 0.3       && < 0.4
                    , containers              >= 0.2
                    , text                    >= 0.8       && < 0.12
+                   , direct-sqlite           >= 2.3.5
                    , resource-pool           >= 0.2.1     && < 0.3
                    , unordered-containers
-    exposed-modules: Database.Sqlite
-                     Database.Groundhog.Sqlite
+    exposed-modules: Database.Groundhog.Sqlite
     ghc-options:     -Wall -fno-warn-unused-do-bind
-    if flag(systemlib)
-        extra-libraries: sqlite3
-    else
-        c-sources:   cbits/sqlite3.c
 
 source-repository head
   type:     git
