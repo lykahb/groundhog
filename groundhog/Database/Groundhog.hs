@@ -1,6 +1,6 @@
 -- | This module exports the most commonly used functions and datatypes.
 --
--- See the @examples@ directory in the package archive or <http://github.com/lykahb/groundhog/tree/master/examples>.
+-- See the @examples@ directory in the package archive or <http://github.com/lykahb/groundhog/tree/master/groundhog/examples>.
 
 module Database.Groundhog (
   -- * Main definitions
