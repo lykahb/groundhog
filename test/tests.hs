@@ -716,7 +716,7 @@ testAutoKeyField = do
   let val = Single "abc"
   migr val
   k <- insert val
-  result <- select $ AutoKeyField `asTypeOf` (undefined :: f v SingleConstructor) ==. k
+  result <- select $ AutoKeyField ==. k
   [val] @=? result
 
 -- This test must just compile

@@ -433,11 +433,11 @@ instance (DbDescriptor db, PersistEntity v) => PersistField (KeyForBackend db v)
   fromPersistValues = primFromPersistValue
   dbType a = dbType ((undefined :: KeyForBackend db v -> v) a)
 
-instance (PersistEntity v, Constructor c, PersistField a) => Projection (Field v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => Projection (Field v c a) db (RestrictionHolder v c) a where
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c, PersistField a) => Projection (SubField v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => Projection (SubField v c a) db (RestrictionHolder v c) a where
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
@@ -445,18 +445,20 @@ instance PersistField a => Projection (Expr db r a) db r a where
   projectionExprs e = (ExprRaw e:)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c, a ~ AutoKey v) => Projection (AutoKeyField v c) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) db (RestrictionHolder v c) a where
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance (PersistEntity v, Constructor c) => Projection (c (ConstructorMarker v)) db (RestrictionHolder v c) v where
+instance EntityConstr v c => Projection (c (ConstructorMarker v)) db (RestrictionHolder v c) v where
   projectionExprs c = ((map ExprField chains)++) where
     chains = map (\f -> (f, [])) $ constrParams constr
     e = entityDef ((undefined :: c (ConstructorMarker v) -> v) c)
-    constr = constructors e !! phantomConstrNum c
-  projectionResult c xs = toSinglePersistValue (phantomConstrNum c) >>= \cNum -> fromEntityPersistValues (cNum:xs)
+    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> Proxy v) c) c
+    constr = constructors e !! cNum
+  projectionResult c xs = toSinglePersistValue cNum >>= \cNum' -> fromEntityPersistValues (cNum':xs) where
+    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> Proxy v) c) c
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v (UniqueConstr k))
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v c)
       => Projection (u (UniqueMarker v)) db r k where
   projectionExprs u = ((map ExprField chains)++) where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
@@ -498,29 +500,39 @@ instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3'
     (e, rest4) <- projectionResult e' rest3
     return ((a, b, c, d, e), rest4)
 
-instance (PersistEntity v, Constructor c, Projection (AutoKeyField v c) db r a') => Assignable (AutoKeyField v c) db r a'
-instance (PersistEntity v, Constructor c, Projection (SubField v c a) db r a') => Assignable (SubField v c a) db r a'
-instance (PersistEntity v, Constructor c, Projection (Field v c a) db r a') => Assignable (Field v c a) db r a'
+instance (EntityConstr v c, Projection (AutoKeyField v c) db r a') => Assignable (AutoKeyField v c) db r a'
+instance (EntityConstr v c, Projection (SubField v c a) db r a') => Assignable (SubField v c a) db r a'
+instance (EntityConstr v c, Projection (Field v c a) db r a') => Assignable (Field v c a) db r a'
 instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) db r a') => Assignable (u (UniqueMarker v)) db r a'
 
-instance (PersistEntity v, Constructor c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) db (RestrictionHolder v c) a where
   fieldChain a = chain where
     chain = ((name, dbType k), [])
     -- if it is Nothing, the name would not be used because the type will be () with no columns
     name = maybe "will_be_ignored" id $ constrAutoKeyName $ constructors e !! cNum
     k = (undefined :: AutoKeyField v c -> AutoKey v) a
-    e = entityDef ((undefined :: AutoKeyField v c -> v) a)
-    cNum = phantomConstrNum ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
 
-instance (PersistEntity v, Constructor c, PersistField a) => FieldLike (SubField v c a) db (RestrictionHolder v c) a where
+    e = entityDef ((undefined :: AutoKeyField v c -> v) a)
+    cNum = entityConstrNum ((undefined :: AutoKeyField v c -> Proxy v) a) ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
+
+instance (EntityConstr v c, PersistField a) => FieldLike (SubField v c a) db (RestrictionHolder v c) a where
   fieldChain (SubField a) = a
 
-instance (PersistEntity v, Constructor c, PersistField a) => FieldLike (Field v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => FieldLike (Field v c a) db (RestrictionHolder v c) a where
   fieldChain = entityFieldChain
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v (UniqueConstr k))
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v c)
       => FieldLike (u (UniqueMarker v)) db r k where
   fieldChain u = chain where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chain = (("will_be_ignored", DbEmbedded $ EmbeddedDef True uFields), [])
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
+
+instance (PersistEntity v, EntityConstr' (IsSumType v) c) => EntityConstr v c where
+  entityConstrNum v = entityConstrNum' $ (undefined :: Proxy v -> IsSumType v) v
+class EntityConstr' flag c where
+  entityConstrNum' :: flag -> c (a :: * -> *) -> Int
+instance EntityConstr' HFalse c where
+  entityConstrNum' _ _ = 0
+instance Constructor c => EntityConstr' HTrue c where
+  entityConstrNum' _ = phantomConstrNum

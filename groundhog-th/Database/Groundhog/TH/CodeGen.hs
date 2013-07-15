@@ -239,9 +239,6 @@ mkUniqueKeysIsUniqueInstances def = do
   let constr = head $ thConstructors def
   forM (thUniqueKeys def) $ \unique -> do
     uniqKeyType <- [t| Key $(return entity) (Unique $(conT $ mkName $ thUniqueKeyPhantomName unique)) |]
-    uniqueConstr' <- do
-      typ <- conT $ mkName $ thPhantomConstrName constr
-      return $ TySynInstD ''UniqueConstr [uniqKeyType] typ
     extractUnique' <- do
       uniqueFields <- mapM (\f -> newName "x" >>= \x -> return (thFieldName f, x)) $ thUniqueKeyFields unique
       let mkFieldPat f = maybe wildP varP $ lookup (thFieldName f) uniqueFields
@@ -253,7 +250,7 @@ mkUniqueKeysIsUniqueInstances def = do
       let uNum = maybe (error $ "mkUniqueKeysIsUniqueInstances: cannot find unique definition for unique key " ++ thUniqueKeyName unique) id index
       funD 'uniqueNum [clause [wildP] (normalB [| uNum |]) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-    return $ InstanceD context (AppT (ConT ''IsUniqueKey) uniqKeyType) [uniqueConstr', extractUnique', uniqueNum']
+    return $ InstanceD context (AppT (ConT ''IsUniqueKey) uniqKeyType) [extractUnique', uniqueNum']
 
 mkUniqueKeysEmbeddedInstances :: THEntityDef -> Q [Dec]
 mkUniqueKeysEmbeddedInstances def = do
@@ -379,8 +376,7 @@ mkEntityPhantomConstructors def = do
 mkEntityPhantomConstructorInstances :: THEntityDef -> Q [Dec]
 mkEntityPhantomConstructorInstances def = sequence $ zipWith f [0..] $ thConstructors def where
   f :: Int -> THConstructorDef -> Q Dec
-  f cNum c = instanceD (cxt []) (appT (conT ''Constructor) (conT $ mkName $ thPhantomConstrName c)) [phantomConstrName', phantomConstrNum'] where
-    phantomConstrName' = funD 'phantomConstrName [clause [wildP] (normalB $ stringE $ thDbConstrName c) []]
+  f cNum c = instanceD (cxt []) (appT (conT ''Constructor) (conT $ mkName $ thPhantomConstrName c)) [phantomConstrNum'] where
     phantomConstrNum' = funD 'phantomConstrNum [clause [wildP] (normalB $ [| cNum |]) []]
 
 mkEntityUniqueKeysPhantoms :: THEntityDef -> Q [Dec]
@@ -426,6 +422,12 @@ mkPersistEntityInstance def = do
               in  [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName unique) |]
     typ <- [t| Key $(return entity) $keyType |]
     return $ TySynInstD ''DefaultKey [entity] typ
+
+  isSumType' <- do
+    let isSumType = ConT $ if length (thConstructors def) == 1
+          then ''HFalse
+          else ''HTrue
+    return $ TySynInstD ''IsSumType [entity] isSumType
   
   fields' <- do
     cParam <- newName "c"
@@ -527,7 +529,7 @@ mkPersistEntityInstance def = do
     in funD 'entityFieldChain clauses
 
   let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-  let decs = [key', autoKey', defaultKey', fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getUniques', entityFieldChain']
+  let decs = [key', autoKey', defaultKey', isSumType', fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getUniques', entityFieldChain']
   return $ [InstanceD context (AppT (ConT ''PersistEntity) entity) decs]
 
 mkToPurePersistValues :: Name -> [(Name, Type)] -> Q Exp

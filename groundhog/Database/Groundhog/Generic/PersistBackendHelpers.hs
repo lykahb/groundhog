@@ -60,7 +60,7 @@ get escape queryFunc (k :: Key v BackendSpecific) = do
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
 
-select :: forall m db r v c opts . (db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, Constructor c, HasSelectOptions opts db r)
+select :: forall m db r v c opts . (db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, HasSelectOptions opts db r)
        => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> (Cond db r -> Maybe (RenderS db r)) -> opts -> m [v]
 select escape queryFunc noLimit renderCond' options = doSelectQuery where
   SelectOptions cond limit offset ords = getSelectOptions options
@@ -79,7 +79,7 @@ select escape queryFunc noLimit renderCond' options = doSelectQuery where
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   doSelectQuery = queryFunc query types binds $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
   binds = maybe id getValues cond' $ limps
-  cNum = phantomConstrNum (undefined :: c a)
+  cNum = entityConstrNum (undefined :: Proxy v) (undefined :: c a)
   constr = constructors e !! cNum
   types = getConstructorTypes constr
 
@@ -117,7 +117,7 @@ getBy escape queryFunc (k :: Key v (Unique u)) = do
     Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
     Nothing -> return Nothing
 
-project :: forall m db r v c p opts a'. (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, Constructor c, Projection p db r a', HasSelectOptions opts db r)
+project :: forall m db r v c p opts a'. (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p db r a', HasSelectOptions opts db r)
         => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> (Cond db r -> Maybe (RenderS db r)) -> p -> opts -> m [a']
 project escape queryFunc noLimit renderCond' p options = doSelectQuery where
   SelectOptions cond limit offset ords = getSelectOptions options
@@ -137,19 +137,19 @@ project escape queryFunc noLimit renderCond' p options = doSelectQuery where
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   doSelectQuery = queryFunc query types binds $ mapAllRows $ liftM fst . projectionResult p
   binds = fieldVals . maybe id getValues cond' $ limps
-  constr = constructors e !! phantomConstrNum (undefined :: c a)
+  constr = constructors e !! entityConstrNum (undefined :: Proxy v) (undefined :: c a)
   types = foldr (getDbTypes . exprType) [] $ chains where
     exprType (ExprRaw a) = dbType $ (undefined :: Expr db r a -> a) a
     exprType (ExprField ((_, t), _)) = t
     exprType (ExprPure a) = dbType a
 
-count :: forall m db r v c . (db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, Constructor c)
+count :: forall m db r v c . (db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
       => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (Cond db r -> Maybe (RenderS db r)) -> Cond db r -> m Int
 count escape queryFunc renderCond' cond = do
   let e = entityDef (undefined :: v)
       proxy = undefined :: Proxy (PhantomDb m)
       cond' = renderCond' cond
-      constr = constructors e !! phantomConstrNum (undefined :: c a)
+      constr = constructors e !! entityConstrNum (undefined :: Proxy v) (undefined :: c a)
       query = "SELECT COUNT(*) FROM " <> tableName escape e constr <> whereClause where
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   x <- queryFunc query [DbInt32] (maybe [] (flip getValues []) cond') id
@@ -194,24 +194,24 @@ replace escape queryFunc execFunc insertIntoConstructorTable k v = do
               execFunc updateDiscrQuery [head vals, toPrimitivePersistValue proxy k]
         Nothing -> return ()
 
-update :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, Constructor c)
+update :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => (Utf8 -> Utf8) -> (Utf8 -> [PersistValue] -> m ()) -> (Cond db r -> Maybe (RenderS db r)) -> [Update db r] -> Cond db r -> m ()
 update escape execFunc renderCond' upds cond = do
   let e = entityDef (undefined :: v)
   case renderUpdates escape upds of
     Just upds' -> do
       let cond' = renderCond' cond
-          constr = constructors e !! phantomConstrNum (undefined :: c a)
+          constr = constructors e !! entityConstrNum (undefined :: Proxy v) (undefined :: c a)
           query = "UPDATE " <> tableName escape e constr <> " SET " <> whereClause where
           whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
       execFunc query (getValues upds' <> maybe mempty getValues cond' $ [])
     Nothing -> return ()
 
-delete :: forall m db r v c . (db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, Constructor c)
+delete :: forall m db r v c . (db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => (Utf8 -> Utf8) -> (Utf8 -> [PersistValue] -> m ()) -> (Cond db r -> Maybe (RenderS db r)) -> Cond db r -> m ()
 delete escape execFunc renderCond' cond = execFunc query (maybe [] (($ []) . getValues) cond') where
   e = entityDef (undefined :: v)
-  constr = constructors e !! phantomConstrNum (undefined :: c a)
+  constr = constructors e !! entityConstrNum (undefined :: Proxy v) (undefined :: c a)
   cond' = renderCond' cond
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   query = if isSimple (constructors e)

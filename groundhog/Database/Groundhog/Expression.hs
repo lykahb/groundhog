@@ -37,16 +37,16 @@ instance PurePersistField a => Expression db r a where
 instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
   toExpr = ExprRaw
 
-instance (PersistEntity v, Constructor c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
+instance (EntityConstr v c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
   toExpr = ExprField . fieldChain
 
-instance (PersistEntity v, Constructor c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (SubField v c a) where
+instance (EntityConstr v c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (SubField v c a) where
   toExpr = ExprField . fieldChain
 
-instance (PersistEntity v, Constructor c, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
+instance (EntityConstr v c, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
   toExpr = ExprField . fieldChain
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v (UniqueConstr k) ~ r')
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v c ~ r')
       => Expression db r' (u (UniqueMarker v)) where
   toExpr = ExprField . fieldChain
 
