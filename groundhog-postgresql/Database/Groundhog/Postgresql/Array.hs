@@ -49,8 +49,11 @@ instance (ArrayElem a, PersistField a) => PersistField (Array a) where
   persistName a = "Array" ++ delim : persistName ((undefined :: Array a -> a) a)
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType a = DbOther $ OtherTypeDef $ \f -> f elemType ++ "[]" where
-    elemType = dbType ((undefined :: Array a -> a) a)
+  dbType a = DbTypePrimitive typ False Nothing Nothing where
+    typ = DbOther $ OtherTypeDef $ \f -> f elemType ++ "[]"
+    elemType = case dbType ((undefined :: Array a -> a) a) of
+      DbTypePrimitive t _ _ _ -> t
+      t -> error $ "dbType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
 
 class ArrayElem a where
   -- this function is added to avoid GHC bug 7126 which appears when PrimitivePersistField is added as class constraint

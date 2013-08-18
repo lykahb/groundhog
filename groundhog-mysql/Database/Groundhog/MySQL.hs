@@ -31,7 +31,7 @@ import qualified Database.MySQL.Base          as MySQLBase
 import qualified Database.MySQL.Base.Types    as MySQLBase
 
 import Control.Arrow ((***))
-import Control.Monad (liftM, liftM2)
+import Control.Monad (liftM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
@@ -41,7 +41,7 @@ import Data.Char (toUpper)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.List (groupBy, intercalate, partition)
+import Data.List (groupBy, intercalate, intersect, partition, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Pool
 
@@ -186,7 +186,6 @@ insert_' v = do
       let RenderS cQuery vals' = insertIntoConstructorTable True (tableName escapeS e constr) constr (rowid:tail vals)
       executeRaw' cQuery (vals' [])
 
--- TODO: In Sqlite we can insert null to the id column. If so, id will be generated automatically. Check performance change from this.
 insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
 insertIntoConstructorTable withId tName c vals = RenderS query vals' where
   query = "INSERT INTO " <> tName <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")"
@@ -265,13 +264,12 @@ migrationPack currentSchema = GM.MigrationPack
   compareTypes
   (compareRefs currentSchema)
   compareUniqs
+  compareDefaults
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
   escape
-  DbInt64
   "BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
-  "BIGINT"
   mainTableId
   defaultPriority
   (\uniques refs -> ([], map AddUnique uniques ++ map AddReference refs))
@@ -465,7 +463,7 @@ showAlterTable currentSchema table (AddReference (Reference schema tName columns
 showAlterTable _ table (DropReference name) = [(False, defaultPriority,
     "ALTER TABLE " ++ table ++ " DROP CONSTRAINT " ++ name)]
 
-readSqlType :: String -> String -> (Maybe Int, Maybe Int, Maybe Int) -> DbType
+readSqlType :: String -> String -> (Maybe Int, Maybe Int, Maybe Int) -> DbTypePrimitive
 readSqlType typ colTyp (_, numeric_precision, numeric_scale) = (case typ of
   _ | typ `elem` ["int", "short", "mediumint"] -> DbInt32
   _ | typ `elem` ["long", "longlong", "bigint"] -> DbInt64
@@ -484,22 +482,20 @@ readSqlType typ colTyp (_, numeric_precision, numeric_scale) = (case typ of
   ) where
     numAttrs = (numeric_precision, numeric_scale)
 
-showSqlType :: DbType -> String
-showSqlType DbString = "TEXT CHARACTER SET utf8"
-showSqlType DbInt32 = "INT"
-showSqlType DbInt64 = "BIGINT"
-showSqlType DbReal = "DOUBLE PRECISION"
-showSqlType DbBool = "TINYINT(1)"
-showSqlType DbDay = "DATE"
-showSqlType DbTime = "TIME"
-showSqlType DbDayTime = "DATETIME"
-showSqlType DbDayTimeZoned = "VARCHAR(50) CHARACTER SET utf8"
-showSqlType DbBlob = "BLOB"
-showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
-showSqlType (DbMaybe t) = showSqlType t
-showSqlType (DbList _ _) = showSqlType DbInt64
-showSqlType (DbEntity Nothing _ _ _) = showSqlType DbInt64
-showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
+showSqlType :: DbTypePrimitive -> String
+showSqlType t = case t of
+  DbString -> "TEXT CHARACTER SET utf8"
+  DbInt32 -> "INT"
+  DbInt64 -> "BIGINT"
+  DbReal -> "DOUBLE PRECISION"
+  DbBool -> "TINYINT(1)"
+  DbDay -> "DATE"
+  DbTime -> "TIME"
+  DbDayTime -> "DATETIME"
+  DbDayTimeZoned -> "VARCHAR(50) CHARACTER SET utf8"
+  DbBlob -> "BLOB"
+  DbOther (OtherTypeDef f) -> f showSqlType
+  DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
 compareUniqs (UniqueDef' _ UniquePrimary cols1) (UniqueDef' _ UniquePrimary cols2) = haveSameElems (==) cols1 cols2
@@ -516,11 +512,16 @@ compareRefs currentSchema (_, Reference sch1 tbl1 pairs1 onDel1 onUpd1) (_, Refe
   && fromMaybe Restrict onUpd1 == fromMaybe Restrict onUpd2 where
     unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
-compareTypes :: DbType -> DbType -> Bool
+compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
 compareTypes type1 type2 = f type1 == f type2 where
   f = map toUpper . showSqlType . hack
   hack DbDayTimeZoned = DbOther $ OtherTypeDef $ const "VARCHAR(50)"
   hack t = t
+
+compareDefaults :: String -> String -> Bool
+compareDefaults def1 def2 = not . null $ f def1 `intersect` f def2 where
+  f def = [Just def, stripQuotes def]
+  stripQuotes = stripPrefix "'" >=> fmap reverse . stripPrefix "'" . reverse
 
 defaultPriority, referencePriority, functionPriority, triggerPriority :: Int
 defaultPriority = 0

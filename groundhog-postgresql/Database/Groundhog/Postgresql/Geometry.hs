@@ -49,7 +49,7 @@ instance PersistField Point where
   persistName _ = "Point"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "point"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "point") False Nothing Nothing
 
 instance PrimitivePersistField Line where
   toPrimitivePersistValue _ (Line (Point x1 y1) (Point x2 y2)) = PersistString $ show ((x1, y1), (x2, y2))
@@ -59,7 +59,7 @@ instance PersistField Line where
   persistName _ = "Line"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "line"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "line") False Nothing Nothing
 
 instance PrimitivePersistField Lseg where
   toPrimitivePersistValue _ (Lseg (Point x1 y1) (Point x2 y2)) = PersistString $ show ((x1, y1), (x2, y2))
@@ -69,7 +69,7 @@ instance PersistField Lseg where
   persistName _ = "Lseg"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "lseg"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "lseg") False Nothing Nothing
 
 instance PrimitivePersistField Box where
   toPrimitivePersistValue _ (Box (Point x1 y1) (Point x2 y2)) = PersistString $ show ((x1, y1), (x2, y2))
@@ -79,7 +79,7 @@ instance PersistField Box where
   persistName _ = "Box"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "box"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "box") False Nothing Nothing
 
 showPath :: Char -> Char -> [Point] -> ShowS
 showPath open close []     s = open : close : s
@@ -102,7 +102,7 @@ instance PersistField Path where
   persistName _ = "Path"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "path"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "path") False Nothing Nothing
 
 instance PrimitivePersistField Polygon where
   toPrimitivePersistValue _ (Polygon ps) = PersistString $ showPath '(' ')' ps ""
@@ -112,7 +112,7 @@ instance PersistField Polygon where
   persistName _ = "Polygon"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "polygon"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "polygon") False Nothing Nothing
 
 instance PrimitivePersistField Circle where
   toPrimitivePersistValue _ (Circle (Point x1 y1) r) = PersistString $ show ((x1, y1), r)
@@ -122,4 +122,4 @@ instance PersistField Circle where
   persistName _ = "Circle"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbOther $ OtherTypeDef $ const "circle"
+  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "circle") False Nothing Nothing

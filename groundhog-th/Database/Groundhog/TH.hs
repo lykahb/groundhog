@@ -238,8 +238,10 @@ applyFieldSettings PSFieldDef{..} def@(THFieldDef{..}) =
       , thExprName = fromMaybe thExprName psExprName
       , thDbTypeName = psDbTypeName
       , thEmbeddedDef = psEmbeddedDef
-      , thFieldOnDelete = psFieldOnDelete
-      , thFieldOnUpdate = psFieldOnUpdate
+      , thDefaultValue = psDefaultValue
+      , thReferenceParent = psReferenceParent
+      , thReferenceOnDelete = psReferenceOnDelete
+      , thReferenceOnUpdate = psReferenceOnUpdate
       }
 
 applyEmbeddedSettings :: PSEmbeddedDef -> THEmbeddedDef -> THEmbeddedDef
@@ -336,10 +338,10 @@ mkTHEntityDefWith NamingStyle{..} (DataD _ dName typeVars cons _) =
       apply f = f dName' (nameBase name) cNum
 
     mkField :: String -> StrictType -> Int -> THFieldDef
-    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (apply mkNormalExprFieldName) t Nothing Nothing Nothing where
+    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (apply mkNormalExprFieldName) t Nothing Nothing Nothing Nothing Nothing where
       apply f = f dName' cName cNum fNum
     mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (apply mkExprFieldName) t Nothing Nothing Nothing where
+    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (apply mkExprFieldName) t Nothing Nothing Nothing Nothing Nothing where
       apply f = f dName' cName cNum fName' fNum
       fName' = nameBase fName
 mkTHEntityDefWith _ _ = error "Only datatypes can be processed"
@@ -358,10 +360,10 @@ mkTHEmbeddedDefWith (NamingStyle{..}) (DataD _ dName typeVars cons _) =
     _ -> error $ "An embedded datatype must have exactly one constructor: " ++ show dName
   
   mkField :: String -> StrictType -> Int -> THFieldDef
-  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (mkNormalExprSelectorName dName' cName' fNum) t Nothing Nothing Nothing where
+  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (mkNormalExprSelectorName dName' cName' fNum) t Nothing Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fNum
   mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing Nothing Nothing where
+  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fName' fNum
     fName' = nameBase fName
 mkTHEmbeddedDefWith _ _ = error "Only datatypes can be processed"
@@ -426,6 +428,12 @@ firstLetter f s = f (head s):tail s
 --            dbName: foo                # Column name
 --            exprName: FooField         # Name of a field used in expressions
 --            \# type: varchar            # This would result in having field type DbOther \"varchar\" instead of DbString. Value of this attribute will be used by DB backend for migration
+--            \# default: foo_value       # The default value for column in the clause
+--            \# reference:               # This is explicit reference to a parent table not mapped by Groundhog
+--            \#   schema: myschema       # Optional schema
+--            \#   table: mytable         # Name of the parent table
+--            \#   columns: [mytable_id]  # Parent columns. If the current field is embedded, e.g., a tuple, it will be a composite key
+--            \# onDelete: cascade
 --          - name: bar
 --            dbName: bar
 --            exprName: BarField
@@ -433,7 +441,7 @@ firstLetter f s = f (head s):tail s
 --          - name: next
 --            dbName: next
 --            exprName: NextField
---            \# If these clauses are omitted, the database will define action automatically. Note that it may differ across databases. For example, MySQL has \"restrict\" by default, but in PostgreSQL it is \"no action\"
+--            \# If these clauses are omitted, the database will choose the action automatically. Note that it may differ across databases. For example, MySQL has \"restrict\" by default, but in PostgreSQL it is \"no action\"
 --            \# onDelete: cascade        # Defines ON DELETE clause of references. It can have values: no action, restrict, cascade, set null, set default
 --            \# onUpdate: set null       # Defines ON UPDATE
 --        uniques:

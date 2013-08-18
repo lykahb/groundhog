@@ -39,9 +39,8 @@ module Database.Groundhog.Generic
   , bracket
   , finally
   , onException
-  , PSEmbeddedFieldDef(..)
-  , applyEmbeddedDbTypeSettings
-  , applyReferencesSettings
+  , PSFieldDef(..)
+  , applyDbTypeSettings
   , findOne
   , replaceOne
   , matchElements
@@ -53,6 +52,7 @@ module Database.Groundhog.Generic
 
 import Database.Groundhog.Core
 
+import Control.Applicative ((<|>))
 import Control.Monad (liftM, forM_, (>=>))
 import Control.Monad.Trans.State (StateT (..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
@@ -155,38 +155,41 @@ onException :: MonadBaseControl IO m
         -> m a
 onException io what = control $ \runInIO -> E.onException (runInIO io) (runInIO what)
 
-data PSEmbeddedFieldDef = PSEmbeddedFieldDef {
-    psEmbeddedFieldName :: String -- bar
-  , psDbEmbeddedFieldName :: Maybe String -- SQLbar
-  , psDbEmbeddedTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
-  , psSubEmbedded :: Maybe [PSEmbeddedFieldDef]
+data PSFieldDef = PSFieldDef {
+    psFieldName :: String -- bar
+  , psDbFieldName :: Maybe String -- SQLbar
+  , psDbTypeName :: Maybe String -- inet, NUMERIC(5,2), VARCHAR(50)
+  , psExprName :: Maybe String -- BarField
+  , psEmbeddedDef :: Maybe [PSFieldDef]
+  , psDefaultValue :: Maybe String
+  , psReferenceParent :: Maybe (Maybe String, String, [String])
+  , psReferenceOnDelete :: Maybe ReferenceActionType
+  , psReferenceOnUpdate :: Maybe ReferenceActionType
 } deriving Show
 
-applyEmbeddedDbTypeSettings :: [PSEmbeddedFieldDef] -> DbType -> DbType
-applyEmbeddedDbTypeSettings settings typ = (case typ of
-  DbEmbedded emb -> DbEmbedded $ applyToDef emb
-  DbEntity (Just (emb, uniq)) onDel onUpd e -> DbEntity (Just (applyToDef emb, uniq)) onDel onUpd e
-  t -> error $ "applyEmbeddedDbTypeSettings: expected DbEmbedded, got " ++ show t) where
-  applyToDef (EmbeddedDef _ fields) = uncurry EmbeddedDef $ go settings fields
+applyDbTypeSettings :: PSFieldDef -> DbType -> DbType
+applyDbTypeSettings f@(PSFieldDef _ _ dbTypeName _ Nothing def _ _ _) typ = case typ of
+  DbTypePrimitive t nullable def' ref -> DbTypePrimitive (maybe t (DbOther . OtherTypeDef . const) dbTypeName) nullable (def <|> def') (applyReferencesSettings f ref)
+  DbEmbedded emb ref -> DbEmbedded emb (applyReferencesSettings f ref)
+  t -> t
+applyDbTypeSettings f@(PSFieldDef _ _ _ _ (Just subs) _ _ _ _) typ = (case typ of
+  DbEmbedded (EmbeddedDef _ fields) ref -> DbEmbedded (uncurry EmbeddedDef $ go subs fields) (applyReferencesSettings f ref)
+  t -> error $ "applyDbTypeSettings: expected DbEmbedded, got " ++ show t) where
   go [] fs = (False, fs)
-  go st [] = error $ "applyEmbeddedDbTypeSettings: embedded datatype does not have following fields: " ++ show st
-  go st (f@(fName, fType):fs) = case partition ((== fName) . psEmbeddedFieldName) st of
-    ([PSEmbeddedFieldDef _ dbName dbTypeName subs], rest) -> result where
+  go st [] = error $ "applyDbTypeSettings: embedded datatype does not have expected fields: " ++ show st
+  go st (field@(fName, fType):fs) = case partition ((== fName) . psFieldName) st of
+    ([fDef], rest) -> result where
       (flag, fields') = go rest fs
-      result = case dbName of
-        Nothing -> (flag, (fName, typ'):fields')
-        Just name' -> (True, (name', typ'):fields')
-      typ' = case (subs, dbTypeName) of
-        (Just e, _) -> applyEmbeddedDbTypeSettings e fType
-        (_, Just typeName) -> DbOther (OtherTypeDef $ const typeName)
-        _ -> fType
-    _ -> let (flag, fields') = go st fs in (flag, f:fields')
+      result = case psDbFieldName fDef of
+        Nothing -> (flag, (fName, applyDbTypeSettings fDef fType):fields')
+        Just name' -> (True, (name', applyDbTypeSettings fDef fType):fields')
+    _ -> let (flag, fields') = go st fs in (flag, field:fields')
 
-applyReferencesSettings :: Maybe ReferenceActionType -> Maybe ReferenceActionType -> DbType -> DbType
-applyReferencesSettings onDel onUpd typ = case typ of
-  DbEntity k _ _ e -> DbEntity k onDel onUpd e
-  DbMaybe (DbEntity k _ _ e) -> DbMaybe (DbEntity k onDel onUpd e)
-  t -> error $ "applyReferencesSettings: expected DbEntity, got " ++ show t
+applyReferencesSettings :: PSFieldDef -> Maybe ParentTableReference -> Maybe ParentTableReference
+applyReferencesSettings (PSFieldDef _ _ _ _ _ _ Nothing Nothing Nothing) ref = ref
+applyReferencesSettings (PSFieldDef _ _ _ _ _ _ parent onDel onUpd) (Just (parent', onDel', onUpd')) = Just (maybe parent' Right parent, onDel <|> onDel', onUpd <|> onUpd')
+applyReferencesSettings (PSFieldDef _ _ _ _ _ _ (Just parent) onDel onUpd) Nothing = Just (Right parent, onDel, onUpd)
+applyReferencesSettings _ Nothing = error $ "applyReferencesSettings: expected type with reference, got Nothing"
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
 primToPersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a:)
@@ -274,7 +277,6 @@ haveSameElems p xs ys = case matchElements p xs ys of
 mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where
   go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
-
 
 phantomDb :: PersistBackend m => m (Proxy (PhantomDb m))
 phantomDb = return $ error "phantomDb"

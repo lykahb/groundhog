@@ -229,9 +229,7 @@ renderFields esc = commasJoin . foldr (flatten esc) []
 flatten :: (Utf8 -> Utf8) -> (String, DbType) -> ([Utf8] -> [Utf8])
 flatten esc (fname, typ) acc = go typ where
   go typ' = case typ' of
-    DbMaybe t -> go t
-    DbEmbedded emb -> handleEmb emb
-    DbEntity (Just (emb, _)) _ _ _ -> handleEmb emb
+    DbEmbedded emb _ -> handleEmb emb
     _            -> esc fullName : acc
   fullName = fromString fname
   handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts
@@ -240,9 +238,7 @@ flatten esc (fname, typ) acc = go typ where
 flattenP :: (Utf8 -> Utf8) -> Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8])
 flattenP esc prefix (fname, typ) acc = go typ where
   go typ' = case typ' of
-    DbMaybe t -> go t
-    DbEmbedded emb -> handleEmb emb
-    DbEntity (Just (emb, _)) _ _ _ -> handleEmb emb
+    DbEmbedded emb _ -> handleEmb emb
     _            -> esc fullName : acc
   fullName = prefix <> fromChar delim <> fromString fname
   handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts

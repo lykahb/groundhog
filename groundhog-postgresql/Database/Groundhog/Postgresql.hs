@@ -28,17 +28,17 @@ import qualified Database.PostgreSQL.LibPQ as LibPQ
 
 import Control.Arrow ((***))
 import Control.Exception (throw)
-import Control.Monad (forM, liftM, liftM2)
+import Control.Monad (forM, liftM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Data.ByteString.Char8 (pack, unpack, copy)
-import Data.Char (toUpper)
+import Data.Char (isAlphaNum, isSpace, toUpper)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
-import Data.List (groupBy, intercalate)
+import Data.List (groupBy, intercalate, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid
 import Data.Pool
@@ -267,13 +267,12 @@ migrationPack currentSchema = GM.MigrationPack
   compareTypes
   (compareRefs currentSchema)
   compareUniqs
+  compareDefaults
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
   escape
-  DbInt64
   "SERIAL PRIMARY KEY UNIQUE"
-  "INT8"
   mainTableId
   defaultPriority
   (\uniques refs -> ([], map AddUnique uniques ++ map AddReference refs))
@@ -541,7 +540,7 @@ showAlterColumn table n (UpdateValue s) = (False, defaultPriority, concat
   ])
 
 -- | udt_name, character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type
-readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> (Int, Maybe String) -> DbType
+readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> (Int, Maybe String) -> DbTypePrimitive
 readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, _) (array_ndims, array_elem) = (case typ of
   "int4" -> DbInt32
   "int8" -> DbInt64
@@ -565,22 +564,20 @@ readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, dat
     defDateTimePrec = 6
     datetime_precision' = datetime_precision >>= \p -> if p == defDateTimePrec then Nothing else Just p
 
-showSqlType :: DbType -> String
-showSqlType DbString = "VARCHAR"
-showSqlType DbInt32 = "INT4"
-showSqlType DbInt64 = "INT8"
-showSqlType DbReal = "DOUBLE PRECISION"
-showSqlType DbBool = "BOOLEAN"
-showSqlType DbDay = "DATE"
-showSqlType DbTime = "TIME"
-showSqlType DbDayTime = "TIMESTAMP"
-showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
-showSqlType DbBlob = "BYTEA"
-showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
-showSqlType (DbMaybe t) = showSqlType t
-showSqlType (DbList _ _) = showSqlType DbInt64
-showSqlType (DbEntity Nothing _ _ _) = showSqlType DbInt64
-showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
+showSqlType :: DbTypePrimitive -> String
+showSqlType t = case t of
+  DbString -> "VARCHAR"
+  DbInt32 -> "INT4"
+  DbInt64 -> "INT8"
+  DbReal -> "DOUBLE PRECISION"
+  DbBool -> "BOOLEAN"
+  DbDay -> "DATE"
+  DbTime -> "TIME"
+  DbDayTime -> "TIMESTAMP"
+  DbDayTimeZoned -> "TIMESTAMP WITH TIME ZONE"
+  DbBlob -> "BYTEA"
+  DbOther (OtherTypeDef f) -> f showSqlType
+  DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
 compareUniqs (UniqueDef' _ UniquePrimary cols1) (UniqueDef' _ UniquePrimary cols2) = haveSameElems (==) cols1 cols2
@@ -597,9 +594,14 @@ compareRefs currentSchema (_, Reference sch1 tbl1 pairs1 onDel1 onUpd1) (_, Refe
   && fromMaybe NoAction onUpd1 == fromMaybe NoAction onUpd2 where
     unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
-compareTypes :: DbType -> DbType -> Bool
+compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
 compareTypes type1 type2 = f type1 == f type2 where
   f = map toUpper . showSqlType
+
+compareDefaults :: String -> String -> Bool
+compareDefaults def1 def2 = Just def2 `elem` [Just def1, stripType def1, stripType def1 >>= stripParens] where
+  stripType = fmap reverse . stripPrefix "::" . dropWhile (\c -> isAlphaNum c || isSpace c) . reverse
+  stripParens = stripPrefix "(" >=> fmap reverse . stripPrefix ")" . reverse
 
 defaultPriority, referencePriority, functionPriority, triggerPriority :: Int
 defaultPriority = 0

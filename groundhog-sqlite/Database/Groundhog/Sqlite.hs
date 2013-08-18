@@ -145,13 +145,12 @@ migrationPack = GM.MigrationPack
   compareTypes
   compareRefs
   compareUniqs
+  compareDefaults
   migTriggerOnDelete
   migTriggerOnUpdate
   GM.defaultMigConstr
   escape
-  DbInt64
   "INTEGER PRIMARY KEY NOT NULL"
-  "INTEGER"
   mainTableId
   defaultPriority
   addUniquesReferences
@@ -258,24 +257,22 @@ getStatement sql = do
   Sqlite conn _ <- DbPersist ask
   liftIO $ S.prepareUtf8 conn $ SD.Utf8 $ fromUtf8 sql
 
-showSqlType :: DbType -> String
-showSqlType DbString = "VARCHAR"
-showSqlType DbInt32 = "INTEGER"
-showSqlType DbInt64 = "INTEGER"
-showSqlType DbReal = "REAL"
-showSqlType DbBool = "BOOLEAN"
-showSqlType DbDay = "DATE"
-showSqlType DbTime = "TIME"
-showSqlType DbDayTime = "TIMESTAMP"
-showSqlType DbDayTimeZoned = "TIMESTAMP WITH TIME ZONE"
-showSqlType DbBlob = "BLOB"
-showSqlType (DbOther (OtherTypeDef f)) = f showSqlType
-showSqlType (DbMaybe t) = showSqlType t
-showSqlType (DbList _ _) = showSqlType DbInt64
-showSqlType (DbEntity Nothing _ _ _) = showSqlType DbInt64
-showSqlType t = error $ "showSqlType: DbType does not have corresponding database type: " ++ show t
+showSqlType :: DbTypePrimitive -> String
+showSqlType t = case t of
+  DbString -> "VARCHAR"
+  DbInt32 -> "INTEGER"
+  DbInt64 -> "INTEGER"
+  DbReal -> "REAL"
+  DbBool -> "BOOLEAN"
+  DbDay -> "DATE"
+  DbTime -> "TIME"
+  DbDayTime -> "TIMESTAMP"
+  DbDayTimeZoned -> "TIMESTAMP WITH TIME ZONE"
+  DbBlob -> "BLOB"
+  DbAutoKey -> "INTEGER"
+  DbOther (OtherTypeDef f) -> f showSqlType
 
-readSqlType :: String -> DbType
+readSqlType :: String -> DbTypePrimitive
 readSqlType "VARCHAR" = DbString
 readSqlType "INTEGER" = DbInt64
 readSqlType "REAL" = DbReal
@@ -289,7 +286,7 @@ readSqlType typ = DbOther $ OtherTypeDef $ const typ
 
 data Affinity = TEXT | NUMERIC | INTEGER | REAL | NONE deriving (Eq, Show)
 
-dbTypeAffinity :: DbType -> Affinity
+dbTypeAffinity :: DbTypePrimitive -> Affinity
 dbTypeAffinity = readSqlTypeAffinity . showSqlType
 
 readSqlTypeAffinity :: String -> Affinity
@@ -303,10 +300,10 @@ readSqlTypeAffinity typ = affinity where
     _ -> NUMERIC
 
 showColumn :: Column -> String
-showColumn (Column name isNull typ _) = escape name ++ " " ++ showSqlType typ ++ rest where
-  rest = if not isNull 
-           then " NOT NULL"
-           else ""
+showColumn (Column name nullable typ def) = escape name ++ " " ++ showSqlType typ ++ rest where
+  rest = concat [
+    if not nullable then " NOT NULL" else "",
+    maybe "" (" DEFAULT " ++) def]
 
 sqlReference :: Reference -> String
 sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape referencedTableName ++ "(" ++ foreign ++ ")" ++ actions where
@@ -476,7 +473,7 @@ queryRawCached' query vals f = do
 queryRawTyped :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRawTyped query types vals f = do
   stmt <- getStatementCached query
-  let types' = map typeToSqlite types
+  let types' = map typeToSqlite $ foldr getDbTypes [] types
   flip finally (liftIO $ S.reset stmt) $ do
     liftIO $ bind stmt vals
     f $ liftIO $ do
@@ -486,26 +483,26 @@ queryRawTyped query types vals f = do
         S.Row  -> fmap (Just . map pFromSql) $ S.typedColumns stmt types'
 
 typeToSqlite :: DbType -> Maybe S.ColumnType
-typeToSqlite DbString = Just S.TextColumn
-typeToSqlite DbInt32 = Just S.IntegerColumn
-typeToSqlite DbInt64 = Just S.IntegerColumn
-typeToSqlite DbReal = Just S.FloatColumn
-typeToSqlite DbBool = Just S.IntegerColumn
-typeToSqlite DbDay = Nothing
-typeToSqlite DbTime = Nothing
-typeToSqlite DbDayTime = Nothing
-typeToSqlite DbDayTimeZoned = Nothing
-typeToSqlite DbBlob = Just S.BlobColumn
-typeToSqlite (DbOther _) = Nothing
-typeToSqlite (DbMaybe _) = Nothing
+typeToSqlite (DbTypePrimitive t nullable _ _) = case t of
+  _ | nullable -> Nothing
+  DbOther _ -> Nothing
+  DbString -> Just S.TextColumn
+  DbInt32 -> Just S.IntegerColumn
+  DbInt64 -> Just S.IntegerColumn
+  DbReal -> Just S.FloatColumn
+  DbBool -> Just S.IntegerColumn
+  DbDay -> Just S.TextColumn
+  DbTime -> Just S.TextColumn
+  DbDayTime -> Just S.TextColumn
+  DbDayTimeZoned -> Just S.TextColumn
+  DbBlob -> Just S.BlobColumn
+  DbAutoKey -> Just S.IntegerColumn
 typeToSqlite (DbList _ _) = Just S.IntegerColumn
-typeToSqlite (DbEntity Nothing _ _ _) = Just S.IntegerColumn
-typeToSqlite t = error $ "typeToSqlite: DbType does not have corresponding database type: " ++ show t
+typeToSqlite t@(DbEmbedded _ _) = error $ "typeToSqlite: DbType does not have corresponding database type: " ++ show t
 
 getDbTypes :: DbType -> [DbType] -> [DbType]
 getDbTypes typ acc = case typ of
-  DbEmbedded (EmbeddedDef _ ts) -> foldr (getDbTypes . snd) acc ts
-  DbEntity (Just (EmbeddedDef _ ts, _)) _ _ _ -> foldr (getDbTypes . snd) acc ts
+  DbEmbedded (EmbeddedDef _ ts) _ -> foldr (getDbTypes . snd) acc ts
   t               -> t:acc
 
 pFromSql :: S.SQLData -> PersistValue
@@ -554,9 +551,12 @@ compareRefs (_, Reference _ tbl1 pairs1 onDel1 onUpd1) (_, Reference _ tbl2 pair
   && fromMaybe NoAction onUpd1 == fromMaybe NoAction onUpd2 where
   unescape name = if head name == '"' && last name == '"' then tail $ init name else name
 
-compareTypes :: DbType -> DbType -> Bool
+compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
 compareTypes type1 type2 = dbTypeAffinity type1 == dbTypeAffinity type2
 --compareTypes type1 type2 = showSqlType type1 == showSqlType type2
+
+compareDefaults :: String -> String -> Bool
+compareDefaults = (==)
 
 mainTableId :: String
 mainTableId = "id"

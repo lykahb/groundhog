@@ -46,7 +46,7 @@ get escape queryFunc (k :: Key v BackendSpecific) = do
         Nothing -> return Nothing
     else do
       let query = "SELECT discr FROM " <> mainTableName escape e <> " WHERE id=?"
-      x <- queryFunc query [DbInt32] [toPrimitivePersistValue proxy k] id
+      x <- queryFunc query [dbInt64] [toPrimitivePersistValue proxy k] id
       case x of
         Just [discr] -> do
           let constructorNum = fromPrimitivePersistValue proxy discr
@@ -91,12 +91,12 @@ selectAll escape queryFunc = start where
       constr = head $ constructors e
       fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId escape constr) $ renderFields escape (constrParams constr)
       query = "SELECT " <> fields <> " FROM " <> tableName escape e constr
-      types = maybe id (const $ (DbInt64:)) (constrId escape constr) $ getConstructorTypes constr
+      types = maybe id (const $ (dbInt64:)) (constrId escape constr) $ getConstructorTypes constr
       in queryFunc query types [] $ mapAllRows $ mkEntity proxy 0
     else liftM concat $ forM (zip [0..] (constructors e)) $ \(cNum, constr) -> do
         let fields = fromJust (constrId escape constr) <> fromChar ',' <> renderFields escape (constrParams constr)
         let query = "SELECT " <> fields <> " FROM " <> tableName escape e constr
-        let types = DbInt64:getConstructorTypes constr
+        let types = dbInt64:getConstructorTypes constr
         queryFunc query types [] $ mapAllRows $ mkEntity proxy cNum
   e = entityDef (undefined :: v)
   proxy = undefined :: Proxy (PhantomDb m)
@@ -138,7 +138,7 @@ project escape queryFunc noLimit renderCond' p options = doSelectQuery where
   doSelectQuery = queryFunc query types binds $ mapAllRows $ liftM fst . projectionResult p
   binds = fieldVals . maybe id getValues cond' $ limps
   constr = constructors e !! entityConstrNum (undefined :: Proxy v) (undefined :: c a)
-  types = foldr (getDbTypes . exprType) [] $ chains where
+  types = map exprType chains where
     exprType (ExprRaw a) = dbType $ (undefined :: Expr db r a -> a) a
     exprType (ExprField ((_, t), _)) = t
     exprType (ExprPure a) = dbType a
@@ -152,7 +152,7 @@ count escape queryFunc renderCond' cond = do
       constr = constructors e !! entityConstrNum (undefined :: Proxy v) (undefined :: c a)
       query = "SELECT COUNT(*) FROM " <> tableName escape e constr <> whereClause where
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  x <- queryFunc query [DbInt32] (maybe [] (flip getValues []) cond') id
+  x <- queryFunc query [dbInt64] (maybe [] (flip getValues []) cond') id
   case x of
     Just [num] -> return $ fromPrimitivePersistValue proxy num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -175,7 +175,7 @@ replace escape queryFunc execFunc insertIntoConstructorTable k v = do
     then execFunc updateQuery (tail vals ++ [toPrimitivePersistValue proxy k])
     else do
       let query = "SELECT discr FROM " <> mainTableName escape e <> " WHERE id=?"
-      x <- queryFunc query [DbInt32] [toPrimitivePersistValue proxy k] (id >=> return . fmap (fromPrimitivePersistValue proxy . head))
+      x <- queryFunc query [dbInt64] [toPrimitivePersistValue proxy k] (id >=> return . fmap (fromPrimitivePersistValue proxy . head))
       case x of
         Just discr -> do
           let cName = tableName escape e constr
@@ -233,7 +233,7 @@ insertByAll escape queryFunc v = do
     then liftM Right $ Core.insert v
     else do
       let query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
-      x <- queryFunc query [DbInt64] (foldr ((.) . snd) id uniques []) id
+      x <- queryFunc query [dbInt64] (foldr ((.) . snd) id uniques []) id
       case x of
         Nothing  -> liftM Right $ Core.insert v
         Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
@@ -257,7 +257,7 @@ countAll escape queryFunc (_ :: v) = do
   let e = entityDef (undefined :: v)
       proxy = undefined :: Proxy (PhantomDb m)
       query = "SELECT COUNT(*) FROM " <> mainTableName escape e
-  x <- queryFunc query [DbInt64] [] id
+  x <- queryFunc query [dbInt64] [] id
   case x of
     Just [num] -> return $ fromPrimitivePersistValue proxy num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
@@ -275,20 +275,14 @@ insertBy escape queryFunc u v = do
       -- this is safe because unique keys exist only for entities with one constructor
       constr = head $ constructors e
       query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
-  x <- queryFunc query [DbInt64] (uniques []) id
+  x <- queryFunc query [dbInt64] (uniques []) id
   case x of
     Nothing  -> liftM Right $ Core.insert v
     Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
     Just xs  -> fail $ "unexpected query result: " ++ show xs
 
 getConstructorTypes :: ConstructorDef -> [DbType]
-getConstructorTypes = foldr getDbTypes [] . map snd . constrParams where
-
-getDbTypes :: DbType -> [DbType] -> [DbType]
-getDbTypes typ acc = case typ of
-  DbEmbedded (EmbeddedDef _ ts) -> foldr (getDbTypes . snd) acc ts
-  DbEntity (Just (EmbeddedDef _ ts, _)) _ _ _ -> foldr (getDbTypes . snd) acc ts
-  t -> t:acc
+getConstructorTypes = map snd . constrParams where
 
 constrId :: (Utf8 -> Utf8) -> ConstructorDef -> Maybe Utf8
 constrId escape = fmap (escape . fromString) . constrAutoKeyName
@@ -300,3 +294,6 @@ mkEntity proxy i xs = fromEntityPersistValues (toPrimitivePersistValue proxy i:x
 
 toEntityPersistValues' :: (PersistBackend m, PersistEntity v) => v -> m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
+
+dbInt64 :: DbType
+dbInt64 = DbTypePrimitive DbInt64 False Nothing Nothing

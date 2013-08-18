@@ -31,12 +31,12 @@ import Control.Monad.Trans.State (StateT (..), gets, modify)
 import Data.Function (on)
 import qualified Data.Map as Map
 import Data.List (group, intercalate)
-import Data.Maybe (fromJust, fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, mapMaybe)
 
 data Column = Column
     { colName :: String
     , colNull :: Bool
-    , colType :: DbType -- ^ contains DbType that maps to one column (no DbEmbedded)
+    , colType :: DbTypePrimitive
     , colDefault :: Maybe String
     } deriving (Eq, Show)
 
@@ -55,7 +55,7 @@ data TableInfo = TableInfo {
   , tableReferences :: [(Maybe String, Reference)]
 } deriving Show
 
-data AlterColumn = Type DbType | IsNull | NotNull
+data AlterColumn = Type DbTypePrimitive | IsNull | NotNull
                  | Default String | NoDefault | UpdateValue String deriving Show
 
 data AlterTable = AddUnique UniqueDef'
@@ -89,16 +89,15 @@ data UniqueDef' = UniqueDef' {
 } deriving Show
 
 data MigrationPack m = MigrationPack {
-    compareTypes :: DbType -> DbType -> Bool
+    compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
   , compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
   , compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
+  , compareDefaults :: String -> String -> Bool
   , migTriggerOnDelete :: Maybe String -> String -> [(String, String)] -> m (Bool, [AlterDB])
   , migTriggerOnUpdate :: Maybe String -> String -> [(String, String)] -> m [(Bool, [AlterDB])]
   , migConstr :: MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
   , escape :: String -> String
-  , primaryKeyType :: DbType
   , primaryKeyTypeName :: String
-  , foreignKeyTypeName :: String
   , mainTableId :: String
   , defaultPriority :: Int
   -- | Sql pieces for the create table statement that add constraints and alterations for running after the table is created
@@ -107,37 +106,47 @@ data MigrationPack m = MigrationPack {
   , showAlterDb :: AlterDB -> SingleMigration
 }
 
-mkColumns :: String -> DbType -> ([Column], [Reference])
-mkColumns columnName dbtype = go "" (columnName, dbtype) where
-  go prefix (fname, typ) = (case typ of
-    DbEmbedded (EmbeddedDef False ts) -> concatMap' (go $ prefix ++ fname ++ [delim]) ts
-    DbEmbedded (EmbeddedDef True  ts) -> concatMap' (go "") ts
-    DbMaybe a      -> case go prefix (fname, a) of
-      ([c], refs) -> ([c {colNull = True}], refs)
-      _ -> error $ "mkColumns: datatype inside DbMaybe must be one column " ++ show a
-    DbEntity (Just (emb, uName)) onDel onUpd e  -> (cols, ref:refs) where
-      (cols, refs) = go prefix (fname, DbEmbedded emb)
-      ref = Reference (entitySchema e) (entityName e) (zipWith' (curry $ colName *** colName) cols foreignColumns) onDel onUpd
+mkColumns :: (String, DbType) -> ([Column] -> [Column])
+mkColumns = go "" where
+  go prefix (fname, typ) acc = (case typ of
+    DbEmbedded (EmbeddedDef flag ts) _ -> foldr (go prefix') acc ts where prefix' = if flag then "" else prefix ++ fname ++ [delim]
+    DbList _ _ -> Column fullName False DbAutoKey Nothing : acc
+    DbTypePrimitive t nullable def _ -> Column fullName nullable t def : acc) where
+      fullName = prefix ++ fname
+
+mkReferences :: (String, DbType) -> [Reference]
+mkReferences = concat . traverseDbType f where
+  f (DbEmbedded _ ref) cols = maybe [] (return . mkReference cols) ref
+  f (DbList lName _) cols = [mkReference cols (Right (Nothing, lName, ["id"]), Nothing, Nothing)]
+  f (DbTypePrimitive _ _ _ ref) cols = maybe [] (return . mkReference cols) ref
+  mkReference :: [String] -> ParentTableReference -> Reference
+  mkReference cols (parent, onDel, onUpd) = case parent of
+    Left (e, Nothing) -> Reference (entitySchema e) (entityName e) (zipWith' (,) cols [keyName]) onDel onUpd where
+      keyName = case constructors e of
+        [cDef] -> fromMaybe (error "mkReferences: autokey name is Nothing") $ constrAutoKeyName cDef
+        _      -> "id"
+    Left (e, (Just uName)) -> Reference (entitySchema e) (entityName e) (zipWith' (,) cols (map colName parentColumns)) onDel onUpd where
       cDef = case constructors e of
         [cDef'] -> cDef'
-        _       -> error "mkColumns: datatype with unique key cannot have more than one constructor"
+        _       -> error "mkReferences: datatype with unique key cannot have more than one constructor"
       UniqueDef _ _ uFields = findOne "unique" id uniqueName uName $ constrUniques cDef
       fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) uFields
-      (foreignColumns, _) = concatMap' (go "") fields
-    t@(DbEntity Nothing onDel onUpd e) -> ([Column name False t Nothing], refs) where
-      refs = [Reference (entitySchema e) (entityName e) [(name, keyName)] onDel onUpd]
-      keyName = case constructors e of
-        [cDef] -> fromMaybe (error "mkColumns: autokey name is Nothing") $ constrAutoKeyName cDef
-        _      -> "id"
-    t@(DbList lName _) -> ([Column name False t Nothing], refs) where
-      -- TODO: schema
-      refs = [Reference Nothing lName [(name, "id")] Nothing Nothing]
-    t -> ([Column name False t Nothing], [])) where
+      parentColumns = foldr mkColumns [] fields
+    Right (sch, table, parentColumns) -> Reference sch table (zipWith' (,) cols parentColumns) onDel onUpd
+  zipWith' _ [] [] = []
+  zipWith' g (x:xs) (y:ys) = g x y: zipWith' g xs ys
+  zipWith' _ _ _ = error "mkReferences: the lists have different length"
+
+traverseDbType :: (DbType -> [String] -> a) -> (String, DbType) -> [a]
+traverseDbType f (columnName, dbtype) = snd $ go "" (columnName, dbtype) where
+  go prefix (fname, typ) = (case typ of
+    t@(DbEmbedded (EmbeddedDef flag ts) _) -> (cols, f t cols : xs) where
+      prefix' = if flag then "" else prefix ++ fname ++ [delim]
+      (cols, xs) = concatMap' (go prefix') ts
+    t@(DbList _ _) -> ([name], [f t [name]])
+    t@(DbTypePrimitive _ _ _ _) -> ([name], [f t [name]])) where
       name = prefix ++ fname
-      concatMap' f xs = concat *** concat $ unzip $ map f xs
-      zipWith' _ [] [] = []
-      zipWith' f (x:xs) (y:ys) = f x y: zipWith' f xs ys
-      zipWith' _ _ _ = error "mkColumns: the lists have different length"
+      concatMap' g xs = concat *** concat $ unzip $ map g xs
 
 -- | Create migration for a given entity and all entities it depends on.
 -- The stateful Map is used to avoid duplicate migrations when an entity type
@@ -149,23 +158,25 @@ migrateRecursively :: (Monad m, PersistEntity v) =>
   -> StateT NamedMigrations m ()
 migrateRecursively migE migL = go . dbType where
   go l@(DbList lName t) = f lName (migL l) (go t)
-  go (DbEntity _ _ _ e) = f (entityName e) (migE e) (mapM_ go (allSubtypes e))
-  go (DbMaybe t)        = go t
-  go (DbEmbedded (EmbeddedDef _ ts))  = mapM_ (go . snd) ts
-  go _                  = return ()    -- ordinary types need not migration
+  go (DbEmbedded (EmbeddedDef _ ts) ref) = mapM_ (go . snd) ts >> migRef ref
+  go (DbTypePrimitive _ _ _ ref) = migRef ref
   f name mig cont = do
     v <- gets (Map.lookup name)
     case v of
       Nothing -> lift mig >>= modify . Map.insert name >> cont
       _ -> return ()
   allSubtypes = map snd . concatMap constrParams . constructors
+  -- TODO: use schema-qualified name
+  migRef ref = case ref of
+    Just (Left (e, _), _, _) -> f (entityName e) (migE e) (mapM_ go (allSubtypes e))
+    _ -> return ()
 
 migrateEntity :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> m SingleMigration
 migrateEntity m@MigrationPack{..} e = do
   let name = entityName e
-  let constrs = constructors e
-  let mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ primaryKeyTypeName ++ ", discr INTEGER NOT NULL)"
-  let expectedMainStructure = TableInfo [Column "id" False primaryKeyType Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef' Nothing UniquePrimary ["id"]] []
+      constrs = constructors e
+      mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ primaryKeyTypeName ++ ", discr INTEGER NOT NULL)"
+      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef' Nothing UniquePrimary ["id"]] []
 
   if isSimple constrs
     then do
@@ -200,20 +211,19 @@ migrateEntity m@MigrationPack{..} e = do
 migrateList :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valuesName = mainName ++ delim : "values"
-      (valueCols, valueRefs) = mkColumns "value" t
+      (valueCols, valueRefs) = (($ []) . mkColumns) &&& mkReferences $ ("value", t)
       refs' = Reference Nothing mainName [("id", "id")] (Just Cascade) Nothing : valueRefs
+      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef' Nothing UniquePrimary ["id"]] []
       mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ primaryKeyTypeName ++ ")"
       (addInCreate, addInAlters) = addUniquesReferences [] refs'
-      items = ("id " ++ foreignKeyTypeName ++ " NOT NULL"):"ord INTEGER NOT NULL" : map showColumn valueCols ++ addInCreate
-      valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " items ++ ")"
-      expectedMainStructure = TableInfo [Column "id" False primaryKeyType Nothing] [UniqueDef' Nothing UniquePrimary ["id"]] []
-      valueColumns = Column "id" False primaryKeyType Nothing : Column "ord" False DbInt32 Nothing : valueCols
       expectedValuesStructure = TableInfo valueColumns [] (map (\x -> (Nothing, x)) refs')
+      valueColumns = Column "id" False DbAutoKey Nothing : Column "ord" False DbInt32 Nothing : valueCols
+      valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " (map showColumn valueColumns ++ addInCreate) ++ ")"
   -- TODO: handle case when outer entity has a schema
   mainStructure <- analyzeTable Nothing mainName
   valuesStructure <- analyzeTable Nothing valuesName
   let triggerMain = []
-  (_, triggerValues) <- migTriggerOnDelete Nothing valuesName $ mkDeletes m valueCols
+  (_, triggerValues) <- migTriggerOnDelete Nothing valuesName $ mkDeletes escape ("value", t)
   return $ case (mainStructure, valuesStructure) of
     (Nothing, Nothing) -> let
       rest = [AlterTable Nothing valuesName valuesQuery expectedValuesStructure expectedValuesStructure addInAlters]
@@ -261,9 +271,10 @@ migrateColumn MigrationPack{..} (Column _ isNull1 type1 def1) (Column _ isNull2 
       Just s -> [UpdateValue s, NotNull]
     _ -> []
   modType = if compareTypes type1 type2 then [] else [Type type2]
-  modDef = if def1 == def2
-    then []
-    else [maybe NoDefault Default def2]
+  modDef = case (def1, def2) of
+    (Nothing, Nothing) -> []
+    (Just def1', Just def2') | compareDefaults def1' def2' -> []
+    _ -> [maybe NoDefault Default def2]
 
 -- from database, from datatype
 migrateUniq :: UniqueDef' -> UniqueDef' -> [AlterTable]
@@ -284,33 +295,31 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
       name = entityName e
       schema = entitySchema e
       cName = if simple then name else name ++ [delim] ++ constrName constr
-      mkColumns' xs = concat *** concat $ unzip $ map (uncurry mkColumns) xs
-      (columns, refs) = mkColumns' $ constrParams constr
   tableStructure <- analyzeTable schema cName
-  let dels = mkDeletes migPack columns
+  let dels = concatMap (mkDeletes escape) $ constrParams constr
   (triggerExisted, delTrigger) <- migTriggerOnDelete schema cName dels
   updTriggers <- liftM (concatMap snd) $ migTriggerOnUpdate schema cName dels
   
-  let (mainRef, columns', refs', uniques') = case constrAutoKeyName constr of
-        Nothing -> (primaryKeyTypeName, columns, refs, uniques)
-        Just keyName | simple -> (primaryKeyTypeName, Column keyName False primaryKeyType Nothing:columns, refs, uniques ++ [UniqueDef' Nothing UniquePrimary [keyName]])
-                     | otherwise -> (foreignKeyTypeName ++ " NOT NULL UNIQUE "
-                      , Column (fromJust $ constrAutoKeyName constr) False primaryKeyType Nothing:columns
-                      , refs ++ [Reference schema name [(fromJust $ constrAutoKeyName constr, mainTableId)] (Just Cascade) Nothing]
-                      , uniques ++ [UniqueDef' Nothing UniqueConstraint [fromJust $ constrAutoKeyName constr]]
-                      )
+  let (columns, refs) = foldr mkColumns [] &&& concatMap mkReferences $ constrParams constr
+      (expectedTableStructure, (addTable, addInAlters)) = case constrAutoKeyName constr of
+        Nothing -> (TableInfo columns uniques (mkRefs refs), f [] columns uniques refs)
+        Just keyName -> let keyColumn = Column keyName False DbAutoKey Nothing 
+                        in if simple
+          then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef' Nothing UniquePrimary [keyName]]) (mkRefs refs)
+               , f [escape keyName ++ " " ++ primaryKeyTypeName] columns uniques refs)
+          else let columns' = keyColumn:columns
+                   refs' = refs ++ [Reference schema name [(keyName, mainTableId)] (Just Cascade) Nothing]
+                   uniques' = uniques ++ [UniqueDef' Nothing UniqueConstraint [keyName]]
+               in (TableInfo columns' uniques' (mkRefs refs'), f [] columns' uniques' refs')
+      uniques = map (\(UniqueDef uName uType cols) -> UniqueDef' (Just uName) uType (map colName $ foldr mkColumns [] cols)) $ constrUniques constr
+      f autoKey cols uniqs refs' = (addTable', addInAlters') where
+        (addInCreate, addInAlters') = addUniquesReferences uniqs refs'
+        items = autoKey ++ map showColumn cols ++ addInCreate
+        addTable' = "CREATE TABLE " ++ tableName escape e constr ++ " (" ++ intercalate ", " items ++ ")"
+      mkRefs = map (\r -> (Nothing, r))
 
-      uniques = map (\(UniqueDef uName uType cols) -> UniqueDef' (Just uName) uType (map colName $ fst $ mkColumns' cols)) $ constrUniques constr
-
-      (addInCreate, addInAlters) = addUniquesReferences uniques refs'
-      autoKey = fmap (\x -> escape x ++ " " ++ mainRef) $ constrAutoKeyName constr
-      items = maybeToList autoKey ++ map showColumn columns ++ addInCreate
-      addTable = "CREATE TABLE " ++ tableName escape e constr ++ " (" ++ intercalate ", " items ++ ")"
-
--- change primary key and columns depending on isSimple
-      expectedTableStructure = TableInfo columns' uniques' (map (\r -> (Nothing, r)) refs')
       (migErrs, constrExisted, mig) = case tableStructure of
-        Nothing  -> let
+        Nothing -> let
           rest = AlterTable schema cName addTable expectedTableStructure expectedTableStructure addInAlters
           in ([], False, [AddTable addTable, rest])
         Just oldTableStructure -> let
@@ -326,13 +335,10 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
 
 -- on delete removes all ephemeral data
 -- returns column name and delete statement for the referenced table
-mkDeletes :: MigrationPack m -> [Column] -> [(String, String)]
-mkDeletes MigrationPack{..} columns = mapMaybe delField columns where
-  delField (Column name _ t _) = fmap delStatement $ ephemeralName t where
-    delStatement ref = (name, "DELETE FROM " ++ escape ref ++ " WHERE id=old." ++ escape name ++ ";")
-  ephemeralName (DbMaybe x) = ephemeralName x
-  ephemeralName (DbList name _) = Just name
-  ephemeralName _ = Nothing
+mkDeletes :: (String -> String) -> (String, DbType) -> [(String, String)]
+mkDeletes esc = concat . traverseDbType f where
+  f (DbList ref _) [col] = [(col, "DELETE FROM " ++ esc ref ++ " WHERE id=old." ++ esc col ++ ";")]
+  f _ _ = []
 
 showReferenceAction :: ReferenceActionType -> String
 showReferenceAction NoAction = "NO ACTION"

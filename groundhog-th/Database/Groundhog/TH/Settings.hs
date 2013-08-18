@@ -14,14 +14,13 @@ module Database.Groundhog.TH.Settings
   , PSEmbeddedDef(..)
   , PSConstructorDef(..)
   , PSFieldDef(..)
-  , PSEmbeddedFieldDef(..)
   , PSUniqueDef(..)
   , PSUniqueKeyDef(..)
   , PSAutoKeyDef(..)
   ) where
 
 import Database.Groundhog.Core (UniqueType(..), ReferenceActionType(..))
-import Database.Groundhog.Generic (PSEmbeddedFieldDef(..))
+import Database.Groundhog.Generic (PSFieldDef(..))
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
@@ -70,9 +69,11 @@ data THFieldDef = THFieldDef {
   , thDbTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
   , thExprName :: String -- BarField
   , thFieldType :: Type
-  , thEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
-  , thFieldOnDelete :: Maybe ReferenceActionType
-  , thFieldOnUpdate :: Maybe ReferenceActionType
+  , thEmbeddedDef :: Maybe [PSFieldDef]
+  , thDefaultValue :: Maybe String
+  , thReferenceParent :: Maybe (Maybe String, String, [String])
+  , thReferenceOnDelete :: Maybe ReferenceActionType
+  , thReferenceOnUpdate :: Maybe ReferenceActionType
 } deriving Show
 
 data THUniqueDef = THUniqueDef {
@@ -113,16 +114,6 @@ data PSConstructorDef = PSConstructorDef {
   , psDbAutoKeyName :: Maybe (Maybe String) -- u2_id
   , psConstrFields  :: Maybe [PSFieldDef]
   , psConstrUniques :: Maybe [PSUniqueDef]
-} deriving Show
-
-data PSFieldDef = PSFieldDef {
-    psFieldName :: String -- bar
-  , psDbFieldName :: Maybe String -- SQLbar
-  , psDbTypeName :: Maybe String -- inet, NUMERIC(5,2), VARCHAR(50)
-  , psExprName :: Maybe String -- BarField
-  , psEmbeddedDef :: Maybe [PSEmbeddedFieldDef]
-  , psFieldOnDelete :: Maybe ReferenceActionType
-  , psFieldOnUpdate :: Maybe ReferenceActionType
 } deriving Show
 
 data PSUniqueDef = PSUniqueDef {
@@ -174,10 +165,7 @@ instance Lift ReferenceActionType where
   lift SetDefault = [| SetDefault |]
 
 instance Lift PSFieldDef where
-  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psFieldOnDelete) $(lift psFieldOnUpdate) |]
-
-instance Lift PSEmbeddedFieldDef where
-  lift (PSEmbeddedFieldDef {..}) = [| PSEmbeddedFieldDef $(lift psEmbeddedFieldName) $(lift psDbEmbeddedFieldName) $(lift psDbEmbeddedTypeName) $(lift psSubEmbedded) |]
+  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) $(lift psReferenceOnDelete) $(lift psReferenceOnUpdate) |]
 
 instance Lift PSUniqueKeyDef where
   lift (PSUniqueKeyDef {..}) = [| PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef) |]
@@ -248,11 +236,10 @@ instance FromJSON ReferenceActionType where
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
 instance FromJSON PSFieldDef where
-  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "onDelete" <*> v .:? "onUpdate"
-  parseJSON _          = mzero
-
-instance FromJSON PSEmbeddedFieldDef where
-  parseJSON (Object v) = PSEmbeddedFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "embeddedType"
+  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> (v .:? "reference" >>= maybe (pure Nothing) ref) <*> v .:? "onDelete" <*> v .:? "onUpdate" where
+    ref val = Just <$> case val of
+      Object r -> (,,) <$> r .:? "schema" <*> r .: "table" <*> r .: "columns"
+      _ -> mzero
   parseJSON _          = mzero
 
 instance FromJSON PSUniqueKeyDef where

@@ -3,7 +3,7 @@ module Migration.New where
 import Database.Groundhog
 import Database.Groundhog.TH
 
-data AddColumn = AddColumn {addColumnNew :: Maybe String, addColumnOld :: Int} deriving (Eq, Show)
+data AddColumn = AddColumn {addColumnNew :: String, addColumnOld :: Int} deriving (Eq, Show)
 data AddUniqueConstraint = AddUniqueConstraint {addUniqueConstraint1 :: Int, addUniqueConstraint2 :: Int} deriving (Eq, Show)
 data AddUniqueIndex = AddUniqueIndex {addUniqueIndex1 :: Int, addUniqueIndex2 :: Int} deriving (Eq, Show)
 data AddConstructorToMany = AddConstructorToMany0 {addConstructorToMany0 :: Int}
@@ -14,6 +14,12 @@ data ChangeType = ChangeType {changeType :: String} deriving (Eq, Show)
 
 mkPersist defaultCodegenConfig [groundhog|
 - entity: AddColumn
+  constructors:
+    - name: AddColumn
+      fields:
+        - name: addColumnNew
+          type: varchar(50) #Fixed length type to enable defaults on MySQL
+          default: "'new_column_default'"
 - entity: AddUniqueConstraint
   constructors:
     - name: AddUniqueConstraint

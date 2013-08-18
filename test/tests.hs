@@ -28,7 +28,7 @@ import Database.Groundhog.MySQL
 #endif
 import Data.ByteString.Char8 (unpack)
 import Data.Int
-import Data.List (isInfixOf, sort)
+import Data.List (intercalate, isInfixOf, sort)
 import qualified Data.Map as Map
 import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
@@ -45,7 +45,7 @@ data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, 
 data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
 data Single a = Single {single :: a} deriving (Eq, Show)
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
-data Settable = Settable {settable1 :: String, settable2 :: Maybe (Key (Single String) BackendSpecific), settableTuple :: (Int, (String, Double))}
+data Settable = Settable {settable1 :: String, settable2 :: Maybe (Key (Single String) BackendSpecific), settableTuple :: (Int, (String, Maybe Int64))}
 data Keys = Keys {refDirect :: Single String, refKey :: Key (Single String) BackendSpecific, refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (Key (Single String) BackendSpecific)}
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
 data UniqueKeySample = UniqueKeySample { uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Int } deriving (Eq, Show)
@@ -92,6 +92,9 @@ mkPersist defaultCodegenConfig [groundhog|
                   dbName: secondTupleElement
                 - name: val1
                   dbName: thirdTupleElement
+                  reference:
+                    table: sqlsettable
+                    columns: [settable_id]
               dbName: name
       uniques:
         - name: someconstraint
@@ -262,20 +265,26 @@ testNumber = do
   migr (undefined :: Number)
   let minNumber = Number minBound minBound minBound minBound minBound minBound minBound minBound minBound
   let maxNumber = Number maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound maxBound
-  minNumber' <- insert minNumber >>= get
-  maxNumber' <- insert maxNumber >>= get
-  Just minNumber @=? minNumber'
-  Just maxNumber @=? maxNumber'
+  Just minNumber @=?? (insert minNumber >>= get)
+  Just maxNumber @=?? (insert maxNumber >>= get)
 
 testPersistSettings :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testPersistSettings = do
+  proxy <- phantomDb
   let val = Single "def"
   migr val
   singleKey <- insert val
-  let settable = Settable "abc" (Just singleKey) (1, ("qqq", 2))
-  m <- createMigration $ migrate settable
-  let expectedNames = ["settable_id", "sqlsettable1", "firstTupleElement", "secondTupleElement", "thirdTupleElement", "someconstraint", "varchar(50)"]
-  liftIO $ all (`isInfixOf` show m) expectedNames H.@? ("Should contain " ++ show expectedNames ++ ": " ++ show m)
+  let settable = Settable "abc" (Just singleKey) (1, ("qqq", Nothing))
+  m <- fmap (Map.lookup "sqlsettable") $ createMigration $ migrate settable
+  let queries = case m of
+        Just (Right qs) -> intercalate ";" $ map (\(_, _, q) -> q) qs
+        t -> fail $ "Unexpected migration result: " ++ show m
+      ref = if backendName proxy == "mysql"
+        then "(`thirdTupleElement`) REFERENCES `test`.`sqlsettable`(`settable_id`)"
+        else "(\"thirdTupleElement\") REFERENCES \"sqlsettable\"(\"settable_id\")"
+      expectedNames = ["settable_id", "sqlsettable1", "firstTupleElement", "secondTupleElement", "thirdTupleElement", "someconstraint", "varchar(50)", ref]
+      absent = filter (not . (`isInfixOf` queries)) expectedNames
+  liftIO $ null absent H.@? ("Migration should contain " ++ show absent ++ ":\n" ++ queries)
   migr settable
   k <- insert settable
   Just settable @=?? get k
@@ -410,8 +419,6 @@ testUpdate = do
   val1 <- get k
   Just (Single ("ghc", "qqq")) @=? val1
   -- update columns to the initial values using embedded data structure subfields
-  --TODO: use key field when implemented
-  --  update [SingleField ~> Tuple2_0Selector =. "abc", SingleField ~> Tuple2_1Selector =. "def"] (KeyIs k)
   update [SingleField ~> Tuple2_0Selector =. "abc", SingleField ~> Tuple2_1Selector =. "def"] (SingleField ==. ("ghc", "qqq"))
   val2 <- get k
   Just val @=? val2
@@ -543,7 +550,6 @@ testReplaceSingle = do
   k <- insert val
   Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrimitivePersistValue proxy k] firstRow
   let valueKey = fromPrimitivePersistValue proxy valueKey'
-  
   replace valueKey (Single "def")
   replaced <- get valueKey
   Just (Single "def") @=? replaced
@@ -551,13 +557,10 @@ testReplaceSingle = do
 testMigrateAddColumnSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddColumnSingle = do
   migr (undefined :: Old.AddColumn)
+  k <- insert $ Old.AddColumn 5
   migr (undefined :: New.AddColumn)
-  m <- createMigration $ migrate (undefined :: New.AddColumn)
-  [] @=? filter (/= Right []) (Map.elems m)
-  let val = New.AddColumn (Just "abc") 5
-  k <- insert val
-  val' <- get k
-  Just val @=? val'
+  k' <- toSinglePersistValue k >>= fromSinglePersistValue
+  Just (New.AddColumn "new_column_default" 5) @=?? get k'
 
 testMigrateAddUniqueConstraint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddUniqueConstraint = do
