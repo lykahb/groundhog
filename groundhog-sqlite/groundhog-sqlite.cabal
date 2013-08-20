@@ -14,13 +14,13 @@ build-type:      Simple
 library
     build-depends:   base                    >= 4         && < 5
                    , bytestring              >= 0.9
-                   , transformers            >= 0.2.1     && < 0.4
+                   , transformers            >= 0.2.1
                    , groundhog               >= 0.3.0     && < 0.4.0
-                   , monad-control           >= 0.3       && < 0.4
+                   , monad-control           >= 0.3
                    , containers              >= 0.2
-                   , text                    >= 0.8       && < 0.12
+                   , text                    >= 0.8
                    , direct-sqlite           >= 2.3.5
-                   , resource-pool           >= 0.2.1     && < 0.3
+                   , resource-pool           >= 0.2.1
                    , unordered-containers
     exposed-modules: Database.Groundhog.Sqlite
     ghc-options:     -Wall -fno-warn-unused-do-bind
