@@ -29,6 +29,8 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
   insert $ Product "Apples" 5 johnKey
   insert $ Product "Melon" 3 johnKey
   janeKey <- insert $ Customer "Jane Doe" "987654321"
+  allCustomers <- select CondEmpty
+  liftIO $ putStrLn $ "All customers: " ++ show (allCustomers :: [Customer])
   insert $ Product "Oranges" 4 janeKey
   -- bonus melon for all large melon orders. The values used in expressions should have known type, so literal 5 is annotated.
   update [QuantityField =. toArith QuantityField + 1] (ProductNameField ==. "Melon" &&. QuantityField >. (5 :: Int))

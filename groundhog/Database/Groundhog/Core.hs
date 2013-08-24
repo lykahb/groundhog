@@ -141,6 +141,7 @@ data Cond db r =
   | Not (Cond db r)
   | Compare ExprRelation (UntypedExpr db r) (UntypedExpr db r)
   | CondRaw (QueryRaw db r)
+  | CondEmpty
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 

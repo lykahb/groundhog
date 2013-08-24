@@ -160,6 +160,7 @@ renderCond esc rendEq rendNotEq (cond :: Cond db r) = go cond 0 where
     [] -> Nothing
     [a] -> Just a
     _ -> error "renderCond: cannot render CondRaw with many elements"
+  go CondEmpty _ = Nothing
   notP = 35
   andP = 30
   orP = 20
