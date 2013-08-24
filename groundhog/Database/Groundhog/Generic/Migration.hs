@@ -104,6 +104,7 @@ data MigrationPack m = MigrationPack {
   , addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
   , showColumn :: Column -> String
   , showAlterDb :: AlterDB -> SingleMigration
+  , defaultReferenceActionType :: ReferenceActionType
 }
 
 mkColumns :: (String, DbType) -> ([Column] -> [Column])

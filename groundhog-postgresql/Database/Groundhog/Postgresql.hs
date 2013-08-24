@@ -278,6 +278,7 @@ migrationPack currentSchema = GM.MigrationPack
   (\uniques refs -> ([], map AddUnique uniques ++ map AddReference refs))
   showColumn
   showAlterDb
+  NoAction
 
 showColumn :: Column -> String
 showColumn (Column n nu t def) = concat

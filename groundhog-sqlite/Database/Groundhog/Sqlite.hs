@@ -156,6 +156,7 @@ migrationPack = GM.MigrationPack
   addUniquesReferences
   showColumn
   showAlterDb
+  NoAction
 
 addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
