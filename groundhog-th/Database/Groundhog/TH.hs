@@ -16,6 +16,8 @@ module Database.Groundhog.TH
   , suffixNamingStyle
   , persistentNamingStyle
   , conciseNamingStyle
+  , lowerCaseSuffixNamingStyle
+  , toUnderscore
   ) where
 
 import Database.Groundhog.Core (delim, UniqueType(..))
@@ -27,7 +29,7 @@ import Language.Haskell.TH.Syntax (StrictType, VarStrictType, Lift(..))
 import Language.Haskell.TH.Quote
 import Control.Monad (forM, forM_, when, unless, liftM2)
 import Data.ByteString.Char8 (pack)
-import Data.Char (toUpper, toLower, isSpace)
+import Data.Char (isUpper, isLower, isSpace, isDigit, toUpper, toLower)
 import Data.Either (lefts)
 import Data.List (nub, (\\))
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -159,6 +161,15 @@ conciseNamingStyle = suffixNamingStyle {
   , mkExprSelectorName = \_ _ fName _ -> firstLetter toUpper fName
   , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
   , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum
+}
+
+-- | The generated Haskell names of phantom types (constructors, fields, etc.) are the same as with suffixNamingStyle. But the table names and columns are converted from camelCase to underscore_lower_case with `toUnderscore`.
+lowerCaseSuffixNamingStyle :: NamingStyle
+lowerCaseSuffixNamingStyle = suffixNamingStyle {
+    mkDbEntityName = \dName -> toUnderscore dName
+  , mkDbConstrName = \_ cName _ -> toUnderscore cName
+  , mkDbFieldName = \_ _ _ fName _ -> toUnderscore fName
+  , mkNormalDbFieldName = \_ cName _ fNum -> toUnderscore $ cName ++ show fNum
 }
 
 -- | Creates the auxiliary structures. 
@@ -370,6 +381,15 @@ mkTHEmbeddedDefWith _ _ = error "Only datatypes can be processed"
 
 firstLetter :: (Char -> Char) -> String -> String
 firstLetter f s = f (head s):tail s
+
+-- | Transforms string from camelCase to lower_case_underscore naming convention.
+-- ColumnName -> column_name, parseURL -> parse_url, FieldIEEE754Floating -> field_ieee754_floating
+toUnderscore :: String -> String
+toUnderscore = map toLower . go where
+  go (x:y:z:xs) | isUpper x && isUpper y && isLower z = x:'_':y:go (z:xs)
+  go (x:y:xs) | (isLower x || isDigit x) && isUpper y = x:'_':y:go xs
+  go (x:xs) = x:go xs
+  go "" = ""
 
 -- $settingsDoc
 -- Groundhog needs to analyze the datatypes and create the auxiliary definitions before it can work with them.
