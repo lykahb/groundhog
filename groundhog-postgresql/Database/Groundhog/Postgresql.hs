@@ -18,7 +18,6 @@ import Database.Groundhog.Generic.Sql.Functions
 import qualified Database.Groundhog.Generic.PersistBackendHelpers as H
 
 import qualified Database.PostgreSQL.Simple as PG
-import qualified Database.PostgreSQL.Simple.BuiltinTypes as PG
 import qualified Database.PostgreSQL.Simple.Internal as PG
 import qualified Database.PostgreSQL.Simple.ToField as PGTF
 import qualified Database.PostgreSQL.Simple.FromField as PGFF
@@ -654,16 +653,7 @@ queryRaw' query vals f = do
         cols <- LibPQ.nfields ret
         getters <- forM [0..cols-1] $ \col -> do
           oid <- LibPQ.ftype ret col
-          case PG.oid2builtin oid of
-            -- TODO: this is a temporary hack until postgresql-simple supports arrays and has more builtin types. Restore fail clause then.
-            Nothing -> return $ getGetter PG.Unknown $
-                       PG.Field ret col oid
-             {- fail $ "Postgresql.withStmt': could not " ++
-                              "recognize " ++ show oid ++ " of column " ++
-                              show (let LibPQ.Col i = col in i) ++
-                              " (counting from zero)" -}
-            Just bt -> return $ getGetter bt $
-                       PG.Field ret col oid
+          return $ getGetter oid $ PG.Field ret col oid
         -- Ready to go!
         rowRef   <- newIORef (LibPQ.Row 0)
         rowCount <- LibPQ.ntuples ret
@@ -705,35 +695,34 @@ type Getter a = PGFF.FieldParser a
 convertPV :: PGFF.FromField a => (a -> b) -> Getter b
 convertPV f = (fmap f .) . PGFF.fromField
 
--- FIXME: check if those are correct and complete.
-getGetter :: PG.BuiltinType -> Getter PersistValue
-getGetter PG.Bool                  = convertPV PersistBool
-getGetter PG.ByteA                 = convertPV (PersistByteString . unBinary)
-getGetter PG.Char                  = convertPV PersistString
-getGetter PG.Name                  = convertPV PersistString
-getGetter PG.Int8                  = convertPV PersistInt64
-getGetter PG.Int2                  = convertPV PersistInt64
-getGetter PG.Int4                  = convertPV PersistInt64
-getGetter PG.Text                  = convertPV PersistString
-getGetter PG.Xml                   = convertPV PersistString
-getGetter PG.Float4                = convertPV PersistDouble
-getGetter PG.Float8                = convertPV PersistDouble
-getGetter PG.AbsTime               = convertPV PersistUTCTime
-getGetter PG.RelTime               = convertPV PersistUTCTime
---getGetter PG.Money                 = convertPV PersistString
-getGetter PG.BpChar                = convertPV PersistString
-getGetter PG.VarChar               = convertPV PersistString
-getGetter PG.Date                  = convertPV PersistDay
-getGetter PG.Time                  = convertPV PersistTimeOfDay
-getGetter PG.Timestamp             = convertPV (PersistUTCTime . localTimeToUTC utc)
-getGetter PG.TimestampTZ           = convertPV (PersistZonedTime . ZT)
-getGetter PG.Bit                   = convertPV PersistInt64
-getGetter PG.VarBit                = convertPV PersistInt64
-getGetter PG.Numeric               = convertPV (PersistDouble . fromRational)
-getGetter PG.Void                  = \_ _ -> return PersistNull
-getGetter _ = \f dat -> fmap (PersistByteString . unBinary) $ case dat of
-  Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
-  Just str -> return $ PG.Binary $ copy $ str
+getGetter :: PG.Oid -> Getter PersistValue
+getGetter (PG.Oid oid) = case oid of
+  16   -> convertPV PersistBool
+  17   -> convertPV (PersistByteString . unBinary)
+  18   -> convertPV PersistString
+  19   -> convertPV PersistString
+  20   -> convertPV PersistInt64
+  21   -> convertPV PersistInt64
+  23   -> convertPV PersistInt64
+  25   -> convertPV PersistString
+  142  -> convertPV PersistString
+  700  -> convertPV PersistDouble
+  701  -> convertPV PersistDouble
+  702  -> convertPV PersistUTCTime
+  703  -> convertPV PersistUTCTime
+  1042 -> convertPV PersistString
+  1043 -> convertPV PersistString
+  1082 -> convertPV PersistDay
+  1083 -> convertPV PersistTimeOfDay
+  1114 -> convertPV (PersistUTCTime . localTimeToUTC utc)
+  1184 -> convertPV (PersistZonedTime . ZT)
+  1560 -> convertPV PersistInt64
+  1562 -> convertPV PersistInt64
+  1700 -> convertPV (PersistDouble . fromRational)
+  2278 -> \_ _ -> return PersistNull
+  _    -> \f dat -> fmap PersistByteString $ case dat of
+    Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
+    Just str -> return $ copy $ str
 
 unBinary :: PG.Binary a -> a
 unBinary (PG.Binary x) = x
