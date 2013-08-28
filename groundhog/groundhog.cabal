@@ -22,6 +22,7 @@ library
                    , blaze-builder            >= 0.3.0.0
                    , containers               >= 0.2
                    , monad-control            >= 0.3
+                   , monad-logger             >= 0.3
                    , transformers-base
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core

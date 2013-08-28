@@ -6,7 +6,8 @@ import Database.Groundhog.Sqlite
 import Control.Applicative (Applicative)
 import Control.Monad (liftM)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
+import Control.Monad.Logger (MonadLogger(..), LoggingT, runStdoutLoggingT)
+import Control.Monad.Trans.Control (MonadBaseControl (..))
 import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
 import Control.Monad.Base (MonadBase (liftBase))
 import Control.Monad.Reader (MonadReader(..))
@@ -14,7 +15,7 @@ import Data.Conduit.Pool
 
 main :: IO ()
 main = withSqlitePool ":memory:" 5 $ \pconn ->
-    runReaderT (runMyMonad sqliteDbAction) (ApplicationState pconn)
+    flip runReaderT (ApplicationState pconn) . runStdoutLoggingT . runMyMonad $ sqliteDbAction
 
 -- It is connection agnostic (runs both with Sqlite and Pool Sqlite)
 sqliteDbAction :: (MonadBaseControl IO m, HasConn m cm Sqlite) => m ()
@@ -35,13 +36,13 @@ instance ConnectionManager ApplicationState Sqlite where
   withConnNoTransaction f app = withConnNoTransaction f (getConnPool app)
 
 -- This can be any application monad like Handler in Snap or GHandler in Yesod
-newtype MyMonad a = MyMonad { runMyMonad :: ReaderT ApplicationState IO a }
-  deriving (Applicative, Functor, Monad, MonadReader ApplicationState, MonadIO)
+newtype MyMonad a = MyMonad { runMyMonad :: LoggingT (ReaderT ApplicationState IO) a }
+  deriving (Applicative, Functor, Monad, MonadReader ApplicationState, MonadIO, MonadLogger)
 
 instance MonadBase IO MyMonad where
   liftBase = liftIO
 
 instance MonadBaseControl IO MyMonad where
-  newtype StM MyMonad a = StMMyMonad { unStMMyMonad :: StM (ReaderT ApplicationState IO) a }
+  newtype StM MyMonad a = StMMyMonad { unStMMyMonad :: StM (LoggingT (ReaderT ApplicationState IO)) a }
   liftBaseWith f = MyMonad (liftBaseWith (\run -> f (liftM StMMyMonad . run . runMyMonad)))
   restoreM = MyMonad . restoreM . unStMMyMonad

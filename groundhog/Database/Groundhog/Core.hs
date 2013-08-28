@@ -72,12 +72,12 @@ module Database.Groundhog.Core
   , ConnectionManager(..)
   , SingleConnectionManager
   , Savepoint(..)
-  , runDbConn
   ) where
 
 import Blaze.ByteString.Builder (Builder, toByteString)
 import Control.Applicative (Applicative)
 import Control.Monad.Base (MonadBase (liftBase))
+import Control.Monad.Logger (MonadLogger(..))
 import Control.Monad.Trans.Class (MonadTrans(..))
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
@@ -243,6 +243,9 @@ instance MonadBaseControl IO m => MonadBaseControl IO (DbPersist conn m) where
   newtype StM (DbPersist conn m) a = StMSP {unStMSP :: ComposeSt (DbPersist conn) m a}
   liftBaseWith = defaultLiftBaseWith StMSP
   restoreM     = defaultRestoreM   unStMSP
+
+instance MonadLogger m => MonadLogger (DbPersist conn m) where
+    monadLoggerLog a b c = lift . monadLoggerLog a b c
 
 runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
 runDbPersist = runReaderT . unDbPersist
@@ -521,7 +524,3 @@ class ConnectionManager cm conn => SingleConnectionManager cm conn
 class Savepoint conn where
   -- | Wraps the passed action into a named savepoint
   withConnSavepoint :: (MonadBaseControl IO m, MonadIO m) => String -> m a -> conn -> m a
-
--- | Runs action within connection. It can handle a simple connection, a pool of them, etc.
-runDbConn :: (MonadBaseControl IO m, MonadIO m, ConnectionManager cm conn) => DbPersist conn m a -> cm -> m a
-runDbConn = withConn . runDbPersist

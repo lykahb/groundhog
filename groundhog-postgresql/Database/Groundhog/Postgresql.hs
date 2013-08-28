@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, MultiParamTypeClasses, TemplateHaskell #-}
 module Database.Groundhog.Postgresql
     ( withPostgresqlPool
     , withPostgresqlConn
@@ -30,6 +30,7 @@ import Control.Arrow ((***))
 import Control.Exception (throw)
 import Control.Monad (forM, liftM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Logger (MonadLogger, logDebugS)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
@@ -55,8 +56,7 @@ instance DbDescriptor Postgresql where
 instance SqlDb Postgresql where
   append a b = Expr $ operator 50 "||" a b
 
-instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgresql m) where
-  {-# SPECIALIZE instance PersistBackend (DbPersist Postgresql IO) #-}
+instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Postgresql m) where
   type PhantomDb (DbPersist Postgresql m) = Postgresql
   insert v = insert' v
   insert_ v = insert_' v
@@ -81,7 +81,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Postgre
   insertList l = insertList' l
   getList k = getList' k
 
-instance (MonadBaseControl IO m, MonadIO m) => SchemaAnalyzer (DbPersist Postgresql m) where
+instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist Postgresql m) where
   listTables schema = queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue proxy schema] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTableTriggers schema name = queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   analyzeTable = analyzeTable'
@@ -142,8 +142,7 @@ open' s = do
 close' :: Postgresql -> IO ()
 close' (Postgresql conn) = PG.close conn
 
-{-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Postgresql IO (AutoKey v) #-}
-insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Postgresql m (AutoKey v)
+insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Postgresql m (AutoKey v)
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -169,8 +168,7 @@ insert' v = do
       executeRaw' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-{-# SPECIALIZE insert_' :: PersistEntity v => v -> DbPersist Postgresql IO () #-}
-insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Postgresql m ()
+insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Postgresql m ()
 insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -200,7 +198,7 @@ insertIntoConstructorTable withRet withId tName c vals = RenderS query vals' whe
   fieldNames   = renderFields escapeS fields
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
-insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Postgresql m Int64
+insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => [a] -> DbPersist Postgresql m Int64
 insertList' (l :: [a]) = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   k <- queryRaw' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES RETURNING(id)") [] getKey
@@ -216,7 +214,7 @@ insertList' (l :: [a]) = do
   go 0 l
   return $ fromPrimitivePersistValue proxy k
   
-getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Postgresql m [a]
+getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => Int64 -> DbPersist Postgresql m [a]
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   let valuesName = mainName <> delim' <> "values"
@@ -231,9 +229,9 @@ getKey pop = pop >>= \(Just [k]) -> return k
 
 ----------
 
-executeRaw' :: MonadIO m => Utf8 -> [PersistValue] -> DbPersist Postgresql m ()
+executeRaw' :: (MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> DbPersist Postgresql m ()
 executeRaw' query vals = do
-  --liftIO $ print $ fromUtf8 query ""
+  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
   Postgresql conn <- DbPersist ask
   let stmt = getStatement query
   liftIO $ do
@@ -251,18 +249,18 @@ escapeS a = let q = fromChar '"' in q <> a <> q
 delim' :: Utf8
 delim' = fromChar delim
 
-toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Postgresql m [PersistValue]
+toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v, MonadLogger m) => v -> DbPersist Postgresql m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 --- MIGRATION
 
-migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Postgresql m)
+migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> Migration (DbPersist Postgresql m)
 migrate' v = do
   x <- lift $ queryRaw' "SELECT current_schema()" [] id
   let schema = fst $ fromPurePersistValues proxy $ fromJust x
   migrateRecursively (migrateEntity $ migrationPack schema) (migrateList $ migrationPack schema) v
 
-migrationPack :: (MonadBaseControl IO m, MonadIO m) => String -> GM.MigrationPack (DbPersist Postgresql m)
+migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> GM.MigrationPack (DbPersist Postgresql m)
 migrationPack currentSchema = GM.MigrationPack
   compareTypes
   (compareRefs currentSchema)
@@ -292,7 +290,7 @@ showColumn (Column n nu t def) = concat
         Just s  -> " DEFAULT " ++ s
     ]
 
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB])
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Postgresql m (Bool, [AlterDB])
 migTriggerOnDelete schema name deletes = do
   let funcName = name
   let trigName = name
@@ -325,7 +323,7 @@ migTriggerOnDelete schema name deletes = do
       
 -- | Table name and a  list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Postgresql m [(Bool, [AlterDB])]
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Postgresql m [(Bool, [AlterDB])]
 migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
   let funcName = name ++ delim : fieldName
   let trigName = name ++ delim : fieldName
@@ -350,7 +348,7 @@ migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
             else [DropTrigger schema trigName schema name, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
   
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m (Maybe TableInfo)
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist Postgresql m (Maybe TableInfo)
 analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
@@ -382,7 +380,7 @@ getColumn :: String -> ((String, String, String, Maybe String), (Maybe Int, Mayb
 getColumn _ ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Column column_name (is_nullable == "YES") t d where
   t = readSqlType udt_name modifiers arr_info
 
-analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Postgresql m [(Maybe String, Reference)]
+analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist Postgresql m [(Maybe String, Reference)]
 analyzeTableReferences schema tName = do
   let sql = "SELECT c.conname, sch_parent.nspname, cl_parent.relname, c. confdeltype, c.confupdtype, a_child.attname AS child, a_parent.attname AS parent FROM\
 \  (SELECT r.conrelid, r.confrelid, unnest(r.conkey) AS conkey, unnest(r.confkey) AS confkey, r.conname, r.confupdtype, r.confdeltype\
@@ -622,11 +620,12 @@ escape s = '\"' : s ++ "\""
 getStatement :: Utf8 -> PG.Query
 getStatement sql = PG.Query $ fromUtf8 sql
 
-queryRawTyped' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRawTyped' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRawTyped' query _ vals f = queryRaw' query vals f
 
-queryRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
+queryRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRaw' query vals f = do
+  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
   Postgresql conn <- DbPersist ask
   rawquery <- liftIO $ PG.formatQuery conn (getStatement query) (map P vals)
   -- Take raw connection

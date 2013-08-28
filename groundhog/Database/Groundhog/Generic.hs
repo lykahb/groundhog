@@ -14,9 +14,10 @@ module Database.Groundhog.Generic
   , silentMigrationLogger
   , defaultMigrationLogger
   , failMessage
-  -- * Helpers for running Groundhog within custom monads
+  -- * Helpers for running Groundhog actions
   , HasConn
   , runDb
+  , runDbConn
   , withSavepoint
   -- * Helper functions for defining *PersistValue instances
   , primToPersistValue
@@ -54,7 +55,8 @@ import Database.Groundhog.Core
 
 import Control.Applicative ((<|>))
 import Control.Monad (liftM, forM_, (>=>))
-import Control.Monad.Trans.State (StateT (..))
+import Control.Monad.Logger (MonadLogger, NoLoggingT(..))
+import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
 import qualified Control.Exception as E
 import Control.Monad.IO.Class (MonadIO (..))
@@ -286,12 +288,16 @@ isSimple [_] = True
 isSimple _   = False
 
 -- | This class helps to shorten the type signatures of user monadic code.
-class (MonadIO m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
-instance (MonadIO m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
+class (MonadIO m, MonadLogger m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
+instance (MonadIO m, MonadLogger m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
 
 -- | It helps to run database operations within your application monad.
-runDb :: HasConn m cm conn => DbPersist conn IO a -> m a
-runDb f = ask >>= liftIO . runDbConn f
+runDb :: HasConn m cm conn => DbPersist conn m a -> m a
+runDb f = ask >>= withConn (runDbPersist f)
+
+-- | Runs action within connection. It can handle a simple connection, a pool of them, etc.
+runDbConn :: (MonadBaseControl IO m, MonadIO m, ConnectionManager cm conn) => DbPersist conn (NoLoggingT m) a -> cm -> m a
+runDbConn f cm = runNoLoggingT (withConn (runDbPersist f) cm)
 
 -- | It helps to run 'withConnSavepoint' within a monad.
 withSavepoint :: (HasConn m cm conn, SingleConnectionManager cm conn, Savepoint conn) => String -> m a -> m a

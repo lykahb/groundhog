@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, RecordWildCards, Rank2Types, MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, RecordWildCards, Rank2Types, MultiParamTypeClasses, TemplateHaskell #-}
 module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
@@ -22,6 +22,7 @@ import qualified Database.SQLite3.Direct as SD
 
 import Control.Arrow ((***))
 import Control.Monad (liftM, forM)
+import Control.Monad.Logger (MonadLogger, NoLoggingT, logDebugS)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Reader (ask)
@@ -36,8 +37,6 @@ import Data.Maybe (fromMaybe)
 import Data.Pool
 import qualified Data.Text as T
 
-import GHC.Exts (inline)
-
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 data Sqlite = Sqlite S.Database (IORef (Map.HashMap BS.ByteString S.Statement))
 
@@ -49,8 +48,8 @@ instance DbDescriptor Sqlite where
 instance SqlDb Sqlite where
   append a b = Expr $ operator 50 "||" a b
 
-instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite m) where
-  {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite IO) #-}
+instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Sqlite m) where
+  {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite (NoLoggingT IO)) #-}
   type PhantomDb (DbPersist Sqlite m) = Sqlite
   insert v = insert' v
   insert_ v = insert_' v
@@ -59,7 +58,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   replace k v = H.replace escapeS queryRawTyped executeRawCached' insertIntoConstructorTable k v
   select options = H.select escapeS queryRawTyped "LIMIT -1" renderCond' options -- select' options
   selectAll = H.selectAll escapeS queryRawTyped
-  get k = inline $ H.get escapeS queryRawTyped k
+  get k = H.get escapeS queryRawTyped k
   getBy k = H.getBy escapeS queryRawTyped k
   update upds cond = H.update escapeS executeRawCached' renderCond' upds cond
   delete cond = H.delete escapeS executeRawCached' renderCond' cond
@@ -77,7 +76,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist Sqlite 
   insertList l = insertList' l
   getList k = getList' k
 
-instance (MonadBaseControl IO m, MonadIO m) => SchemaAnalyzer (DbPersist Sqlite m) where
+instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist Sqlite m) where
   listTables _ = queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTableTriggers _ name = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   analyzeTable = analyzeTable'
@@ -137,10 +136,10 @@ close' (Sqlite conn smap) = do
   readIORef smap >>= mapM_ S.finalize . Map.elems
   S.close conn
 
-migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist Sqlite m)
+migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> Migration (DbPersist Sqlite m)
 migrate' = migrateRecursively (migrateEntity migrationPack) (migrateList migrationPack)
 
-migrationPack :: (MonadBaseControl IO m, MonadIO m) => GM.MigrationPack (DbPersist Sqlite m)
+migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => GM.MigrationPack (DbPersist Sqlite m)
 migrationPack = GM.MigrationPack
   compareTypes
   compareRefs
@@ -162,7 +161,7 @@ addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
   (constraints, indexes) = partition ((/= UniqueIndex) . uniqueDefType) uniques
 
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
 migTriggerOnDelete schema name deletes = do
   let addTrigger = AddTriggerOnDelete Nothing name Nothing name (concatMap snd deletes)
   x <- analyzeTrigger schema name
@@ -178,7 +177,7 @@ migTriggerOnDelete schema name deletes = do
         
 -- | Schema name, table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m [(Bool, [AlterDB])]
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m [(Bool, [AlterDB])]
 migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
   let trigName = name ++ delim : fieldName
   let addTrigger = AddTriggerOnUpdate Nothing trigName Nothing name (Just fieldName) del
@@ -189,7 +188,7 @@ migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
         then []
         else [DropTrigger Nothing trigName Nothing name, addTrigger])
 
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist Sqlite m (Maybe TableInfo)
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist Sqlite m (Maybe TableInfo)
 analyzeTable' _ tName = do
   let fromName = escapeS . fromString
   tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
@@ -229,7 +228,7 @@ analyzeTable' _ tName = do
               else []
       return $ Just $ TableInfo columns uniques' foreigns
 
-analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m) => String -> DbPersist Sqlite m (Maybe String)
+analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe String)
 analyzePrimaryKey tName = do
   tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   let rawColumns :: [(Int, (String, String, Int, Maybe String, Int))]
@@ -325,8 +324,7 @@ sqlUnique (UniqueDef' name typ cols) = concat [
       UniqueConstraint -> " UNIQUE("
       UniqueIndex -> error "sqlUnique: does not handle indexes"
 
-{-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist Sqlite IO (AutoKey v) #-}
-insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Sqlite m (AutoKey v)
+insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Sqlite m (AutoKey v)
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -350,8 +348,7 @@ insert' v = do
       executeRawCached' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-{-# SPECIALIZE insert_' :: PersistEntity v => v -> DbPersist Sqlite IO () #-}
-insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist Sqlite m ()
+insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Sqlite m ()
 insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -381,7 +378,7 @@ insertIntoConstructorTable withId tName c vals = RenderS query vals' where
   fieldNames   = renderFields escapeS fields
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
-insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist Sqlite m Int64
+insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => [a] -> DbPersist Sqlite m Int64
 insertList' l = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   executeRawCached' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES") []
@@ -398,7 +395,7 @@ insertList' l = do
   go 0 l
   return $ fromPrimitivePersistValue proxy k
   
-getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
+getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   let valuesName = mainName <> delim' <> "values"
@@ -406,8 +403,7 @@ getList' k = do
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
   queryRawTyped query (getDbTypes (dbType (undefined :: a)) []) [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
     
-{-# SPECIALIZE getLastInsertRowId :: DbPersist Sqlite IO PersistValue #-}
-getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m PersistValue
+getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m PersistValue
 getLastInsertRowId = do
   Sqlite conn _ <- DbPersist ask
   liftIO (SD.lastInsertRowId conn) >>= toSinglePersistValue
@@ -432,25 +428,27 @@ bind stmt = go 1 where
       PersistCustom _ _       -> error "bind: unexpected PersistCustom"
     go (i + 1) xs
 
-executeRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
+executeRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
 executeRaw' query vals = do
+  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatement query
   liftIO $ flip finally (S.finalize stmt) $ do
     bind stmt vals
     S.Done <- S.step stmt
     return ()
 
-{-# SPECIALIZE executeRawCached' :: Utf8 -> [PersistValue] -> DbPersist Sqlite IO () #-}
-executeRawCached' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
+executeRawCached' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
 executeRawCached' query vals = do
+  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatementCached query
   liftIO $ flip finally (S.reset stmt) $ do
     bind stmt vals
     S.Done <- S.step stmt
     return ()
 
-queryRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
+queryRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRaw' query vals f = do
+  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatement query
   flip finally (liftIO $ S.finalize stmt) $ do
     liftIO $ bind stmt vals
@@ -458,10 +456,11 @@ queryRaw' query vals f = do
       x <- S.step stmt
       case x of
         S.Done -> return Nothing
-        S.Row  -> liftM (Just . map pFromSql) $ S.columns stmt
+        S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
 
-queryRawCached' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
+queryRawCached' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRawCached' query vals f = do
+  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatementCached query
   flip finally (liftIO $ S.reset stmt) $ do
     liftIO $ bind stmt vals
@@ -471,8 +470,9 @@ queryRawCached' query vals f = do
         S.Done -> return Nothing
         S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
 
-queryRawTyped :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
+queryRawTyped :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
 queryRawTyped query types vals f = do
+  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatementCached query
   let types' = map typeToSqlite $ foldr getDbTypes [] types
   flip finally (liftIO $ S.reset stmt) $ do
@@ -535,7 +535,7 @@ proxy = error "Proxy Sqlite"
 delim' :: Utf8
 delim' = fromChar delim
 
-toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist Sqlite m [PersistValue]
+toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistEntity v) => v -> DbPersist Sqlite m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool

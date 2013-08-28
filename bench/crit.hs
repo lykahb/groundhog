@@ -74,14 +74,14 @@ main =
     pKey <- runResourceT $ runNoLoggingT $ P.runSqlConn (pMigrate $ P.execute "truncate table \"PPerson\"" []) pConn
 -}
     unless eachStatementInTransaction $ do
-      G.runDbPersist (G.executeRaw False "BEGIN" []) gConn
+      runNoLoggingT $ G.runDbPersist (G.executeRaw False "BEGIN" []) gConn
       runResourceT $ runNoLoggingT $ runReaderT ((\(P.SqlPersistT m) -> m) $ P.rawExecute "BEGIN" []) pConn
 
     let mkBench :: (forall m . G.PersistBackend m => m a1) -> P.SqlPersistT (NoLoggingT (ResourceT IO)) a2 -> [Benchmark]
         mkBench gm pm = [bench "groundhog" $ whnfIO $ runSqlite gm, bench "persistent" $ whnfIO $ runPersistent pm] where
           (runSqlite, runPersistent) = if eachStatementInTransaction
             then (\gm -> G.runDbConn (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ P.runSqlConn (replicateM_ numberOfOperations pm) pConn)
-            else (\gm -> G.runDbPersist (replicateM_ numberOfOperations gm) gConn, \(P.SqlPersistT pm) -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
+            else (\gm -> runNoLoggingT $ G.runDbPersist (replicateM_ numberOfOperations gm) gConn, \(P.SqlPersistT pm) -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
     defaultMainWith myConfig (return ())
       [ bgroup "get" $ mkBench (G.get gKey) (P.get pKey)
 --      , bgroup "get" [bench "esqueleto" $ whnfIO $  runPers (E.select $ E.from $ \p -> E.where_ (p ^. PPersonId ==. val pKey) >> return p)]

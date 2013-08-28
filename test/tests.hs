@@ -6,6 +6,7 @@ import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
 import Control.Monad (replicateM_, liftM, mapM_, forM_, (>=>), unless)
 import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Logger (MonadLogger)
 import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Database.Groundhog
 import Database.Groundhog.Core
@@ -217,7 +218,7 @@ mkTestSuite run =
   ]
 
 #if WITH_SQLITE
-sqliteTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Sqlite m () -> IO ()) -> [Test]
+sqliteTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist Sqlite m () -> IO ()) -> [Test]
 sqliteTestSuite run = 
   [ testCase "testMigrateOrphanConstructors" $ run testMigrateOrphanConstructors
   , testCase "testSchemaAnalysisSqlite" $ run testSchemaAnalysisSqlite
@@ -227,7 +228,7 @@ sqliteTestSuite run =
 #endif
 
 #if WITH_POSTGRESQL
-postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist Postgresql m () -> IO ()) -> [Test]
+postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist Postgresql m () -> IO ()) -> [Test]
 postgresqlTestSuite run =
   [ testCase "testGeometry" $ run testGeometry
   , testCase "testArrays" $ run testArrays
@@ -239,7 +240,7 @@ postgresqlTestSuite run =
 #endif
 
 #if WITH_MYSQL
-mysqlTestSuite :: (MonadBaseControl IO m, MonadIO m) => (DbPersist MySQL m () -> IO ()) -> [Test]
+mysqlTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist MySQL m () -> IO ()) -> [Test]
 mysqlTestSuite run =
   [ testCase "testSchemas" $ run testSchemas
   , testCase "testSchemaAnalysisMySQL" $ run testSchemaAnalysisMySQL
@@ -757,7 +758,7 @@ testSchemas = do
   Just val2 @=?? (insert val2 >>= get)
 
 #if WITH_SQLITE
-testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m) => DbPersist Sqlite m ()
+testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m ()
 testSchemaAnalysisSqlite = do
   let val = Single (Single "abc")
   migr val
@@ -776,7 +777,7 @@ firstRow :: Monad m => RowPopper m -> m (Maybe [PersistValue])
 firstRow = id
 
 #if WITH_POSTGRESQL
-testGeometry :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+testGeometry :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
 testGeometry = do
   let p = Point 1.2 3.45
   let val1 = Single (p, Lseg p p, Box p p, Circle p 6.7)
@@ -790,7 +791,7 @@ testGeometry = do
   val2' <- get k2
   Just val2 @=? val2'
 
-testArrays :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+testArrays :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
 testArrays = do
   let val = Single (Array [1 :: Int, 2, 3])
   migr val
@@ -824,7 +825,7 @@ testArrays = do
   migr val2
   Just val2 @=?? (insert val2 >>= get)
 
-testSchemaAnalysisPostgresql :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+testSchemaAnalysisPostgresql :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
 testSchemaAnalysisPostgresql = do
   let val = Single (Single "abc")
   migr val
@@ -840,7 +841,7 @@ testSchemaAnalysisPostgresql = do
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
 
-cleanPostgresql :: (MonadBaseControl IO m, MonadIO m) => DbPersist Postgresql m ()
+cleanPostgresql :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
 cleanPostgresql = forM_ ["public", "myschema"] $ \schema -> do
   executeRaw True ("drop schema if exists " ++ schema ++ " cascade") []
   executeRaw True ("create schema " ++ schema) []
@@ -848,7 +849,7 @@ cleanPostgresql = forM_ ["public", "myschema"] $ \schema -> do
 #endif
 
 #if WITH_MYSQL
-testSchemaAnalysisMySQL :: (MonadBaseControl IO m, MonadIO m) => DbPersist MySQL m ()
+testSchemaAnalysisMySQL :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist MySQL m ()
 testSchemaAnalysisMySQL = do
   let val = Single (Single "abc")
   migr val
@@ -864,7 +865,7 @@ testSchemaAnalysisMySQL = do
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN 42" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
 
-cleanMySQL :: (MonadBaseControl IO m, MonadIO m) => DbPersist MySQL m ()
+cleanMySQL :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist MySQL m ()
 cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 0" []
   forM_ ["test", "myschema"] $ \schema -> do

@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, MultiParamTypeClasses, TemplateHaskell #-}
 module Database.Groundhog.MySQL
     ( withMySQLPool
     , withMySQLConn
@@ -33,6 +33,7 @@ import qualified Database.MySQL.Base.Types    as MySQLBase
 import Control.Arrow ((***))
 import Control.Monad (liftM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Logger (MonadLogger, logDebugS)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
@@ -55,8 +56,7 @@ instance DbDescriptor MySQL where
 instance SqlDb MySQL where
   append a b = Expr $ function "concat" [toExpr a, toExpr b]
 
-instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist MySQL m) where
-  {-# SPECIALIZE instance PersistBackend (DbPersist MySQL IO) #-}
+instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist MySQL m) where
   type PhantomDb (DbPersist MySQL m) = MySQL
   insert v = insert' v
   insert_ v = insert_' v
@@ -81,7 +81,7 @@ instance (MonadBaseControl IO m, MonadIO m) => PersistBackend (DbPersist MySQL m
   insertList l = insertList' l
   getList k = getList' k
 
-instance (MonadBaseControl IO m, MonadIO m) => SchemaAnalyzer (DbPersist MySQL m) where
+instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist MySQL m) where
   listTables schema = queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,database())" [toPrimitivePersistValue proxy schema] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTableTriggers schema name = queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,database()) AND event_object_table=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   analyzeTable = analyzeTable'
@@ -140,8 +140,7 @@ open' ci = do
 close' :: MySQL -> IO ()
 close' (MySQL conn) = MySQL.close conn
 
-{-# SPECIALIZE insert' :: PersistEntity v => v -> DbPersist MySQL IO (AutoKey v) #-}
-insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist MySQL m (AutoKey v)
+insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist MySQL m (AutoKey v)
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -165,8 +164,7 @@ insert' v = do
       executeRaw' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-{-# SPECIALIZE insert_' :: PersistEntity v => v -> DbPersist MySQL IO () #-}
-insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> DbPersist MySQL m ()
+insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist MySQL m ()
 insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -195,7 +193,7 @@ insertIntoConstructorTable withId tName c vals = RenderS query vals' where
   fieldNames   = renderFields escapeS fields
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
-insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => [a] -> DbPersist MySQL m Int64
+insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => [a] -> DbPersist MySQL m Int64
 insertList' (l :: [a]) = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   executeRaw' ("INSERT INTO " <> escapeS mainName <> "()VALUES()") []
@@ -212,7 +210,7 @@ insertList' (l :: [a]) = do
   go 0 l
   return $ fromPrimitivePersistValue proxy k
   
-getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, PersistField a) => Int64 -> DbPersist MySQL m [a]
+getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => Int64 -> DbPersist MySQL m [a]
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   let valuesName = mainName <> delim' <> "values"
@@ -220,17 +218,16 @@ getList' k = do
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
   queryRaw' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
 
-{-# SPECIALIZE getLastInsertId :: DbPersist MySQL IO PersistValue #-}
-getLastInsertId :: (MonadBaseControl IO m, MonadIO m) => DbPersist MySQL m PersistValue
+getLastInsertId :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist MySQL m PersistValue
 getLastInsertId = do
   x <- queryRaw' "SELECT last_insert_id()" [] id
   return $ maybe (error "getLastInsertId: Nothing") head x
 
 ----------
 
-executeRaw' :: MonadIO m => Utf8 -> [PersistValue] -> DbPersist MySQL m ()
+executeRaw' :: (MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> DbPersist MySQL m ()
 executeRaw' query vals = do
-  --liftIO $ print $ fromUtf8 query ""
+  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
   MySQL conn <- DbPersist ask
   let stmt = getStatement query
   liftIO $ do
@@ -248,18 +245,18 @@ escapeS a = let q = fromChar '`' in q <> a <> q
 delim' :: Utf8
 delim' = fromChar delim
 
-toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, PersistEntity v) => v -> DbPersist MySQL m [PersistValue]
+toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistEntity v) => v -> DbPersist MySQL m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 --- MIGRATION
 
-migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m) => v -> Migration (DbPersist MySQL m)
+migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> Migration (DbPersist MySQL m)
 migrate' v = do
   x <- lift $ queryRaw' "SELECT database()" [] id
   let schema = fst $ fromPurePersistValues proxy $ fromJust x
   migrateRecursively (migrateEntity $ migrationPack schema) (migrateList $ migrationPack schema) v
 
-migrationPack :: (MonadBaseControl IO m, MonadIO m) => String -> GM.MigrationPack (DbPersist MySQL m)
+migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> GM.MigrationPack (DbPersist MySQL m)
 migrationPack currentSchema = GM.MigrationPack
   compareTypes
   (compareRefs currentSchema)
@@ -289,7 +286,7 @@ showColumn (Column n nu t def) = concat
         Just s  -> " DEFAULT " ++ s
     ]
 
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist MySQL m (Bool, [AlterDB])
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist MySQL m (Bool, [AlterDB])
 migTriggerOnDelete schema name deletes = do
   let addTrigger = AddTriggerOnDelete schema name schema name (concatMap snd deletes)
   x <- analyzeTrigger schema name
@@ -305,7 +302,7 @@ migTriggerOnDelete schema name deletes = do
 
 -- | Schema name, table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> [(String, String)] -> DbPersist MySQL m [(Bool, [AlterDB])]
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist MySQL m [(Bool, [AlterDB])]
 migTriggerOnUpdate schema name deletes = do
   let trigName = name ++ "_ON_UPDATE"
       f (fieldName, del) = "IF NOT (NEW." ++ escape fieldName ++ " <=> OLD." ++ escape fieldName ++ ") THEN " ++ del ++ " END IF;"
@@ -322,7 +319,7 @@ migTriggerOnUpdate schema name deletes = do
         -- this can happen when an ephemeral field was added or removed.
         else [DropTrigger schema trigName schema name, addTrigger])
   
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist MySQL m (Maybe TableInfo)
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist MySQL m (Maybe TableInfo)
 analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, database()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
@@ -348,7 +345,7 @@ getColumn :: String -> ((String, String, String, String, Maybe String), (Maybe I
 getColumn _ ((column_name, is_nullable, data_type, column_type, d), modifiers) = Column column_name (is_nullable == "YES") t d where
   t = readSqlType data_type column_type modifiers
 
-analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m) => Maybe String -> String -> DbPersist MySQL m [(Maybe String, Reference)]
+analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist MySQL m [(Maybe String, Reference)]
 analyzeTableReferences schema tName = do
   let sql = "SELECT tc.constraint_name, u.referenced_table_schema, u.referenced_table_name, rc.delete_rule, rc.update_rule, u.column_name, u.referenced_column_name FROM information_schema.table_constraints tc\
 \  INNER JOIN information_schema.key_column_usage u USING (constraint_catalog, constraint_schema, constraint_name, table_schema, table_name)\
@@ -542,11 +539,12 @@ escape s = '`' : s ++ "`"
 getStatement :: Utf8 -> MySQL.Query
 getStatement sql = MySQL.Query $ fromUtf8 sql
 
-queryRawTyped' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist MySQL m) -> DbPersist MySQL m a) -> DbPersist MySQL m a
+queryRawTyped' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist MySQL m) -> DbPersist MySQL m a) -> DbPersist MySQL m a
 queryRawTyped' query _ vals f = queryRaw' query vals f
 
-queryRaw' :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist MySQL m) -> DbPersist MySQL m a) -> DbPersist MySQL m a
+queryRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist MySQL m) -> DbPersist MySQL m a) -> DbPersist MySQL m a
 queryRaw' query vals func = do
+  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
   MySQL conn <- DbPersist ask
   liftIO $ MySQL.formatQuery conn (getStatement query) (map P vals) >>= MySQLBase.query conn
   result <- liftIO $ MySQLBase.storeResult conn

@@ -17,6 +17,7 @@ library
                    , transformers            >= 0.2.1
                    , groundhog               >= 0.3.0     && < 0.4.0
                    , monad-control           >= 0.3
+                   , monad-logger            >= 0.3
                    , containers              >= 0.2
                    , text                    >= 0.8
                    , direct-sqlite           >= 2.3.5
