@@ -58,38 +58,38 @@ instance Unifiable a a
 instance (Normalize bk a (ak, r), Normalize ak b (bk, r)) => Unifiable a b
 
 class Normalize counterpart t r | t -> r
-instance (ExtractValue t (isPlain, r), NormalizeValue counterpart isPlain r r') => Normalize counterpart t r'
+instance NormalizeValue a (isPlain, r) => Normalize HFalse (Field v c a) (HFalse, r)
+instance r ~ (HFalse, a)               => Normalize HTrue  (Field v c a) r
+instance NormalizeValue a (isPlain, r) => Normalize HFalse (SubField v c a) (HFalse, r)
+instance r ~ (HFalse, a)               => Normalize HTrue  (SubField v c a) r
+instance NormalizeValue a (isPlain, r) => Normalize HFalse (Expr db r' a) (HFalse, r)
+instance r ~ (HFalse, a)               => Normalize HTrue  (Expr db r' a) r
+instance NormalizeValue (Key v (Unique u)) (isPlain, r) => Normalize HFalse (u (UniqueMarker v)) (HFalse, r)
+instance r ~ (HFalse, Key v (Unique u))                 => Normalize HTrue  (u (UniqueMarker v)) r
+instance NormalizeValue (Key v BackendSpecific) (isPlain, r) => Normalize HFalse (AutoKeyField v c) (HFalse, r)
+instance r ~ (HFalse, Key v BackendSpecific)                 => Normalize HTrue  (AutoKeyField v c) r
+instance NormalizeValue t r => Normalize HFalse t r
+instance r ~ (HTrue, t)     => Normalize HTrue  t r
 
-class ExtractValue t r | t -> r
-instance r ~ (HFalse, a) => ExtractValue (Field v c a) r
-instance r ~ (HFalse, a) => ExtractValue (SubField v c a) r
-instance r ~ (HFalse, a) => ExtractValue (Expr db r' a) r
-instance r ~ (HFalse, Key v BackendSpecific) => ExtractValue (AutoKeyField v c) r
-instance r ~ (HFalse, Key v (Unique u)) => ExtractValue (u (UniqueMarker v)) r
-instance r ~ (HTrue, a) => ExtractValue a r
-
-class NormalizeValue counterpart isPlain t r | t isPlain -> r
-instance NormalizeValue' t (isPlain, r) => NormalizeValue HFalse HFalse t (HFalse, r)
-instance NormalizeValue' t (isPlain, r) => NormalizeValue HFalse HTrue t (isPlain, r)
-instance r ~ (isPlain, t) => NormalizeValue HTrue isPlain t r
-
-class NormalizeValue' t r | t -> r
+class NormalizeValue t r | t -> r
 -- Normalize @Key v u@ to @v@ only if this key is used for storing @v@.
-instance (TypeEq (DefaultKey a) (Key a u) isDef,
-         r ~ (Not isDef, Maybe (NormalizeKey isDef (Key a u))))
-         => NormalizeValue' (Maybe (Key a u)) r
-instance (TypeEq (DefaultKey a) (Key a u) isDef,
-         r ~ (Not isDef, NormalizeKey isDef (Key a u)))
-         => NormalizeValue' (Key a u) r
-instance r ~ (HTrue, a) => NormalizeValue' a r
+instance (TypeEq (DefaultKey v) (Key v u) isDef,
+         NormalizeKey isDef (Key v u) k,
+         r ~ (Not isDef, Maybe k))
+         => NormalizeValue (Maybe (Key v u)) r
+instance (TypeEq (DefaultKey v) (Key v u) isDef,
+         NormalizeKey isDef (Key v u) k,
+         r ~ (Not isDef, k))
+         => NormalizeValue (Key v u) r
+instance r ~ (HTrue, a) => NormalizeValue a r
 
 class TypeEq x y b | x y -> b
-instance (b ~ HFalse) => TypeEq x y b
+instance b ~ HFalse => TypeEq x y b
 instance TypeEq x x HTrue
 
-type family NormalizeKey isDef key
-type instance NormalizeKey HTrue (Key a u) = a
-type instance NormalizeKey HFalse a = a
+class NormalizeKey isDef key r | isDef key -> r, r -> key
+instance r ~ v => NormalizeKey HTrue (Key v u) r
+instance r ~ a => NormalizeKey HFalse a r
 
 type family Not bool
 type instance Not HTrue  = HFalse
