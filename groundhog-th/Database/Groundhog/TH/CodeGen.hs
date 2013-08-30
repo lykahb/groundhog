@@ -722,9 +722,9 @@ spanM p = go  where
 
 mkType :: THFieldDef -> ExpQ -> ExpQ
 mkType THFieldDef{..} nvar = t2 where
-  psField = PSFieldDef thFieldName (Just thDbFieldName) thDbTypeName (Just thExprName) thEmbeddedDef thDefaultValue thReferenceParent thReferenceOnDelete thReferenceOnUpdate
+  psField = PSFieldDef thFieldName (Just thDbFieldName) thDbTypeName (Just thExprName) thEmbeddedDef thDefaultValue thReferenceParent
   t1 = [| dbType $nvar |]
   -- if there are any type settings, apply them in runtime
-  t2 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent, thReferenceOnDelete, thReferenceOnUpdate) of
-    (Nothing, Nothing, Nothing, Nothing, Nothing, Nothing) -> t1
+  t2 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent) of
+    (Nothing, Nothing, Nothing, Nothing) -> t1
     _ -> [| applyDbTypeSettings $(lift psField) $t1 |]

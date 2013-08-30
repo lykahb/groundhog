@@ -71,9 +71,7 @@ data THFieldDef = THFieldDef {
   , thFieldType :: Type
   , thEmbeddedDef :: Maybe [PSFieldDef]
   , thDefaultValue :: Maybe String
-  , thReferenceParent :: Maybe (Maybe String, String, [String])
-  , thReferenceOnDelete :: Maybe ReferenceActionType
-  , thReferenceOnUpdate :: Maybe ReferenceActionType
+  , thReferenceParent :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 } deriving Show
 
 data THUniqueDef = THUniqueDef {
@@ -165,7 +163,7 @@ instance Lift ReferenceActionType where
   lift SetDefault = [| SetDefault |]
 
 instance Lift PSFieldDef where
-  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) $(lift psReferenceOnDelete) $(lift psReferenceOnUpdate) |]
+  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) |]
 
 instance Lift PSUniqueKeyDef where
   lift (PSUniqueKeyDef {..}) = [| PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef) |]
@@ -236,10 +234,18 @@ instance FromJSON ReferenceActionType where
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
 instance FromJSON PSFieldDef where
-  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> (v .:? "reference" >>= maybe (pure Nothing) ref) <*> v .:? "onDelete" <*> v .:? "onUpdate" where
-    ref val = Just <$> case val of
-      Object r -> (,,) <$> r .:? "schema" <*> r .: "table" <*> r .: "columns"
-      _ -> mzero
+  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> mkRefSettings where
+    mkRefSettings = do
+      ref <- v .:? "reference"
+      (parent, onDel, onUpd) <- case ref of
+        Just (Object r) -> (,,) <$> parentRef <*> r .:? "onDelete" <*> r .:? "onUpdate" where
+          parentRef = optional ((,,) <$> r .:? "schema" <*> r .: "table" <*> r .: "columns")
+        _ -> pure (Nothing, Nothing, Nothing)
+      -- this temporary solution uses onDelete and onUpdate both from inside reference object (preferred) and from field level (for compatibility)
+      (onDel', onUpd') <- (,) <$> v .:? "onDelete" <*> v .:? "onUpdate"
+      pure $ case (parent, onDel <|> onDel', onUpd <|> onUpd') of
+        (Nothing, Nothing, Nothing) -> Nothing
+        refSettings -> Just refSettings
   parseJSON _          = mzero
 
 instance FromJSON PSUniqueKeyDef where

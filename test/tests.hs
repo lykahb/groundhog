@@ -82,7 +82,8 @@ mkPersist defaultCodegenConfig [groundhog|
           type: varchar(50)
           exprName: Settable1Fld
         - name: settable2
-          onDelete: cascade
+          reference:
+            onDelete: cascade
         - name: settableTuple
           embeddedType:
             - name: val0

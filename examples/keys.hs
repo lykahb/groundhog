@@ -44,8 +44,9 @@ definitions:
         fields:
           - name: albumTrack
   # Configure actions on parent table changes
-            onDelete: cascade
-            onUpdate: restrict
+            reference:
+              onDelete: cascade
+              onUpdate: restrict
   - entity: ArtistAlbum
     autoKey: null # Disable creation of the autoincrement integer key
     keys:

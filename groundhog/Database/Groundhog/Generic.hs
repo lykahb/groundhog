@@ -164,18 +164,16 @@ data PSFieldDef = PSFieldDef {
   , psExprName :: Maybe String -- BarField
   , psEmbeddedDef :: Maybe [PSFieldDef]
   , psDefaultValue :: Maybe String
-  , psReferenceParent :: Maybe (Maybe String, String, [String])
-  , psReferenceOnDelete :: Maybe ReferenceActionType
-  , psReferenceOnUpdate :: Maybe ReferenceActionType
+  , psReferenceParent :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 } deriving Show
 
 applyDbTypeSettings :: PSFieldDef -> DbType -> DbType
-applyDbTypeSettings f@(PSFieldDef _ _ dbTypeName _ Nothing def _ _ _) typ = case typ of
-  DbTypePrimitive t nullable def' ref -> DbTypePrimitive (maybe t (DbOther . OtherTypeDef . const) dbTypeName) nullable (def <|> def') (applyReferencesSettings f ref)
-  DbEmbedded emb ref -> DbEmbedded emb (applyReferencesSettings f ref)
+applyDbTypeSettings (PSFieldDef _ _ dbTypeName _ Nothing def psRef) typ = case typ of
+  DbTypePrimitive t nullable def' ref -> DbTypePrimitive (maybe t (DbOther . OtherTypeDef . const) dbTypeName) nullable (def <|> def') (applyReferencesSettings psRef ref)
+  DbEmbedded emb ref -> DbEmbedded emb (applyReferencesSettings psRef ref)
   t -> t
-applyDbTypeSettings f@(PSFieldDef _ _ _ _ (Just subs) _ _ _ _) typ = (case typ of
-  DbEmbedded (EmbeddedDef _ fields) ref -> DbEmbedded (uncurry EmbeddedDef $ go subs fields) (applyReferencesSettings f ref)
+applyDbTypeSettings (PSFieldDef _ _ _ _ (Just subs) _ psRef) typ = (case typ of
+  DbEmbedded (EmbeddedDef _ fields) ref -> DbEmbedded (uncurry EmbeddedDef $ go subs fields) (applyReferencesSettings psRef ref)
   t -> error $ "applyDbTypeSettings: expected DbEmbedded, got " ++ show t) where
   go [] fs = (False, fs)
   go st [] = error $ "applyDbTypeSettings: embedded datatype does not have expected fields: " ++ show st
@@ -187,10 +185,10 @@ applyDbTypeSettings f@(PSFieldDef _ _ _ _ (Just subs) _ _ _ _) typ = (case typ o
         Just name' -> (True, (name', applyDbTypeSettings fDef fType):fields')
     _ -> let (flag, fields') = go st fs in (flag, field:fields')
 
-applyReferencesSettings :: PSFieldDef -> Maybe ParentTableReference -> Maybe ParentTableReference
-applyReferencesSettings (PSFieldDef _ _ _ _ _ _ Nothing Nothing Nothing) ref = ref
-applyReferencesSettings (PSFieldDef _ _ _ _ _ _ parent onDel onUpd) (Just (parent', onDel', onUpd')) = Just (maybe parent' Right parent, onDel <|> onDel', onUpd <|> onUpd')
-applyReferencesSettings (PSFieldDef _ _ _ _ _ _ (Just parent) onDel onUpd) Nothing = Just (Right parent, onDel, onUpd)
+applyReferencesSettings :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType) -> Maybe ParentTableReference -> Maybe ParentTableReference
+applyReferencesSettings Nothing ref = ref
+applyReferencesSettings (Just (parent, onDel, onUpd)) (Just (parent', onDel', onUpd')) = Just (maybe parent' Right parent, onDel <|> onDel', onUpd <|> onUpd')
+applyReferencesSettings (Just (Just parent, onDel, onUpd)) Nothing = Just (Right parent, onDel, onUpd)
 applyReferencesSettings _ Nothing = error $ "applyReferencesSettings: expected type with reference, got Nothing"
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
