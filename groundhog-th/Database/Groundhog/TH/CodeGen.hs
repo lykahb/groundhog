@@ -384,12 +384,16 @@ mkEntityPhantomConstructorInstances def = sequence $ zipWith f [0..] $ thConstru
 mkEntityUniqueKeysPhantoms :: THEntityDef -> Q [Dec]
 mkEntityUniqueKeysPhantoms def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
-  forM (thUniqueKeys def) $ \u -> do
-    v <- newName "v"
-    let name = mkName $ thUniqueKeyPhantomName u
-    phantom <- [t| UniqueMarker $(return entity) |]
-    let constr = ForallC (thTypeParams def) [EqualP (VarT v) phantom] $ NormalC name []
-    dataD (cxt []) name [PlainTV v] [return constr] []
+  fmap concat $ forM (thUniqueKeys def) $ \u -> do
+    exists <- lookupTypeName $ thUniqueKeyPhantomName u
+    if exists == Nothing
+      then do
+        v <- newName "v"
+        let name = mkName $ thUniqueKeyPhantomName u
+        phantom <- [t| UniqueMarker $(return entity) |]
+        let constr = ForallC (thTypeParams def) [EqualP (VarT v) phantom] $ NormalC name []
+        sequence [dataD (cxt []) name [PlainTV v] [return constr] []]
+      else return []
     
 mkPersistEntityInstance :: THEntityDef -> Q [Dec]
 mkPersistEntityInstance def = do
