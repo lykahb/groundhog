@@ -3,6 +3,7 @@
 -- | This module has common SQL functions and operators which are supported in the most SQL databases
 module Database.Groundhog.Generic.Sql.Functions
     ( like
+    , notLike
     , in_
     , notIn_
     , lower
@@ -25,6 +26,9 @@ notIn_ a bs = CondRaw $ Snippet $ \esc p -> [parens 45 p $ renderExpr esc (toExp
 
 like :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> String -> Cond db r
 like a b = CondRaw $ operator 40 " LIKE " a b
+
+notLike :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> String -> Cond db r
+notLike a b = CondRaw $ operator 40 " NOT LIKE " a b
 
 lower :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> Expr db r String
 lower a = Expr $ function "lower" [toExpr a]
