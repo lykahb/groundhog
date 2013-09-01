@@ -445,15 +445,17 @@ toUnderscore = map toLower . go where
 --          - name: foo                  # The name as in constructor record. If constructor is not a record, the name is created by 'mkNormalFieldName'. For example, the fields in constructor SomeConstr would have names someConstr0 and someConstr1 by default.
 --            dbName: foo                # Column name
 --            exprName: FooField         # Name of a field used in expressions
---            \# type: varchar            # This would result in having field type DbOther \"varchar\" instead of DbString. Value of this attribute will be used by DB backend for migration
---            \# default: foo_value       # The default value for column in the clause
---            \# reference:               # This is explicit reference to a parent table not mapped by Groundhog
---            \#   schema: myschema       # Optional schema
---            \#   table: mytable         # Name of the parent table
---            \#   columns: [mytable_id]  # Parent columns. If the current field is embedded, e.g., a tuple, it will be a composite key
---            \#   onDelete: cascade      # Defines ON DELETE clause of references. It can have values: no action, restrict, cascade, set null, set default
---            \#   onUpdate: restrict     # Defines ON UPDATE
---            \# If onDelete or onUpdate are omitted, the database will choose the action automatically. Note that it may differ across databases. For example, MySQL has \"restrict\" by default, but in PostgreSQL it is \"no action\". They can be set not inside reference object, but at the same level. This placement is kept for compatibility and deprecated.
+--          \# type: varchar              # This would result in having field type DbOther \"varchar\" instead of DbString. Value of this attribute will be used by DB backend for migration
+--          \# default: foo_value         # The default value for column in the clause
+--          \# reference:                 # This is explicit reference to a parent table not mapped by Groundhog
+--          \#   schema: myschema         # Optional schema
+--          \#   table: mytable           # Name of the parent table
+--          \#   columns: [mytable_id]    # Parent columns. If the current field is embedded, e.g., a tuple, it will be a composite key
+--          \#   onDelete: cascade        # Defines ON DELETE clause of references. It can have values: no action, restrict, cascade, set null, set default
+--          \#   onUpdate: restrict       # Defines ON UPDATE
+--          \# onDelete: cascade          # Clauses onDelete and onUpdate can be set outside of reference too. This is deprecated and kept for compatibility
+--          \# If onDelete or onUpdate are omitted, the database will choose the action automatically. Note that it may differ across databases.
+--          \# For example, MySQL has \"restrict\" by default, but in PostgreSQL it is \"no action\".
 --          - name: bar
 --            dbName: bar
 --            exprName: BarField
