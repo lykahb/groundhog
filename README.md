@@ -41,7 +41,7 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
 
 ```haskell
 megatron <- insert $ Machine "Megatron 5000" 2500.00
-nsert $ Part "Megamaker" (Just 50) megatron
+insert $ Part "Megamaker" (Just 50) megatron
 insert $ Part "Tiny Bolt" (Just 1) megatron
 
 microtron <- insert $ Machine "Microtron 12" 19.99
