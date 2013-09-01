@@ -1,4 +1,9 @@
-0.3
+0.4.0
+* query logging
+* default column values
+* switched to direct-sqlite backend
+
+0.3.0
 * switched from pool-conduit to resource-pool
 * schema qualified tables
 * support for savepoints

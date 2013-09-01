@@ -1,3 +1,8 @@
+0.4.0
+* references to tables not mapped by groundhog
+* default column values
+* check for already existing unique key phantom datatypes
+
 0.3.1
 * generation of SinglePersistField and PurePersistField instances for keys
 

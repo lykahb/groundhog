@@ -1,3 +1,10 @@
+0.4.0
+* references to tables not mapped by groundhog
+* default column values
+* better type inference for expressions
+* constructor for empty condition CondEmpty
+* logging queries based on monad-logger
+
 0.3.1
 * removed superclass constraints SinglePersistField and PurePersistField for PrimitivePersistField
 * fixed prefixing columns of nested embedded datatypes when not all names are specified
