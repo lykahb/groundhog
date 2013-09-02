@@ -3,7 +3,7 @@ module Database.Groundhog.Postgresql
     ( withPostgresqlPool
     , withPostgresqlConn
     , runDbConn
-    , Postgresql
+    , Postgresql(..)
     , module Database.Groundhog
     , module Database.Groundhog.Generic.Sql.Functions
     ) where

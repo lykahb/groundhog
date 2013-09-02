@@ -3,7 +3,7 @@ module Database.Groundhog.MySQL
     ( withMySQLPool
     , withMySQLConn
     , runDbConn
-    , MySQL
+    , MySQL(..)
     , module Database.Groundhog
     , module Database.Groundhog.Generic.Sql.Functions
     , MySQL.ConnectInfo(..)

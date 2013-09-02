@@ -3,7 +3,7 @@ module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
     , runDbConn
-    , Sqlite
+    , Sqlite(..)
     , module Database.Groundhog
     , module Database.Groundhog.Generic.Sql.Functions
     ) where
