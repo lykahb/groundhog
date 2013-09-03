@@ -17,6 +17,7 @@ module Database.Groundhog.Expression
   , (=.)
   , (&&.), (||.)
   , (==.), (/=.), (<.), (<=.), (>.), (>=.)
+  , isFieldNothing
   ) where
 
 import Database.Groundhog.Core
@@ -135,3 +136,10 @@ a <.  b = Compare Lt (toExpr a) (toExpr b)
 a <=. b = Compare Le (toExpr a) (toExpr b)
 a >.  b = Compare Gt (toExpr a) (toExpr b)
 a >=. b = Compare Ge (toExpr a) (toExpr b)
+
+-- | This function more limited than (==.), but has better type inference.
+-- If you want to compare your value to Nothing with @(==.)@ operator, you have to write the types explicitly @myExpr ==. (Nothing :: Maybe Int)@.
+isFieldNothing :: (Expression db r f, FieldLike f db r (Maybe a), PrimitivePersistField (Maybe a), Unifiable f (Maybe a)) => f -> Cond db r
+isFieldNothing a = a `eq` Nothing where
+  eq :: (Expression db r f, Expression db r a, FieldLike f db r a, Unifiable f a) => f -> a -> Cond db r
+  eq = (==.)

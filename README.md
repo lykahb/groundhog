@@ -23,7 +23,7 @@ import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 
 data Machine = Machine { modelName :: String, cost :: Double } deriving Show
-data Part = Part { partName :: String, weight :: Maybe Int, machine :: DefaultKey Machine }
+data Part = Part { partName :: String, weight :: Int, machine :: DefaultKey Machine }
 deriving instance Show Part
 
 mkPersist defaultCodegenConfig [groundhog|
@@ -41,11 +41,11 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
 
 ```haskell
 megatron <- insert $ Machine "Megatron 5000" 2500.00
-insert $ Part "Megamaker" (Just 50) megatron
-insert $ Part "Tiny Bolt" (Just 1) megatron
+insert $ Part "Megamaker" 50 megatron
+insert $ Part "Tiny Bolt" 1 megatron
 
 microtron <- insert $ Machine "Microtron 12" 19.99
-insert $ Part "Insignificonium" Nothing microtron
+insert $ Part "Insignificonium" 2 microtron
 ```
 
 ### Querying results

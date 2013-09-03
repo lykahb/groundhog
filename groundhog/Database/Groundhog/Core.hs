@@ -483,7 +483,7 @@ instance Eq (Expr db r a) where (==) = error "(==): this instance Eq (Expr db r 
 
 -- | Represents everything which can be put into a database. This data can be stored in multiple columns and tables. To get value of those columns we might need to access another table. That is why the result type is monadic.
 class PersistField a where
-  -- | Return name of the type. If it is polymorhic, the names of parameter types are separated with 'Database.Groundhog.Generic.delim' symbol
+  -- | Return name of the type. If it is polymorphic, the names of parameter types are separated with 'Database.Groundhog.Generic.delim' symbol
   persistName :: a -> String
   -- | Convert a value into something which can be stored in a database column.
   -- Note that for complex datatypes it may insert them to return identifier
