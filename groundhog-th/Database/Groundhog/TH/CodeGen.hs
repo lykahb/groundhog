@@ -95,34 +95,37 @@ mkEmbeddedPersistFieldInstance def = do
   return $ [InstanceD context (AppT (ConT ''PersistField) embedded) decs]
 
 mkFromPersistValues :: Name -> Name -> Name -> [THFieldDef] -> Q (Bool, Exp)
-mkFromPersistValues failureName values constrName fieldDefs = let
-    goField xs vars result failure = do
-      (fields, rest) <- spanM (liftM not . isPrim . snd) vars
-      xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
-      let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValues $(varE oldXs) |]
-      let stmts = zipWith3 f xss (tail xss) fields
-      (isFailureUsed, expr) <- goPrim (last xss) rest result failure
-      return (isFailureUsed, doE $ stmts ++ [noBindS expr])
-    goPrim xs vars result failure = do
-      xs' <- newName "xs"
-      (prim, rest) <- spanM (isPrim . snd) vars
-      (isFailureUsed, body') <- case rest of
-        [] -> return (False, [| return ($result, $(varE xs')) |])
-        _  -> goField xs' rest result failure
-      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
-      return $ if not (null rest || null prim)
-         then (True, caseE (varE xs) [m, failure])
-         else (isFailureUsed, caseE (varE xs) [m])
-    mkArg proxy (fname, t) = isPrim t >>= \isP -> (if isP then [| fromPrimitivePersistValue $(varE proxy) $(varE fname) |] else (varE fname))
-    in do
-      proxy <- newName "p"
-      vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, thFieldType f)) fieldDefs
-      anyPrim <- liftM or $ mapM (isPrim . snd) vars
-      let failure = match wildP (normalB $ varE failureName) []
-      let result = foldl (\a f -> appE a $ mkArg proxy f) (conE constrName) vars
-      (isFailureUsed, body) <- goPrim values vars result failure
-      body' <- if anyPrim then [| phantomDb >>= $(lamE [varP proxy] body) |] else body
-      return (isFailureUsed, body')
+mkFromPersistValues failureName values constrName fieldDefs = do
+  proxy <- newName "p"
+  allVars <- mapM (\f -> newName "x" >>= \fname -> return (fname, thFieldType f)) fieldDefs
+  let failure = match wildP (normalB $ varE failureName) []
+      mkArg (fname, t) = do
+        isP <- isPrim t
+        if isP
+          then [| fromPrimitivePersistValue $(varE proxy) $(varE fname) |]
+          else varE fname
+      result = foldl (\a f -> appE a $ mkArg f) (conE constrName) allVars
+      goField xs vars = do
+        (fields, rest) <- spanM (liftM not . isPrim . snd) vars
+        xss <- liftM (xs:) $ mapM (const $ newName "xs") fields
+        let f oldXs newXs (fname, _) = bindS (conP '(,) [varP fname, varP newXs]) [| fromPersistValues $(varE oldXs) |]
+        let stmts = zipWith3 f xss (tail xss) fields
+        expr <- goPrim (last xss) rest
+        return $ doE $ stmts ++ [noBindS expr]
+      goPrim xs vars = do
+        xs' <- newName "xs"
+        (prim, rest) <- spanM (isPrim . snd) vars
+        body' <- case rest of
+          [] -> return [| return ($result, $(varE xs')) |]
+          _  -> goField xs' rest
+        let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
+        return $ if null prim
+          then caseE (varE xs) [m]
+          else caseE (varE xs) [m, failure]
+  body <- goPrim values allVars
+  anyPrim <- liftM or $ mapM (isPrim . snd) allVars
+  body' <- if anyPrim then [| phantomDb >>= $(lamE [varP proxy] body) |] else body
+  return (anyPrim, body')
 
 mkPurePersistFieldInstance :: Type -> Name -> [THFieldDef] -> Cxt -> Q [Dec]
 mkPurePersistFieldInstance dataType cName fDefs context = do
