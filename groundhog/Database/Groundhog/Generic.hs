@@ -7,6 +7,7 @@ module Database.Groundhog.Generic
     createMigration
   , executeMigration
   , executeMigrationUnsafe
+  , getQueries
   , runMigration
   , runMigrationUnsafe
   , printMigration
@@ -66,41 +67,47 @@ import Data.Function (on)
 import Data.List (partition, sortBy)
 import qualified Data.Map as Map
 
-getCorrectMigrations :: NamedMigrations -> [(Bool, Int, String)]
-getCorrectMigrations = either (error.unlines) id . mergeMigrations . Map.elems
-
 -- | Produce the migrations but not execute them. Fails when an unsafe migration occurs.
 createMigration :: PersistBackend m => Migration m -> m NamedMigrations
 createMigration m = liftM snd $ runStateT m Map.empty
 
+-- | Returns either a list of errors in migration or a list of queries
+getQueries :: Bool -- ^ True - support unsafe queries
+             -> SingleMigration -> Either [String] [String]
+getQueries _ (Left errs) = Left errs
+getQueries runUnsafe (Right migs) = (if runUnsafe || null unsafe
+  then Right $ map (\(_, _, query) -> query) migs'
+  else Left $
+    [ "Database migration: manual intervention required."
+    , "The following actions are considered unsafe:"
+    ] ++ map (\(_, _, query) -> query) unsafe) where
+  migs' = sortBy (compare `on` \(_, i, _) -> i) migs
+  unsafe = filter (\(isUnsafe, _, _) -> isUnsafe) migs'
+
+executeMigration' :: (PersistBackend m, MonadIO m) => Bool -> (String -> IO ()) -> NamedMigrations -> m ()
+executeMigration' runUnsafe logger m = do
+  let migs = getQueries runUnsafe $ mergeMigrations $ Map.elems m
+  case migs of
+    Left errs -> fail $ unlines errs
+    Right qs -> mapM_ (executeMigrate logger) qs
+
 -- | Execute the migrations and log them. 
 executeMigration :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> NamedMigrations -> m ()
-executeMigration logger m = do
-  let migs = getCorrectMigrations m
-  let unsafe = filter (\(isUnsafe, _, _) -> isUnsafe) migs
-  if null unsafe
-    then mapM_ (\(_, _, query) -> executeMigrate logger query) $ sortBy (compare `on` \(_, i, _) -> i) migs
-    else error $ concat
-            [ "\n\nDatabase migration: manual intervention required.\n"
-            , "The following actions are considered unsafe:\n\n"
-            , unlines $ map (\(_, _, query) -> "    " ++ query ++ ";") unsafe
-            ]
+executeMigration = executeMigration' False
 
 -- | Execute migrations and log them. Executes the unsafe migrations without warnings
 executeMigrationUnsafe :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> NamedMigrations -> m ()
-executeMigrationUnsafe logger = mapM_ (\(_, _, query) -> executeMigrate logger query) . getCorrectMigrations
+executeMigrationUnsafe = executeMigration' True
 
 -- | Pretty print the migrations
 printMigration :: MonadIO m => NamedMigrations -> m ()
-printMigration migs = liftIO $ do
-  let kv = Map.assocs migs
-  forM_ kv $ \(k, v) -> do
-    putStrLn $ "Datatype " ++ k ++ ":"
-    case v of
-      Left errors -> mapM_ (putStrLn . ("\tError:\t" ++)) errors
-      Right sqls  -> do
-        let showSql (isUnsafe, _, sql) = (if isUnsafe then "Unsafe:\t" else "Safe:\t") ++ sql
-        mapM_ (putStrLn . ("\t" ++) . showSql) sqls
+printMigration migs = liftIO $ forM_ (Map.assocs migs) $ \(k, v) -> do
+  putStrLn $ "Datatype " ++ k ++ ":"
+  case v of
+    Left errors -> mapM_ (putStrLn . ("\tError:\t" ++)) errors
+    Right sqls  -> do
+      let showSql (isUnsafe, _, sql) = (if isUnsafe then "Unsafe:\t" else "Safe:\t") ++ sql
+      mapM_ (putStrLn . ("\t" ++) . showSql) sqls
 
 -- | Run migrations and log them. Fails when an unsafe migration occurs.
 runMigration :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> Migration m -> m ()
