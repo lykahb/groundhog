@@ -31,5 +31,5 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
   liftIO $ print phones
   -- we can also use 'project' as a replacement for 'select' with extended options.
   liftIO $ putStrLn "The special datatype 'AutoKeyField' projects to the entity autokey, unique key phantoms project to keys, and the constructor phantoms project to the data itself"
-  withIds <- project (AutoKeyField, Unique_name, UserConstructor) (() ==. ())
+  withIds <- project (AutoKeyField, Unique_name, UserConstructor) CondEmpty
   liftIO $ print withIds
