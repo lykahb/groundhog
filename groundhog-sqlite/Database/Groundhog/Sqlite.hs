@@ -102,19 +102,17 @@ withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
 
 instance Savepoint Sqlite where
   withConnSavepoint name m (Sqlite c _) = do
-    let runStmt query = S.prepare c query >>= \stmt -> S.step stmt >> S.finalize stmt
     let name' = fromString name
-    liftIO $ runStmt $ "SAVEPOINT " <> name'
-    x <- onException m (liftIO $ runStmt $ "ROLLBACK TO " <> name')
-    liftIO $ runStmt $ "RELEASE " <> name'
+    liftIO $ S.exec c $ "SAVEPOINT " <> name'
+    x <- onException m (liftIO $ S.exec c $ "ROLLBACK TO " <> name')
+    liftIO $ S.exec c $ "RELEASE " <> name'
     return x
 
 instance ConnectionManager Sqlite Sqlite where
   withConn f conn@(Sqlite c _) = do
-    let runStmt query = S.prepare c query >>= \stmt -> S.step stmt >> S.finalize stmt
-    liftIO $ runStmt "BEGIN"
-    x <- onException (f conn) (liftIO $ runStmt "ROLLBACK")
-    liftIO $ runStmt "COMMIT"
+    liftIO $ S.exec c "BEGIN"
+    x <- onException (f conn) (liftIO $ S.exec c "ROLLBACK")
+    liftIO $ S.exec c "COMMIT"
     return x
   withConnNoTransaction f conn = f conn
 
