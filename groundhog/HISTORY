@@ -1,3 +1,7 @@
+0.4.0.1
+* added migration helper function Database.Groundhog.Generic.getQueries
+* added comparison function Database.Groundhog.Expression.isFieldNothing
+
 0.4.0
 * references to tables not mapped by groundhog
 * default column values
