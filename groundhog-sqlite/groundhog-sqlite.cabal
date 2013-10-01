@@ -7,7 +7,7 @@ maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        Sqlite3 backend for the groundhog library
 description:     It depends on direct-sqlite library which includes Sqlite C sources, so there are no system dependencies.
 category:        Database
-stability:       Non-stable
+stability:       Stable
 cabal-version:   >= 1.6
 build-type:      Simple
 

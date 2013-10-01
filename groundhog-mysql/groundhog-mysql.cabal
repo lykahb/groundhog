@@ -7,7 +7,7 @@ maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        MySQL backend for the groundhog library.
 description:     This package uses mysql-simple and mysql
 category:        Database
-stability:       Non-stable
+stability:       Stable
 cabal-version:   >= 1.6
 build-type:      Simple
 

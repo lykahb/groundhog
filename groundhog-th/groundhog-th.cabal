@@ -7,7 +7,7 @@ maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        Type-safe datatype-database mapping library.
 description:     This library helps to generate instances for Groundhog datatypes.
 category:        Database
-stability:       Non-stable
+stability:       Stable
 cabal-version:   >= 1.6
 build-type:      Simple
 

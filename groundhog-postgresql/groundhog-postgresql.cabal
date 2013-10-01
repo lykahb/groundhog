@@ -7,7 +7,7 @@ maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        PostgreSQL backend for the groundhog library.
 description:     This package uses postgresql-simple and postgresql-libpq.
 category:        Database
-stability:       Non-stable
+stability:       Stable
 cabal-version:   >= 1.6
 build-type:      Simple
 
