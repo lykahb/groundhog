@@ -1,15 +1,18 @@
 ## Interact with relational databases in Haskell
 
-Migrate and access PostgreSQL, MySQL, and SQLite with type safety and
-detailed control.
+Migrate and access PostgreSQL, MySQL, and SQLite with type safety and detailed control. 
+Advanced migration capabilities allow you to precisely specify the schema description, fitting it to an existing database, or
+creating a migration script for a new one. Groundhog is not opinionated about schema and can bind your datatypes to a relational model which may have composite keys, references across different schemas, indexes, etc.
+It is used in hobby projects and commercial applications.
 
-## Usage
+## Useful links
 
-* Check out full list of [examples](examples).
+* [Tutorial](http://www.fpcomplete.com/user/lykahb/groundhog).
+* Full list of [examples](examples).
 * Read [docs](http://hackage.haskell.org/package/groundhog) for
 groundhog on Hackage.
-* Read [docs](http://hackage.haskell.org/package/groundhog-th) for the
-`mkPersist` DSL on Hackage.
+* Read [docs](http://hackage.haskell.org/package/groundhog-th/docs/Database-Groundhog-TH.html) for the
+`mkPersist` mapping description on Hackage.
 
 ### Creating and migrating tables
 
