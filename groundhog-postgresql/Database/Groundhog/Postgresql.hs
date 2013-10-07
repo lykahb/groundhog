@@ -2,6 +2,7 @@
 module Database.Groundhog.Postgresql
     ( withPostgresqlPool
     , withPostgresqlConn
+    , createPostgresqlPool
     , runDbConn
     , Postgresql(..)
     , module Database.Groundhog
@@ -95,20 +96,24 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues proxy src)
 
---{-# SPECIALIZE withPostgresqlPool :: String -> Int -> (Pool Postgresql -> IO a) -> IO a #-}
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
-               => String -- ^ connection string
-               -> Int -- ^ number of connections to open
-               -> (Pool Postgresql -> m a)
-               -> m a
-withPostgresqlPool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
+                   => String -- ^ connection string
+                   -> Int -- ^ number of connections to open
+                   -> (Pool Postgresql -> m a)
+                   -> m a
+withPostgresqlPool s connCount f = createPostgresqlPool s connCount >>= f
 
-{-# SPECIALIZE withPostgresqlConn :: String -> (Postgresql -> IO a) -> IO a #-}
 withPostgresqlConn :: (MonadBaseControl IO m, MonadIO m)
-               => String -- ^ connection string
-               -> (Postgresql -> m a)
-               -> m a
+                   => String -- ^ connection string
+                   -> (Postgresql -> m a)
+                   -> m a
 withPostgresqlConn s = bracket (liftIO $ open' s) (liftIO . close')
+
+createPostgresqlPool :: MonadIO m
+                     => String -- ^ connection string
+                     -> Int -- ^ number of connections to open
+                     -> m (Pool Postgresql)
+createPostgresqlPool s connCount = liftIO $ createPool (open' s) close' 1 20 connCount
 
 instance Savepoint Postgresql where
   withConnSavepoint name m (Postgresql c) = do

@@ -2,6 +2,7 @@
 module Database.Groundhog.MySQL
     ( withMySQLPool
     , withMySQLConn
+    , createMySQLPool
     , runDbConn
     , MySQL(..)
     , module Database.Groundhog
@@ -97,16 +98,22 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
       Just src -> return (fst $ fromPurePersistValues proxy src)
 
 withMySQLPool :: (MonadBaseControl IO m, MonadIO m)
-               => MySQL.ConnectInfo
-               -> Int -- ^ number of connections to open
-               -> (Pool MySQL -> m a)
-               -> m a
-withMySQLPool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
+              => MySQL.ConnectInfo
+              -> Int -- ^ number of connections to open
+              -> (Pool MySQL -> m a)
+              -> m a
+withMySQLPool s connCount f = createMySQLPool s connCount >>= f
+
+createMySQLPool :: MonadIO m
+                => MySQL.ConnectInfo
+                -> Int -- ^ number of connections to open
+                -> m (Pool MySQL)
+createMySQLPool s connCount = liftIO $ createPool (open' s) close' 1 20 connCount
 
 withMySQLConn :: (MonadBaseControl IO m, MonadIO m)
-               => MySQL.ConnectInfo
-               -> (MySQL -> m a)
-               -> m a
+              => MySQL.ConnectInfo
+              -> (MySQL -> m a)
+              -> m a
 withMySQLConn s = bracket (liftIO $ open' s) (liftIO . close')
 
 instance Savepoint MySQL where

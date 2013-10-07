@@ -2,6 +2,7 @@
 module Database.Groundhog.Sqlite
     ( withSqlitePool
     , withSqliteConn
+    , createSqlitePool
     , runDbConn
     , Sqlite(..)
     , module Database.Groundhog
@@ -88,17 +89,23 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
   analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
 
 withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
-               => String
+               => String -- ^ connection string
                -> Int -- ^ number of connections to open
                -> (Pool Sqlite -> m a)
                -> m a
-withSqlitePool s connCount f = liftIO (createPool (open' s) close' 1 20 connCount) >>= f
+withSqlitePool s connCount f = createSqlitePool s connCount >>= f
 
 withSqliteConn :: (MonadBaseControl IO m, MonadIO m)
-               => String
+               => String -- ^ connection string
                -> (Sqlite -> m a)
                -> m a
 withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
+
+createSqlitePool :: MonadIO m)
+                 => String -- ^ connection string
+                 -> Int -- ^ number of connections to open
+                 -> m (Pool Sqlite)
+createSqlitePool = liftIO $ createPool (open' s) close' 1 20 connCount
 
 instance Savepoint Sqlite where
   withConnSavepoint name m (Sqlite c _) = do
