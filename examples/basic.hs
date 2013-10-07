@@ -14,9 +14,6 @@ mkPersist defaultCodegenConfig [groundhog|
       fields:
         - name: customerName
           dbName: name           # Set column name to "name" instead of "customerName"
-      uniques:
-        - name: NameConstraint
-          fields: [customerName] # Inline format of list
 - entity: Product
 |]
 
