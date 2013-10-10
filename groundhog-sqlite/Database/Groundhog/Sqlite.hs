@@ -101,11 +101,11 @@ withSqliteConn :: (MonadBaseControl IO m, MonadIO m)
                -> m a
 withSqliteConn s = bracket (liftIO $ open' s) (liftIO . close')
 
-createSqlitePool :: MonadIO m)
+createSqlitePool :: MonadIO m
                  => String -- ^ connection string
                  -> Int -- ^ number of connections to open
                  -> m (Pool Sqlite)
-createSqlitePool = liftIO $ createPool (open' s) close' 1 20 connCount
+createSqlitePool s connCount = liftIO $ createPool (open' s) close' 1 20 connCount
 
 instance Savepoint Sqlite where
   withConnSavepoint name m (Sqlite c _) = do
