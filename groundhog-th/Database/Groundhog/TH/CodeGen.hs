@@ -27,6 +27,7 @@ import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
+import Control.Arrow (second)
 import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
 import Data.List (findIndex, nub, partition)
 import Data.Maybe (catMaybes)
@@ -518,11 +519,14 @@ mkPersistEntityInstance def = do
       pats = map (const wildP) $ thConstrFields cdef
     mkClause cNum cdef = do
       let allConstrainedFields = concatMap thUniqueFields $ thConstrUniques cdef
-      vars <- mapM (\f -> newName "x" >>= \x -> return $ if thFieldName f `elem` allConstrainedFields then Just (x, thFieldType f) else Nothing) $ thConstrFields cdef
-      let pat = conP (thConstrName cdef) $ map (maybe wildP (varP . fst)) vars
+      vars <- mapM (\f -> newName "x" >>= \x -> return $ if thFieldName f `elem` allConstrainedFields then Just (x, f) else Nothing) $ thConstrFields cdef
       proxy <- newName "p"
-      let body = normalB $ [| (cNum, $(listE $ map (\(THUniqueDef uName _ fnames) -> [| (uName, $result) |] ) $ thConstrUniques cdef)) |]
-          result = mkToPurePersistValues proxy (catMaybes vars)
+      let pat = conP (thConstrName cdef) $ map (maybe wildP (varP . fst)) vars
+          body = normalB $ [| (cNum, $(listE $ map mkUnique $ thConstrUniques cdef)) |]
+          mkUnique (THUniqueDef uName _ fnames) = [| (uName, $result) |] where
+            -- find corresponding field from vars
+            uFields = map (\f -> findOne "field" id (thFieldName . snd) f $ catMaybes vars) fnames
+            result = mkToPurePersistValues proxy $ map (second thFieldType) uFields
       clause [varP proxy, pat] body []
     in funD 'getUniques clauses
 
