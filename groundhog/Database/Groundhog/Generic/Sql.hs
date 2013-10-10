@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, GADTs, OverloadedStrings, TypeSynonymInstances, FlexibleInstances, TypeFamilies, MultiParamTypeClasses, FunctionalDependencies, UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, OverloadedStrings, FlexibleInstances, TypeFamilies, UndecidableInstances #-}
 {-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -18,6 +18,7 @@ module Database.Groundhog.Generic.Sql
     , renderPersistValue
     , intercalateS
     , commasJoin
+    , flatten
     , RenderS(..)
     , Utf8(..)
     , fromUtf8

@@ -228,16 +228,15 @@ insertByAll escape queryFunc v = do
       (constructorNum, uniques) = getUniques proxy v
       constr = constructors e !! constructorNum
       uniqueDefs = constrUniques constr
-      cond = intercalateS " OR " $ map (intercalateS " AND " . map (\(fname, _) -> escape (fromString fname) <> "=?")) $ map (\(UniqueDef _ _ fields) -> fields) uniqueDefs
   if null uniques
     then liftM Right $ Core.insert v
     else do
-      let query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
+      let cond = intercalateS " OR " $ map (intercalateS " AND " . foldr (flatten $ \x -> escape x <> "=?") [] . uniqueFields) uniqueDefs
+          query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
       x <- queryFunc query [dbInt64] (foldr ((.) . snd) id uniques []) id
       case x of
-        Nothing  -> liftM Right $ Core.insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
-        Just xs  -> fail $ "unexpected query result: " ++ show xs
+        Nothing -> liftM Right $ Core.insert v
+        Just xs -> return $ Left $ fst $ fromPurePersistValues proxy xs
 
 deleteByKey :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
             => (Utf8 -> Utf8) -> (Utf8 -> [PersistValue] -> m ()) -> Key v BackendSpecific -> m ()
