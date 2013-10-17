@@ -274,7 +274,7 @@ migrationPack currentSchema = GM.MigrationPack
   migTriggerOnUpdate
   GM.defaultMigConstr
   escape
-  "SERIAL PRIMARY KEY UNIQUE"
+  "BIGSERIAL PRIMARY KEY UNIQUE"
   mainTableId
   defaultPriority
   (\uniques refs -> ([], map AddUnique uniques ++ map AddReference refs))
