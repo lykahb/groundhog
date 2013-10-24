@@ -50,9 +50,9 @@ get escape queryFunc (k :: Key v BackendSpecific) = do
       case x of
         Just [discr] -> do
           let constructorNum = fromPrimitivePersistValue proxy discr
-          let constr = constructors e !! constructorNum
-          let fields = renderFields escape (constrParams constr)
-          let cQuery = "SELECT " <> fields <> " FROM " <> tableName escape e constr <> " WHERE " <> fromJust (constrId escape constr) <> "=?"
+              constr = constructors e !! constructorNum
+              fields = renderFields escape (constrParams constr)
+              cQuery = "SELECT " <> fields <> " FROM " <> tableName escape e constr <> " WHERE " <> fromJust (constrId escape constr) <> "=?"
           x2 <- queryFunc cQuery (getConstructorTypes constr) [toPrimitivePersistValue proxy k] id
           case x2 of
             Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ discr:xs
@@ -102,13 +102,17 @@ selectAll escape queryFunc = start where
   proxy = undefined :: Proxy (PhantomDb m)
 
 getBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
-      => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Key v (Unique u) -> m (Maybe v)
-getBy escape queryFunc (k :: Key v (Unique u)) = do
+      => (Utf8 -> Utf8) -- ^ escape
+      -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -- ^ function to run query
+      -> Utf8  -- ^ condition to compare with constant
+      -> Key v (Unique u)
+      -> m (Maybe v)
+getBy escape queryFunc equalsTo (k :: Key v (Unique u)) = do
   uniques <- toPersistValues k
   let e = entityDef (undefined :: v)
       u = (undefined :: Key v (Unique u) -> u (UniqueMarker v)) k
-      uFields = (renderChain escape $ fieldChain u) []
-      cond = intercalateS " AND " $ map (<> "=?") uFields
+      uFields = renderChain escape (fieldChain u) []
+      cond = intercalateS " AND " $ map (<> equalsTo) uFields
       constr = head $ constructors e
       fields = renderFields escape (constrParams constr)
       query = "SELECT " <> fields <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
@@ -131,7 +135,6 @@ project escape queryFunc noLimit renderCond' p options = doSelectQuery where
         (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
   cond' = renderCond' cond
   chains = projectionExprs p []
---  fields = intercalateS (fromChar ',') $ foldr (renderChain escape) [] chains
   RenderS fields fieldVals  = intercalateS (fromChar ',') $ concatMap (renderExprExtended escape 0) chains
   query = "SELECT " <> fields <> " FROM " <> tableName escape e constr <> whereClause <> orders <> lim
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
@@ -220,9 +223,11 @@ delete escape execFunc renderCond' cond = execFunc query (maybe [] (($ []) . get
     else "DELETE FROM " <> mainTableName escape e <> " WHERE id IN(SELECT " <> fromJust (constrId escape constr) <> " FROM " <> tableName escape e constr <> whereClause <> ")"
 
 insertByAll :: forall m v . (PersistBackend m, PersistEntity v)
-            => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a)
+            => (Utf8 -> Utf8) -- ^ escape
+            -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -- ^ function to run query
+            -> Utf8 -- ^ condition to compare with constant
             -> v -> m (Either (AutoKey v) (AutoKey v))
-insertByAll escape queryFunc v = do
+insertByAll escape queryFunc equalsTo v = do
   let e = entityDef v
       proxy = undefined :: Proxy (PhantomDb m)
       (constructorNum, uniques) = getUniques proxy v
@@ -231,7 +236,7 @@ insertByAll escape queryFunc v = do
   if null uniques
     then liftM Right $ Core.insert v
     else do
-      let cond = intercalateS " OR " $ map (intercalateS " AND " . foldr (flatten $ \x -> escape x <> "=?") [] . uniqueFields) uniqueDefs
+      let cond = intercalateS " OR " $ map (intercalateS " AND " . foldr (flatten $ \x -> escape x <> equalsTo) [] . uniqueFields) uniqueDefs
           query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
       x <- queryFunc query [dbInt64] (foldr ((.) . snd) id uniques []) id
       case x of
@@ -263,14 +268,16 @@ countAll escape queryFunc (_ :: v) = do
     Nothing -> fail $ "COUNT returned no rows"
 
 insertBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
-         => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a)
+         => (Utf8 -> Utf8)
+         -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a)
+         -> Utf8
          -> u (UniqueMarker v) -> v -> m (Either (AutoKey v) (AutoKey v))
-insertBy escape queryFunc u v = do
+insertBy escape queryFunc equalsTo u v = do
   uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
   let e = entityDef v
       proxy = undefined :: Proxy (PhantomDb m)
       uFields = (renderChain escape $ fieldChain u) []
-      cond = intercalateS " AND " $ map (<> "=?") uFields
+      cond = intercalateS " AND " $ map (<> equalsTo) uFields
       -- this is safe because unique keys exist only for entities with one constructor
       constr = head $ constructors e
       query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
