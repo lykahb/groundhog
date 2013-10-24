@@ -1,3 +1,6 @@
+0.4.0.2
+* added createMySQLPool
+
 0.4.0.1
 * exposed connection constructor
 

@@ -1,3 +1,6 @@
+0.4.0.2
+* fix for nullable fields in unique constraint
+
 0.4.0.1
 * added migration helper function Database.Groundhog.Generic.getQueries
 * added comparison function Database.Groundhog.Expression.isFieldNothing
