@@ -19,6 +19,7 @@ library
                    , time                     >= 1.1.4
                    , containers               >= 0.2
                    , yaml                     >= 0.8.1
+                   , utf8-string              >= 0.3       && < 0.4
     exposed-modules: Database.Groundhog.TH
                      Database.Groundhog.TH.Settings
                      Database.Groundhog.TH.CodeGen

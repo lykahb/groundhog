@@ -28,7 +28,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (StrictType, VarStrictType, Lift(..))
 import Language.Haskell.TH.Quote
 import Control.Monad (forM, forM_, when, unless, liftM2)
-import Data.ByteString.Char8 (pack)
+import Data.ByteString.UTF8 (fromString)
 import Data.Char (isUpper, isLower, isSpace, isDigit, toUpper, toLower)
 import Data.Either (lefts)
 import Data.List (nub, (\\))
@@ -521,7 +521,7 @@ groundhogFile = quoteFile groundhog
 
 parseDefinitions :: String -> Q Exp
 parseDefinitions s = do
-  result <- runIO $ decodeHelper (Y.decode $ pack s)
+  result <- runIO $ decodeHelper (Y.decode $ fromString s)
   case result of
     Left err -> case err of
       InvalidYaml (Just (Y.YamlParseException problem context mark)) -> fail $ unlines
