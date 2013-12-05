@@ -19,6 +19,8 @@ module Database.Groundhog.TH.CodeGen
   , mkEntitySinglePersistFieldInstance
   , mkPersistEntityInstance
   , mkEntityNeverNullInstance
+  , mkPrimitivePersistFieldInstance
+  , mkPrimitivePrimitivePersistFieldInstance
   , mkMigrateFunction
   ) where
   
@@ -589,7 +591,7 @@ mkEntityPersistFieldInstance def = do
          _         -> error "mkEntityPersistFieldInstance: key has no unique type"
     funD 'toPersistValues $ [ clause [] body [] ]
 
-  fromPersistValue' <- do
+  fromPersistValues' <- do
     let body = normalB $ case uniqInfo of
          _ | isOne -> [| singleFromPersistValue |]
          Just u    -> [| fromPersistValuesUnique $(snd u) |]
@@ -599,7 +601,7 @@ mkEntityPersistFieldInstance def = do
   dbType' <- funD 'dbType $ [clause [] (normalB [| dbType . (undefined :: a -> DefaultKey a) |]) []]
 
   let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-  let decs = [persistName', toPersistValues', fromPersistValue', dbType']
+  let decs = [persistName', toPersistValues', fromPersistValues', dbType']
   return $ [InstanceD context (AppT (ConT ''PersistField) entity) decs]
 
 mkEntitySinglePersistFieldInstance :: THEntityDef -> Q [Dec]
@@ -628,6 +630,47 @@ mkEntityNeverNullInstance def = do
   return $ if isOne
     then [InstanceD context (AppT (ConT ''NeverNull) entity) []]
     else []
+
+mkPrimitivePersistFieldInstance :: THPrimitiveDef -> Q [Dec]
+mkPrimitivePersistFieldInstance def = do
+  let prim = ConT (thPrimitiveName def)
+  persistName' <- do
+    let body = normalB $ stringE $ nameBase $ thPrimitiveName def
+    funD 'persistName $ [ clause [wildP] body [] ]
+  fromPersistValues' <- funD 'fromPersistValues [clause [] (normalB [| primFromPersistValue |]) []]
+  toPersistValues' <- funD 'toPersistValues [clause [] (normalB [| primToPersistValue |]) []]
+  dbType' <- do
+    let typ = if thPrimitiveStringRepresentation def
+          then [| DbTypePrimitive DbString False Nothing Nothing |]
+          else [| DbTypePrimitive DbInt32  False Nothing Nothing |]
+    funD 'dbType $ [ clause [wildP] (normalB typ) [] ]
+  let decs = [persistName', toPersistValues', fromPersistValues', dbType']  
+  return [InstanceD [] (AppT (ConT ''PersistField) prim) decs]
+
+mkPrimitivePrimitivePersistFieldInstance :: THPrimitiveDef -> Q [Dec]
+mkPrimitivePrimitivePersistFieldInstance def = do
+  let prim = ConT (thPrimitiveName def)
+  toPrim' <- do
+    proxy <- newName "p"
+    x <- newName "x"
+    let value = if thPrimitiveStringRepresentation def
+          then [| show $(varE x) |]
+          else [| fromEnum $(varE x) |]
+        body = [| toPrimitivePersistValue $(varE proxy) $value |]
+    funD 'toPrimitivePersistValue [clause [varP proxy, varP x] (normalB body) []]
+  fromPrim' <- do
+    proxy <- newName "p"
+    x <- newName "x"
+    let value = [| fromPrimitivePersistValue $(varE proxy) $(varE x) |]
+        body = if thPrimitiveStringRepresentation def
+          then [| read $value |]
+          else [| toEnum $value |]
+    funD 'fromPrimitivePersistValue [clause [varP proxy, varP x] (normalB body) []]
+  let context = []
+  let decs = [toPrim', fromPrim']
+  sequence $ [return $ InstanceD context (AppT (ConT ''PrimitivePersistField) prim) decs
+           , mkDefaultPurePersistFieldInstance context prim
+           , mkDefaultSinglePersistFieldInstance context prim]
 
 mkMigrateFunction :: String -> [THEntityDef] -> Q [Dec]
 mkMigrateFunction name defs = do

@@ -3,8 +3,10 @@
 
 module Database.Groundhog.TH.Settings
   ( PersistDefinitions(..)
+  , PersistDefinition(..)
   , THEntityDef(..)
   , THEmbeddedDef(..)
+  , THPrimitiveDef(..)
   , THConstructorDef(..)
   , THFieldDef(..)
   , THUniqueDef(..)
@@ -12,6 +14,7 @@ module Database.Groundhog.TH.Settings
   , THAutoKeyDef(..)
   , PSEntityDef(..)
   , PSEmbeddedDef(..)
+  , PSPrimitiveDef(..)
   , PSConstructorDef(..)
   , PSFieldDef(..)
   , PSUniqueDef(..)
@@ -27,7 +30,11 @@ import Control.Applicative
 import Control.Monad (mzero)
 import Data.Yaml
 
-data PersistDefinitions = PersistDefinitions {definitions :: [Either PSEntityDef PSEmbeddedDef]} deriving Show
+data PersistDefinitions = PersistDefinitions {definitions :: [PersistDefinition]} deriving Show
+data PersistDefinition = PSEntityDef' PSEntityDef
+                       | PSEmbeddedDef' PSEmbeddedDef
+                       | PSPrimitiveDef' PSPrimitiveDef
+     deriving Show
 
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
@@ -52,6 +59,13 @@ data THEmbeddedDef = THEmbeddedDef {
   , thDbEmbeddedName :: String -- used only to set polymorphic part of name of its container
   , thEmbeddedTypeParams :: [TyVarBndr]
   , thEmbeddedFields :: [THFieldDef]
+} deriving Show
+
+data THPrimitiveDef = THPrimitiveDef {
+    thPrimitiveName :: Name
+  , thPrimitiveDbName :: String -- used only to set polymorphic part of name of its container
+  , thPrimitiveStringRepresentation :: Bool -- store in database as string using Show/Read instances or as integer using Enum instance
+  , thPrimitiveConstructors :: [Name]
 } deriving Show
 
 data THConstructorDef = THConstructorDef {
@@ -105,6 +119,12 @@ data PSEmbeddedDef = PSEmbeddedDef {
   , psEmbeddedFields :: Maybe [PSFieldDef]
 } deriving Show
 
+data PSPrimitiveDef = PSPrimitiveDef {
+    psPrimitiveName :: String
+  , psPrimitiveDbName :: Maybe String -- used only to set polymorphic part of name of its container
+  , psPrimitiveStringRepresentation :: Maybe Bool -- store in database as string using Show/Read instances or as integer using Enum instance
+} deriving Show
+
 data PSConstructorDef = PSConstructorDef {
     psConstrName :: String -- U2
   , psPhantomConstrName :: Maybe String -- U2Constructor
@@ -134,6 +154,14 @@ data PSAutoKeyDef = PSAutoKeyDef {
     psAutoKeyConstrName :: Maybe String
   , psAutoKeyIsDef :: Maybe Bool
 } deriving Show
+
+instance Lift PersistDefinition where
+  lift (PSEntityDef' e) = [| PSEntityDef' e |]
+  lift (PSEmbeddedDef' e) = [| PSEmbeddedDef' e |]
+  lift (PSPrimitiveDef' e) = [| PSPrimitiveDef' e |]
+
+instance Lift PSPrimitiveDef where
+  lift (PSPrimitiveDef {..}) = [| PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveStringRepresentation) |]
 
 instance Lift PersistDefinitions where
   lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift definitions) |]
@@ -190,16 +218,10 @@ instance FromJSON PersistDefinitions where
     defs@(Array _) -> parseJSON defs
     _ -> mzero
 
-instance FromJSON (Either PSEntityDef PSEmbeddedDef) where
-  parseJSON obj@(Object v) = do
-    entity   <- v .:? "entity"
-    embedded <- v .:? "embedded"
-    case (entity, embedded) of
-      (Just _, Nothing) -> fmap Left $ parseJSON obj
-      (Nothing, Just _) -> fmap Right $ parseJSON obj
-      (Just entName, Just embName) -> fail $ "Record has both entity name " ++ entName ++ " and embedded name " ++ embName
-      (Nothing, Nothing) -> fail "Record must have either entity name or embedded name"
-  parseJSON _          = mzero
+instance FromJSON PersistDefinition where
+  parseJSON obj = PSEntityDef' <$> parseJSON obj
+              <|> PSEmbeddedDef' <$> parseJSON obj
+              <|> PSPrimitiveDef' <$> parseJSON obj
 
 instance FromJSON PSEntityDef where
   parseJSON (Object v) = PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> v .:? "schema" <*> optional (v .: "autoKey") <*> v .:? "keys" <*> v .:? "constructors"
@@ -207,6 +229,17 @@ instance FromJSON PSEntityDef where
 
 instance FromJSON PSEmbeddedDef where
   parseJSON (Object v) = PSEmbeddedDef <$> v .: "embedded" <*> v .:? "dbName" <*> v .:? "fields"
+  parseJSON _          = mzero
+
+instance FromJSON PSPrimitiveDef where
+  parseJSON (Object v) = do
+    x <- v .:? "representation"
+    let representation = case x of
+          Nothing -> pure True
+          Just "showread" -> pure True
+          Just "enum" -> pure False
+          Just r -> fail $ "parseJSON: representation expected [\"showread\",\"enum\"], but got " ++ r
+    PSPrimitiveDef <$> v .: "primitive" <*> v .:? "dbName" <*> pure representation
   parseJSON _          = mzero
 
 instance FromJSON PSConstructorDef where

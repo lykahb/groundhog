@@ -52,6 +52,9 @@ data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, In
 data UniqueKeySample = UniqueKeySample { uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Int } deriving (Eq, Show)
 data InCurrentSchema = InCurrentSchema { inCurrentSchema :: Maybe (Key InAnotherSchema BackendSpecific) }
 data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific) }
+data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
+data ShowRead = ShowRead String Int deriving (Eq, Show, Read)
+
 
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
@@ -126,6 +129,10 @@ mkPersist defaultCodegenConfig [groundhog|
 - entity: InCurrentSchema
 - entity: InAnotherSchema
   schema: myschema
+- primitive: EnumTest
+  representation: enum
+- primitive: ShowRead
+  representation: showread # by default
 |]
 
 data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
@@ -216,6 +223,7 @@ mkTestSuite run =
   , testCase "testKeyNormalization" $ run testKeyNormalization
   , testCase "testAutoKeyField" $ run testAutoKeyField
   , testCase "testTime" $ run testTime
+  , testCase "testPrimitiveData" $ run testPrimitiveData
   ]
 
 #if WITH_SQLITE
@@ -749,6 +757,12 @@ testTime = do
   k <- insert val
   val' <- get k
   Just val @=? val'
+
+testPrimitiveData :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testPrimitiveData = do
+  let val = Single (Enum2, ShowRead "abc" 42)
+  migr val
+  Just val @=?? (insert val >>= get)
 
 testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testSchemas = do
