@@ -65,7 +65,6 @@ data THPrimitiveDef = THPrimitiveDef {
     thPrimitiveName :: Name
   , thPrimitiveDbName :: String -- used only to set polymorphic part of name of its container
   , thPrimitiveStringRepresentation :: Bool -- store in database as string using Show/Read instances or as integer using Enum instance
-  , thPrimitiveConstructors :: [Name]
 } deriving Show
 
 data THConstructorDef = THConstructorDef {

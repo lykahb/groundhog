@@ -394,14 +394,9 @@ mkTHEmbeddedDef (NamingStyle{..}) (DataD _ dName typeVars cons _) =
 mkTHEmbeddedDef _ _ = error "Only datatypes can be processed"
 
 mkTHPrimitiveDef :: NamingStyle -> Dec -> THPrimitiveDef
-mkTHPrimitiveDef (NamingStyle{..}) (DataD _ dName _ cons _) =
-  THPrimitiveDef dName (mkDbEntityName dName') True (map mkConstr cons) where
+mkTHPrimitiveDef (NamingStyle{..}) (DataD _ dName _ _ _) =
+  THPrimitiveDef dName (mkDbEntityName dName') True where
   dName' = nameBase dName
-  mkConstr c = case c of
-    NormalC name _ -> name
-    RecC name _ -> name
-    InfixC{} -> error $ "Types with infix constructors are not supported" ++ show dName
-    ForallC{} -> error $ "Types with existential quantification are not supported" ++ show dName
 mkTHPrimitiveDef _ _ = error "Only datatypes can be processed"
 
 firstLetter :: (Char -> Char) -> String -> String
