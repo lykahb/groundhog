@@ -221,7 +221,8 @@ mkAutoKeyPrimitivePersistFieldInstance def = case thAutoKey def of
     fromPrim' <- funD 'fromPrimitivePersistValue [clause [wildP] (normalB $ conE conName) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [toPrim', fromPrim']
-    sequence $ [return $ InstanceD context (AppT (ConT ''PrimitivePersistField) keyType) decs
+    sequence [ return $ InstanceD context (AppT (ConT ''PrimitivePersistField) keyType) decs
+             , return $ InstanceD context (AppT (ConT ''NeverNull) keyType) []
              , mkDefaultPurePersistFieldInstance context keyType
              , mkDefaultSinglePersistFieldInstance context keyType]
   _ -> return []
@@ -313,6 +314,7 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
         fromPrim' <- funD 'fromPrimitivePersistValue [clause [varP proxy, varP x] (normalB [| $(conE conName) (fromPrimitivePersistValue $(varE proxy) $(varE x)) |]) []]
         let decs = [toPrim', fromPrim']
         sequence [ return $ InstanceD context (AppT (ConT ''PrimitivePersistField) uniqKeyType) decs
+                 , return $ InstanceD context (AppT (ConT ''NeverNull) uniqKeyType) decs
                  , mkDefaultPurePersistFieldInstance context uniqKeyType
                  , mkDefaultSinglePersistFieldInstance context uniqKeyType]
       else mkPurePersistFieldInstance uniqKeyType conName (thUniqueKeyFields unique) context
@@ -644,8 +646,10 @@ mkPrimitivePersistFieldInstance def = do
           then [| DbTypePrimitive DbString False Nothing Nothing |]
           else [| DbTypePrimitive DbInt32  False Nothing Nothing |]
     funD 'dbType $ [ clause [wildP] (normalB typ) [] ]
-  let decs = [persistName', toPersistValues', fromPersistValues', dbType']  
-  return [InstanceD [] (AppT (ConT ''PersistField) prim) decs]
+  let decs = [persistName', toPersistValues', fromPersistValues', dbType']
+  return [ InstanceD [] (AppT (ConT ''PersistField) prim) decs
+         , InstanceD [] (AppT (ConT ''NeverNull) prim) []
+         ]
 
 mkPrimitivePrimitivePersistFieldInstance :: THPrimitiveDef -> Q [Dec]
 mkPrimitivePrimitivePersistFieldInstance def = do
