@@ -25,7 +25,7 @@ import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 
 import Control.Monad (liftM, forM, (>=>))
-import Data.Maybe (fromJust)
+import Data.Maybe (catMaybes, fromJust)
 import Data.Monoid
 
 {-# INLINABLE get #-}
@@ -104,19 +104,18 @@ selectAll escape queryFunc = start where
 getBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
       => (Utf8 -> Utf8) -- ^ escape
       -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -- ^ function to run query
-      -> Utf8  -- ^ condition to compare with constant
       -> Key v (Unique u)
       -> m (Maybe v)
-getBy escape queryFunc equalsTo (k :: Key v (Unique u)) = do
+getBy escape queryFunc (k :: Key v (Unique u)) = do
   uniques <- toPersistValues k
   let e = entityDef (undefined :: v)
       u = (undefined :: Key v (Unique u) -> u (UniqueMarker v)) k
       uFields = renderChain escape (fieldChain u) []
-      cond = intercalateS " AND " $ map (<> equalsTo) uFields
+      RenderS cond vals = intercalateS " AND " $ mkUniqueCond uFields uniques
       constr = head $ constructors e
       fields = renderFields escape (constrParams constr)
       query = "SELECT " <> fields <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
-  x <- queryFunc query (getConstructorTypes constr) (uniques []) id
+  x <- queryFunc query (getConstructorTypes constr) (vals []) id
   case x of
     Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
     Nothing -> return Nothing
@@ -225,20 +224,25 @@ delete escape execFunc renderCond' cond = execFunc query (maybe [] (($ []) . get
 insertByAll :: forall m v . (PersistBackend m, PersistEntity v)
             => (Utf8 -> Utf8) -- ^ escape
             -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -- ^ function to run query
-            -> Utf8 -- ^ condition to compare with constant
+            -> Bool -- ^ allow multiple duplication of uniques with nulls
             -> v -> m (Either (AutoKey v) (AutoKey v))
-insertByAll escape queryFunc equalsTo v = do
+insertByAll escape queryFunc manyNulls v = do
   let e = entityDef v
       proxy = undefined :: Proxy (PhantomDb m)
       (constructorNum, uniques) = getUniques proxy v
       constr = constructors e !! constructorNum
       uniqueDefs = constrUniques constr
-  if null uniques
+
+      query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
+      conds = catMaybes $ zipWith (\u (_, uVals) -> checkNulls uVals $ intercalateS " AND " $ mkUniqueCond (f u) uVals) uniqueDefs uniques where
+        f = foldr (flatten escape) [] . uniqueFields
+      -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
+      checkNulls uVals x = if manyNulls && any (== PersistNull) (uVals []) then Nothing else Just x
+      RenderS cond vals = intercalateS " OR " conds
+  if null conds
     then liftM Right $ Core.insert v
     else do
-      let cond = intercalateS " OR " $ map (intercalateS " AND " . foldr (flatten $ \x -> escape x <> equalsTo) [] . uniqueFields) uniqueDefs
-          query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
-      x <- queryFunc query [dbInt64] (foldr ((.) . snd) id uniques []) id
+      x <- queryFunc query [dbInt64] (vals []) id
       case x of
         Nothing -> liftM Right $ Core.insert v
         Just xs -> return $ Left $ fst $ fromPurePersistValues proxy xs
@@ -270,22 +274,27 @@ countAll escape queryFunc (_ :: v) = do
 insertBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
          => (Utf8 -> Utf8)
          -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a)
-         -> Utf8
+         -> Bool
          -> u (UniqueMarker v) -> v -> m (Either (AutoKey v) (AutoKey v))
-insertBy escape queryFunc equalsTo u v = do
+insertBy escape queryFunc manyNulls u v = do
   uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
   let e = entityDef v
       proxy = undefined :: Proxy (PhantomDb m)
-      uFields = (renderChain escape $ fieldChain u) []
-      cond = intercalateS " AND " $ map (<> equalsTo) uFields
+      uFields = renderChain escape (fieldChain u) []
+      RenderS cond vals = intercalateS " AND " $ mkUniqueCond uFields uniques
+      -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
+      checkNulls uVals = manyNulls && any (== PersistNull) (uVals [])
       -- this is safe because unique keys exist only for entities with one constructor
       constr = head $ constructors e
       query = "SELECT " <> maybe "1" id (constrId escape constr) <> " FROM " <> tableName escape e constr <> " WHERE " <> cond
-  x <- queryFunc query [dbInt64] (uniques []) id
-  case x of
-    Nothing  -> liftM Right $ Core.insert v
-    Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
-    Just xs  -> fail $ "unexpected query result: " ++ show xs
+  if checkNulls uniques
+    then liftM Right $ Core.insert v
+    else do
+      x <- queryFunc query [dbInt64] (vals []) id
+      case x of
+        Nothing  -> liftM Right $ Core.insert v
+        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
+        Just xs  -> fail $ "unexpected query result: " ++ show xs
 
 getConstructorTypes :: ConstructorDef -> [DbType]
 getConstructorTypes = map snd . constrParams where
@@ -303,3 +312,8 @@ toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 dbInt64 :: DbType
 dbInt64 = DbTypePrimitive DbInt64 False Nothing Nothing
+
+mkUniqueCond :: [Utf8] -> ([PersistValue] -> [PersistValue]) -> [RenderS db r]
+mkUniqueCond u vals = zipWith f u (vals []) where
+  f a PersistNull = RenderS (a <> " IS NULL") id
+  f a x = RenderS (a <> "=?") (x:)

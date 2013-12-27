@@ -49,7 +49,7 @@ data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
 data Settable = Settable {settable1 :: String, settable2 :: Maybe (Key (Single String) BackendSpecific), settableTuple :: (Int, (String, Maybe Int64))}
 data Keys = Keys {refDirect :: Single String, refKey :: DefaultKey (Single String), refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (DefaultKey (Single String))}
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
-data UniqueKeySample = UniqueKeySample { uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Int } deriving (Eq, Show)
+data UniqueKeySample = UniqueKeySample { uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Maybe Int } deriving (Eq, Show)
 data InCurrentSchema = InCurrentSchema { inCurrentSchema :: Maybe (Key InAnotherSchema BackendSpecific) }
 data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific) }
 data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
@@ -339,9 +339,7 @@ testMaybe :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMaybe = do
   let val = Single (Just "abc")
   migr val
-  k <- insert val
-  val' <- get k
-  Just val @=? val'
+  Just val @=?? (insert val >>= get)
 
 testSelect :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => m ()
 testSelect = do
@@ -648,9 +646,7 @@ testLongNames :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testLongNames = do
   let val = Single [(Single [Single ""], 0 :: Int, [""], (), [""])]
   migr val
-  k <- insert val
-  val' <- get k
-  Just val @=? val'
+  Just val @=?? (insert val >>= get)
 
   let val2 = Single [([""], Single "", 0 :: Int)]
   migr val2
@@ -675,18 +671,24 @@ testMaybeReference = do
 
 testUniqueKey :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testUniqueKey = do
-  let uVal = UniqueKeySample 1 2 3
+  let uVal = UniqueKeySample 1 2 (Just 3)
+  let uKey = Unique_key_two_columnsKey 2 (Just 3)
   let val = Single uVal
   migr val
   k <- insert val
-  val1 <- get k
-  Just val @=? val1
-  val2 <- select (Unique_key_two_columns ==. Unique_key_two_columnsKey 2 3)
-  [uVal] @=? val2
+  Just val @=?? get k
+  [uVal] @=?? select (Unique_key_two_columns ==. uKey)
+  Left () @=?? insertByAll uVal
+  -- check that constraints with nulls can be repeated
+  insert $ UniqueKeySample 2 2 Nothing
+  insert $ UniqueKeySample 3 2 Nothing
+  insertByAll $ UniqueKeySample 4 2 Nothing
+  3 @=?? count (Unique_key_two_columns ==. Unique_key_two_columnsKey 2 Nothing)
+  return ()
 
 testForeignKeyUnique :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testForeignKeyUnique = do
-  let uVal = UniqueKeySample 1 2 3
+  let uVal = UniqueKeySample 1 2 (Just 3)
   let val = HoldsUniqueKey (extractUnique uVal)
   migr val
   insert uVal
@@ -700,7 +702,7 @@ testProjection = do
   k <- insert val
   result <- project (AutoKeyField, SingleConstructor, SingleField, SingleField ~> Tuple2_1Selector) ("" ==. "")
   [(k, val, ("abc", 5 :: Int), 5 :: Int)] @=? result
-  let uVal = UniqueKeySample 1 2 3
+  let uVal = UniqueKeySample 1 2 (Just 3)
   migr uVal
   insert uVal
   result2 <- project Unique_key_two_columns ("" ==. "")

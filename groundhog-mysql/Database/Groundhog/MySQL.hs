@@ -61,13 +61,13 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   type PhantomDb (DbPersist MySQL m) = MySQL
   insert v = insert' v
   insert_ v = insert_' v
-  insertBy u v = H.insertBy escapeS queryRawTyped' "<=>?" u v
-  insertByAll v = H.insertByAll escapeS queryRawTyped' "<=>?" v
+  insertBy u v = H.insertBy escapeS queryRawTyped' True u v
+  insertByAll v = H.insertByAll escapeS queryRawTyped' True v
   replace k v = H.replace escapeS queryRawTyped' executeRaw' insertIntoConstructorTable k v
   select options = H.select escapeS queryRawTyped' noLimit renderCond' options
   selectAll = H.selectAll escapeS queryRawTyped'
   get k = H.get escapeS queryRawTyped' k
-  getBy k = H.getBy escapeS queryRawTyped' "<=>?" k
+  getBy k = H.getBy escapeS queryRawTyped' k
   update upds cond = H.update escapeS executeRaw' renderCond' upds cond
   delete cond = H.delete escapeS executeRaw' renderCond' cond
   deleteByKey k = H.deleteByKey escapeS executeRaw' k
