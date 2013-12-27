@@ -1,3 +1,6 @@
+0.4.0.3
+* added function runDbConnNoTransaction to run a monadic action without creating a transaction around it
+
 0.4.0.2
 * fix for nullable fields in unique constraint
 
