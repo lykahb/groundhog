@@ -8,7 +8,8 @@
 -- StringField ==. \"abc\" &&. NumberField >. (0 :: Int) ||. MaybeField ==. (Nothing :: Maybe String) ||. MaybeField ==. Just \"def\"
 -- @
 --
--- Note that polymorphic values like numbers or Nothing must have a type annotation
+-- Note that polymorphic values like numbers or Nothing must have a type annotation.
+-- Comparison operators specific for SQL such as IN and LIKE are defined in "Database.Groundhog.Generic.Sql.Functions".
 
 module Database.Groundhog.Expression
   ( Expression(..)
