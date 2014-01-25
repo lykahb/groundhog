@@ -18,10 +18,12 @@ import Database.Groundhog.Generic.Sql
 
 in_ :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
     a -> [b] -> Cond db r
+in_ _ [] = CondEmpty
 in_ a bs = CondRaw $ Snippet $ \esc p -> [parens 45 p $ renderExpr esc (toExpr a) <> " IN (" <> commasJoin (map (renderExpr esc . toExpr) bs) <> ")"]
 
 notIn_ :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
        a -> [b] -> Cond db r
+notIn_ _ [] = CondEmpty
 notIn_ a bs = CondRaw $ Snippet $ \esc p -> [parens 45 p $ renderExpr esc (toExpr a) <> " NOT IN (" <> commasJoin (map (renderExpr esc . toExpr) bs) <> ")"]
 
 like :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> String -> Cond db r
