@@ -820,9 +820,9 @@ testArrays = do
       int = id
   [2] @=?? project (SingleField ! int 2) (AutoKeyField ==. k)
   [Array [2, 3]] @=?? project (SingleField !: (int 2, int 3)) (AutoKeyField ==. k)
-  [Array [1..4]] @=?? project (SingleField `Arr.append` int 4) (AutoKeyField ==. k)
-  [Array [0..3]] @=?? project (int 0 `Arr.prepend` SingleField) (AutoKeyField ==. k)
-  [Array [1..6]] @=?? project (SingleField `arrayCat` Array [int 4..6]) (AutoKeyField ==. k)
+  [Array [1..4]] @=?? project (SingleField `Arr.append` explicitType (int 4)) (AutoKeyField ==. k)
+  [Array [0..3]] @=?? project (explicitType (int 0) `Arr.prepend` SingleField) (AutoKeyField ==. k)
+  [Array [1..6]] @=?? project (SingleField `arrayCat` explicitType (Array [int 4..6])) (AutoKeyField ==. k)
   ["[1:3]"] @=?? project (arrayDims SingleField) (AutoKeyField ==. k)
   [1] @=?? project (arrayNDims SingleField) (AutoKeyField ==. k)
   [1] @=?? project (arrayLower SingleField 1) (AutoKeyField ==. k)
@@ -833,9 +833,9 @@ testArrays = do
   [] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.any (int 0) SingleField)
   [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.all (int 2) (SingleField !: (int 2, int 2)))
   [] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.all (int 2) SingleField)
-  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. SingleField @> Array [int 2, 1])
-  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Array [int 2, 1] <@ SingleField)
-  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Array [int 3..10] `overlaps` SingleField)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. SingleField @> explicitType (Array [int 2, 1]))
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. explicitType (Array [int 2, 1]) <@ SingleField)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. explicitType (Array [int 3..10]) `overlaps` SingleField)
   -- test escaping/unescaping
   let myString = ['\1'..'\255'] :: String
   let val2 = Single (Array[myString], Array[Array[myString]])

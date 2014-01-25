@@ -7,10 +7,13 @@ module Database.Groundhog.Postgresql
     , Postgresql(..)
     , module Database.Groundhog
     , module Database.Groundhog.Generic.Sql.Functions
+    , explicitType
+    , castType
     ) where
 
 import Database.Groundhog
 import Database.Groundhog.Core
+import Database.Groundhog.Expression
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
@@ -325,7 +328,7 @@ migTriggerOnDelete schema name deletes = do
             else [DropTrigger schema trigName schema name, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
       
--- | Table name and a  list of field names and according delete statements
+-- | Table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
 migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Postgresql m [(Bool, [AlterDB])]
 migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
@@ -737,3 +740,17 @@ proxy = error "Proxy Postgresql"
 
 withSchema :: Maybe String -> String -> String
 withSchema sch name = maybe "" (\x -> escape x ++ ".") sch ++ escape name
+
+
+-- | Put explicit type for expression. It is useful for values which are defaulted to a wrong type.
+-- For example, a literal Int from a 64bit machine can be defaulted to a 32bit int by Postgresql. 
+-- Also a value entered as an external string (geometry, arrays and other complex types have this representation) may need an explicit type. 
+explicitType :: (Expression Postgresql r a, PersistField a) => a -> Expr Postgresql r a
+explicitType a = castType a t where
+  t = case dbType a of
+    DbTypePrimitive t' _ _ _ -> showSqlType t'
+    _ -> error "explicitType: type is not primitive"
+
+-- | Casts expression to a type. @castType value \"INT\"@ results in @value::INT@.
+castType :: Expression Postgresql r a => a -> String -> Expr Postgresql r a
+castType a t = Expr $ Snippet $ \esc _ -> ["(" <> renderExpr esc (toExpr a) <> ")::" <> fromString t] where
