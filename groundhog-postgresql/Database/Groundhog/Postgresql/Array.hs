@@ -131,13 +131,13 @@ parseArr p = Array <$> (char '{' *> parseElem p `sepBy` char ',' <* char '}')
 (!:) arr (i1, i2) = Expr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i1) <> ":" <> renderExpr esc (toExpr i2) <> "]"]
 
 prepend :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Expr Postgresql r (Array elem)
-prepend a b = Expr $ operator 50 "||" a b
+prepend a b = Expr $ function "array_prepend" [toExpr a, toExpr b]
 
 append :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b elem) => a -> b -> Expr Postgresql r (Array elem)
-append a b = Expr $ operator 50 "||" a b
+append a b = Expr $ function "array_append" [toExpr a, toExpr b]
 
 arrayCat :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b (Array elem)) => a -> b -> Expr Postgresql r (Array elem)
-arrayCat a b = Expr $ operator 50 "||" a b
+arrayCat a b = Expr $ function "array_cat" [toExpr a, toExpr b]
 
 arrayDims :: (ExpressionOf Postgresql r a (Array elem)) => a -> Expr Postgresql r String
 arrayDims arr = Expr $ function "array_dims" [toExpr arr]
