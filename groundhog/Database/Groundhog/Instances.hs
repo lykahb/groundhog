@@ -12,7 +12,7 @@ import Data.Bits (bitSize)
 import Data.ByteString.Char8 (ByteString, unpack)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)
-import Data.Time.LocalTime (ZonedTime)
+import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, utc, utcToZonedTime)
 import Data.Word (Word8, Word16, Word32, Word64)
 
 instance (PersistField a', PersistField b') => Embedded (a', b') where
@@ -187,11 +187,13 @@ instance PrimitivePersistField TimeOfDay where
 instance PrimitivePersistField UTCTime where
   toPrimitivePersistValue _ a = PersistUTCTime a
   fromPrimitivePersistValue _ (PersistUTCTime a) = a
+  fromPrimitivePersistValue _ (PersistZonedTime (ZT a)) = zonedTimeToUTC a
   fromPrimitivePersistValue _ x = readHelper x ("Expected UTCTime, received: " ++ show x)
 
 instance PrimitivePersistField ZonedTime where
   toPrimitivePersistValue _ a = PersistZonedTime (ZT a)
   fromPrimitivePersistValue _ (PersistZonedTime (ZT a)) = a
+  fromPrimitivePersistValue _ (PersistUTCTime a) = utcToZonedTime utc a
   fromPrimitivePersistValue _ x = readHelper x ("Expected ZonedTime, received: " ++ show x)
 
 instance (PrimitivePersistField a, NeverNull a) => PrimitivePersistField (Maybe a) where
