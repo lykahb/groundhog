@@ -1,3 +1,6 @@
+0.4.1
+* added functions replaceBy and deleteAll
+
 0.4.0.2
 * added createMySQLPool
 

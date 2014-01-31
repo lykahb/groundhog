@@ -1,3 +1,8 @@
+0.4.1
+* added functions replaceBy and deleteAll
+* renamed deleteByKey to deleteBy
+* instances of UTCTime and ZonedTime can read both values with time zone and without it
+
 0.4.0.3
 * added function runDbConnNoTransaction to run a monadic action without creating a transaction around it
 
