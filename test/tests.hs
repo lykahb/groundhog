@@ -201,9 +201,11 @@ mkTestSuite run =
   , testCase "testComparison" $ run testComparison
   , testCase "testEncoding" $ run testEncoding
   , testCase "testDelete" $ run testDelete
-  , testCase "testDeleteByKey" $ run testDeleteByKey
+  , testCase "testDeleteBy" $ run testDeleteBy
+  , testCase "testDeleteAll" $ run testDeleteAll
   , testCase "testReplaceSingle" $ run testReplaceSingle
   , testCase "testReplaceMulti" $ run testReplaceMulti
+  , testCase "testReplaceBy" $ run testReplaceBy
   , testCase "testTuple" $ run testTuple
   , testCase "testTupleList" $ run testTupleList
   , testCase "testMigrateAddColumnSingle" $ run testMigrateAddColumnSingle
@@ -300,7 +302,7 @@ testPersistSettings = do
   Just settable @=?? get k
   vals <- select $ Settable1Fld ==. "abc" &&. SettableTupleField ~> Tuple2_0Selector ==. (1 :: Int) &&. SettableTupleField ~> Tuple2_1Selector ~> Tuple2_0Selector ==. "qqq"
   [settable] @=? vals
-  deleteByKey singleKey -- test on delete cascade
+  deleteBy singleKey -- test on delete cascade
   Nothing @=?? get k
   assertExc "Uniqueness constraint not enforced" $ insert settable >> insert settable
 
@@ -482,7 +484,7 @@ testListTriggersOnDelete = do
   k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
   Just [listKey] <- queryRaw' "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrimitivePersistValue proxy k] firstRow
   listsInsideListKeys <- queryRaw' "select value from \"List##List##String#values\" where id=?" [listKey] $ mapAllRows return
-  deleteByKey k
+  deleteBy k
   -- test if the main list table and the associated values were deleted
   listMain <- queryRaw' "select * from \"List##List##String\" where id=?" [listKey] firstRow
   Nothing @=? listMain
@@ -521,20 +523,30 @@ testDelete = do
   Nothing @=?? queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue proxy k] firstRow
   Nothing @=?? queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue proxy k] firstRow
 
-testDeleteByKey :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
-testDeleteByKey = do
+testDeleteBy :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testDeleteBy = do
   migr (undefined :: Multi String)
   proxy <- phantomDb
   k <- insert $ Second "abc"
-  deleteByKey k
+  deleteBy k
   Nothing @=?? queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue proxy k] firstRow
   Nothing @=?? queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue proxy k] firstRow
+
+testDeleteAll :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testDeleteAll = do
+  let val = Second "abc"
+  migr val
+  proxy <- phantomDb
+  insert val
+  deleteAll val
+  Nothing @=?? queryRaw' "SELECT * FROM \"Multi#String\"" [] firstRow
+  Nothing @=?? queryRaw' "SELECT * FROM \"Multi#String#Second\"" [] firstRow
 
 testReplaceMulti :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testReplaceMulti = do
   migr (undefined :: Single (Multi String))
   proxy <- phantomDb
-  -- we need Single to test that referenced value cam be replaced
+  -- we need Single to test that referenced value can be replaced
   k <- insert $ Single (Second "abc")
   Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrimitivePersistValue proxy k] firstRow
   let valueKey = fromPrimitivePersistValue proxy valueKey'
@@ -551,7 +563,7 @@ testReplaceMulti = do
 
 testReplaceSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testReplaceSingle = do
-  -- we need Single to test that referenced value cam be replaced
+  -- we need Single to test that referenced value can be replaced
   let val = Single (Single "abc")
   migr val
   proxy <- phantomDb
@@ -561,6 +573,15 @@ testReplaceSingle = do
   replace valueKey (Single "def")
   replaced <- get valueKey
   Just (Single "def") @=? replaced
+
+testReplaceBy :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testReplaceBy = do
+  let val = UniqueKeySample 1 2 (Just 3)
+      replaced = UniqueKeySample 1 3 Nothing
+  migr val
+  k <- insert val
+  replaceBy Unique_key_one_column replaced
+  Just replaced @=?? getBy (Unique_key_one_columnKey 1)
 
 testMigrateAddColumnSingle :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMigrateAddColumnSingle = do
@@ -613,7 +634,7 @@ testMigrateAddDropNotNull = do
   migr (undefined :: New.AddNotNull)
   k <- insert val2
   migr (undefined :: Old.AddNotNull)
-  insert val >>= deleteByKey
+  insert val >>= deleteBy
   migr (undefined :: New.AddNotNull)
   val2' <- get k
   Just val2 @=? val2'
@@ -660,14 +681,14 @@ testReference = do
   migr (undefined :: Single (Key (Single String) BackendSpecific))
   k <- insert $ Single "abc"
   insert $ Single k
-  assertExc "Foreign key must prevent deletion" $ deleteByKey k
+  assertExc "Foreign key must prevent deletion" $ deleteBy k
 
 testMaybeReference :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testMaybeReference = do
   migr (undefined :: Single (Maybe (Key (Single String) BackendSpecific)))
   k <- insert $ Single "abc"
   insert $ Single $ Just k
-  assertExc "Foreign key must prevent deletion" $ deleteByKey k
+  assertExc "Foreign key must prevent deletion" $ deleteBy k
 
 testUniqueKey :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testUniqueKey = do

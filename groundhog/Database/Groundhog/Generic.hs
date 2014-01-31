@@ -51,6 +51,7 @@ module Database.Groundhog.Generic
   , mapAllRows
   , phantomDb
   , isSimple
+  , deleteByKey
   ) where
 
 import Database.Groundhog.Core
@@ -319,3 +320,7 @@ runDbConnNoTransaction f cm = runNoLoggingT (withConnNoTransaction (runDbPersist
 -- | It helps to run 'withConnSavepoint' within a monad.
 withSavepoint :: (HasConn m cm conn, SingleConnectionManager cm conn, Savepoint conn) => String -> m a -> m a
 withSavepoint name m = ask >>= withConnNoTransaction (withConnSavepoint name m)
+
+{-# DEPRECATED deleteByKey "Use deleteBy instead" #-}
+deleteByKey :: (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m ()
+deleteByKey = deleteBy

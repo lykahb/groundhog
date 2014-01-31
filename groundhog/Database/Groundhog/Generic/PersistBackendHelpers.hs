@@ -10,10 +10,12 @@ module Database.Groundhog.Generic.PersistBackendHelpers
   , project
   , count
   , replace
+  , replaceBy
   , update
   , delete
+  , deleteBy
+  , deleteAll
   , insertByAll
-  , deleteByKey
   , countAll
   , insertBy
   ) where
@@ -196,6 +198,23 @@ replace escape queryFunc execFunc insertIntoConstructorTable k v = do
               execFunc updateDiscrQuery [head vals, toPrimitivePersistValue proxy k]
         Nothing -> return ()
 
+replaceBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
+          => (Utf8 -> Utf8) -- ^ escape
+          -> (Utf8 -> [PersistValue] -> m ()) -- ^ function to execute query
+          -> u (UniqueMarker v)
+          -> v
+          -> m ()
+replaceBy escape execFunc u v = do
+  uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
+  vals <- toEntityPersistValues v
+  let e = entityDef (undefined :: v)
+      uFields = renderChain escape (fieldChain u) []
+      RenderS cond condVals = intercalateS " AND " $ mkUniqueCond uFields uniques
+      constr = head $ constructors e
+      upds = renderFields (\f -> escape f <> "=?") $ constrParams constr
+      updateQuery = "UPDATE " <> tableName escape e constr <> " SET " <> upds <> " WHERE " <> cond
+  execFunc updateQuery (tail . vals . condVals $ [])
+
 update :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => (Utf8 -> Utf8) -> (Utf8 -> [PersistValue] -> m ()) -> (Cond db r -> Maybe (RenderS db r)) -> [Update db r] -> Cond db r -> m ()
 update escape execFunc renderCond' upds cond = do
@@ -247,9 +266,9 @@ insertByAll escape queryFunc manyNulls v = do
         Nothing -> liftM Right $ Core.insert v
         Just xs -> return $ Left $ fst $ fromPurePersistValues proxy xs
 
-deleteByKey :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
+deleteBy :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
             => (Utf8 -> Utf8) -> (Utf8 -> [PersistValue] -> m ()) -> Key v BackendSpecific -> m ()
-deleteByKey escape execFunc k = execFunc query [toPrimitivePersistValue proxy k] where
+deleteBy escape execFunc k = execFunc query [toPrimitivePersistValue proxy k] where
   e = entityDef ((undefined :: Key v u -> v) k)
   proxy = undefined :: Proxy (PhantomDb m)
   constr = head $ constructors e
@@ -258,6 +277,13 @@ deleteByKey escape execFunc k = execFunc query [toPrimitivePersistValue proxy k]
     else "id"
   -- the entries in the constructor table are deleted because of the reference on delete cascade
   query = "DELETE FROM " <> mainTableName escape e <> " WHERE " <> idName <> "=?"
+
+deleteAll :: forall m v . (PersistBackend m, PersistEntity v)
+          => (Utf8 -> Utf8) -> (Utf8 -> [PersistValue] -> m ()) -> v -> m ()
+deleteAll escape execFunc (_ :: v) = do
+  let e = entityDef (undefined :: v)
+      query = "DELETE FROM " <> mainTableName escape e
+  execFunc query []
 
 countAll :: forall m v . (PersistBackend m, PersistEntity v)
          => (Utf8 -> Utf8) -> (forall a . Utf8 -> [DbType] -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> v -> m Int

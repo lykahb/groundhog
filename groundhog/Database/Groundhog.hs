@@ -20,6 +20,7 @@ module Database.Groundhog (
   , limitTo
   , offsetBy
   , orderBy
+  , deleteByKey
   -- * Expressions
   , (=.)
   , (&&.), (||.)
