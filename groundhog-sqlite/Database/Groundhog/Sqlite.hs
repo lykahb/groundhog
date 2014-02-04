@@ -47,28 +47,28 @@ instance DbDescriptor Sqlite where
   backendName _ = "sqlite"
 
 instance SqlDb Sqlite where
-  append a b = Expr $ operator 50 "||" a b
+  append a b = mkExpr $ operator 50 "||" a b
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite (NoLoggingT IO)) #-}
   type PhantomDb (DbPersist Sqlite m) = Sqlite
   insert v = insert' v
   insert_ v = insert_' v
-  insertBy u v = H.insertBy escapeS queryRawTyped True u v
-  insertByAll v = H.insertByAll escapeS queryRawTyped True v
-  replace k v = H.replace escapeS queryRawTyped executeRawCached' insertIntoConstructorTable k v
+  insertBy u v = H.insertBy escapeS queryRawCached' True u v
+  insertByAll v = H.insertByAll escapeS queryRawCached' True v
+  replace k v = H.replace escapeS queryRawCached' executeRawCached' insertIntoConstructorTable k v
   replaceBy k v = H.replaceBy escapeS executeRawCached' k v
-  select options = H.select escapeS queryRawTyped "LIMIT -1" renderCond' options -- select' options
-  selectAll = H.selectAll escapeS queryRawTyped
-  get k = H.get escapeS queryRawTyped k
-  getBy k = H.getBy escapeS queryRawTyped k
+  select options = H.select escapeS queryRawCached' "LIMIT -1" renderCond' options -- select' options
+  selectAll = H.selectAll escapeS queryRawCached'
+  get k = H.get escapeS queryRawCached' k
+  getBy k = H.getBy escapeS queryRawCached' k
   update upds cond = H.update escapeS executeRawCached' renderCond' upds cond
   delete cond = H.delete escapeS executeRawCached' renderCond' cond
   deleteBy k = H.deleteBy escapeS executeRawCached' k
   deleteAll v = H.deleteAll escapeS executeRawCached' v
-  count cond = H.count escapeS queryRawTyped renderCond' cond
-  countAll fakeV = H.countAll escapeS queryRawTyped fakeV
-  project p options = H.project escapeS queryRawTyped "LIMIT -1" renderCond' p options
+  count cond = H.count escapeS queryRawCached' renderCond' cond
+  countAll fakeV = H.countAll escapeS queryRawCached' fakeV
+  project p options = H.project escapeS queryRawCached' "LIMIT -1" renderCond' p options
   migrate fakeV = migrate' fakeV
 
   executeRaw False query ps = executeRaw' (fromString query) ps
@@ -408,7 +408,7 @@ getList' k = do
   let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRawTyped query (getDbTypes (dbType (undefined :: a)) []) [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
+  queryRawCached' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
     
 getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m PersistValue
 getLastInsertRowId = do
@@ -476,19 +476,6 @@ queryRawCached' query vals f = do
       case x of
         S.Done -> return Nothing
         S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
-
-queryRawTyped :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
-queryRawTyped query types vals f = do
-  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
-  stmt <- getStatementCached query
-  let types' = map typeToSqlite $ foldr getDbTypes [] types
-  flip finally (liftIO $ S.reset stmt) $ do
-    liftIO $ bind stmt vals
-    f $ liftIO $ do
-      x <- S.step stmt
-      case x of
-        S.Done -> return Nothing
-        S.Row  -> fmap (Just . map pFromSql) $ S.typedColumns stmt types'
 
 typeToSqlite :: DbType -> Maybe S.ColumnType
 typeToSqlite (DbTypePrimitive t nullable _ _) = case t of

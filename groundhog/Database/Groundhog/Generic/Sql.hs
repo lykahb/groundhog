@@ -28,6 +28,7 @@ module Database.Groundhog.Generic.Sql
     , function
     , operator
     , parens
+    , mkExpr
     , Snippet(..)
     , SqlDb(..)
     , liftExpr
@@ -77,7 +78,7 @@ renderExpr esc expr = renderExprPriority esc 0 expr
 
 renderExprPriority :: (DbDescriptor db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> Int -> UntypedExpr db r -> RenderS db r
 renderExprPriority esc p expr = (case expr of
-  ExprRaw (Expr (Snippet f)) -> let vals = f esc p in ensureOne vals id
+  ExprRaw (Snippet f) -> let vals = f esc p in ensureOne vals id
   ExprField f -> let fs = renderChain esc f []
                  in ensureOne fs $ \f' -> RenderS f' id
   ExprPure  a -> let vals = toPurePersistValues proxy a
@@ -90,7 +91,7 @@ renderExprPriority esc p expr = (case expr of
 
 renderExprExtended :: (DbDescriptor db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> Int -> UntypedExpr db r -> [RenderS db r]
 renderExprExtended esc p expr = (case expr of
-  ExprRaw (Expr (Snippet f)) -> f esc p
+  ExprRaw (Snippet f) -> f esc p
   ExprField f -> map (flip RenderS id) $ renderChain esc f []
   ExprPure a -> let vals = toPurePersistValues proxy a []
                 in map renderPersistValue vals) where
@@ -125,6 +126,9 @@ operator pr op = \a b -> Snippet $ \esc p ->
 function :: (SqlDb db, QueryRaw db ~ Snippet db) => String -> [UntypedExpr db r] -> Snippet db r
 function func args = Snippet $ \esc _ -> [fromString func <> fromChar '(' <> commasJoin (map (renderExpr esc) args) <> fromChar ')']
 
+mkExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => Snippet db r -> Expr db r a
+mkExpr = Expr . ExprRaw
+
 #if !MIN_VERSION_base(4, 5, 0)
 {-# INLINABLE (<>) #-}
 (<>) :: Monoid m => m -> m -> m
@@ -132,11 +136,11 @@ function func args = Snippet $ \esc _ -> [fromString func <> fromChar '(' <> com
 #endif
 
 instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Num a) => Num (Expr db r a) where
-  a + b = Expr $ operator 60 "+" a b
-  a - b = Expr $ operator 60 "-" a b
-  a * b = Expr $ operator 70 "*" a b
+  a + b = mkExpr $ operator 60 "+" a b
+  a - b = mkExpr $ operator 60 "-" a b
+  a * b = mkExpr $ operator 70 "*" a b
   signum = error "Num Expr: no signum"
-  abs a = Expr $ Snippet $ \esc _ -> ["ABS(" <> renderExpr esc (toExpr a) <> fromChar ')']
+  abs a = mkExpr $ Snippet $ \esc _ -> ["ABS(" <> renderExpr esc (toExpr a) <> fromChar ')']
   fromInteger a = liftExpr' (fromIntegral a :: Int64)
 
 {-# INLINABLE renderCond #-}
@@ -270,7 +274,7 @@ liftExpr :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a b) => a -> 
 liftExpr a = liftExpr' a
 
 liftExpr' :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a) => a -> Expr db r b
-liftExpr' a = Expr $ Snippet $ \esc pr -> renderExprExtended esc pr (toExpr a)
+liftExpr' a = mkExpr $ Snippet $ \esc pr -> renderExprExtended esc pr (toExpr a)
 
 -- | Returns escaped table name optionally qualified with schema
 {-# SPECIALIZE tableName :: (Utf8 -> Utf8) -> EntityDef -> ConstructorDef -> Utf8 #-}

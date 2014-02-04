@@ -57,27 +57,27 @@ instance DbDescriptor Postgresql where
   backendName _ = "postgresql"
 
 instance SqlDb Postgresql where
-  append a b = Expr $ operator 50 "||" a b
+  append a b = mkExpr $ operator 50 "||" a b
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Postgresql m) where
   type PhantomDb (DbPersist Postgresql m) = Postgresql
   insert v = insert' v
   insert_ v = insert_' v
-  insertBy u v = H.insertBy escapeS queryRawTyped' True u v
-  insertByAll v = H.insertByAll escapeS queryRawTyped' True v
-  replace k v = H.replace escapeS queryRawTyped' executeRaw' (insertIntoConstructorTable False) k v
+  insertBy u v = H.insertBy escapeS queryRaw' True u v
+  insertByAll v = H.insertByAll escapeS queryRaw' True v
+  replace k v = H.replace escapeS queryRaw' executeRaw' (insertIntoConstructorTable False) k v
   replaceBy k v = H.replaceBy escapeS executeRaw' k v
-  select options = H.select escapeS queryRawTyped' "" renderCond' options
-  selectAll = H.selectAll escapeS queryRawTyped'
-  get k = H.get escapeS queryRawTyped' k
-  getBy k = H.getBy escapeS queryRawTyped' k
+  select options = H.select escapeS queryRaw' "" renderCond' options
+  selectAll = H.selectAll escapeS queryRaw'
+  get k = H.get escapeS queryRaw' k
+  getBy k = H.getBy escapeS queryRaw' k
   update upds cond = H.update escapeS executeRaw' renderCond' upds cond
   delete cond = H.delete escapeS executeRaw' renderCond' cond
   deleteBy k = H.deleteBy escapeS executeRaw' k
   deleteAll v = H.deleteAll escapeS executeRaw' v
-  count cond = H.count escapeS queryRawTyped' renderCond' cond
-  countAll fakeV = H.countAll escapeS queryRawTyped' fakeV
-  project p options = H.project escapeS queryRawTyped' "" renderCond' p options
+  count cond = H.count escapeS queryRaw' renderCond' cond
+  countAll fakeV = H.countAll escapeS queryRaw' fakeV
+  project p options = H.project escapeS queryRaw' "" renderCond' p options
   migrate fakeV = migrate' fakeV
 
   executeRaw _ query ps = executeRaw' (fromString query) ps
@@ -629,9 +629,6 @@ escape s = '\"' : s ++ "\""
 getStatement :: Utf8 -> PG.Query
 getStatement sql = PG.Query $ fromUtf8 sql
 
-queryRawTyped' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [DbType] -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
-queryRawTyped' query _ vals f = queryRaw' query vals f
-
 queryRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Postgresql m) -> DbPersist Postgresql m a) -> DbPersist Postgresql m a
 queryRaw' query vals f = do
   $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
@@ -755,4 +752,4 @@ explicitType a = castType a t where
 
 -- | Casts expression to a type. @castType value \"INT\"@ results in @value::INT@.
 castType :: Expression Postgresql r a => a -> String -> Expr Postgresql r a
-castType a t = Expr $ Snippet $ \esc _ -> ["(" <> renderExpr esc (toExpr a) <> ")::" <> fromString t] where
+castType a t = mkExpr $ Snippet $ \esc _ -> ["(" <> renderExpr esc (toExpr a) <> ")::" <> fromString t] where

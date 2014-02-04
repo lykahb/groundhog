@@ -446,7 +446,7 @@ instance (EntityConstr v c, PersistField a) => Projection (SubField v c a) db (R
   projectionResult _ = fromPersistValues
 
 instance PersistField a => Projection (Expr db r a) db r a where
-  projectionExprs e = (ExprRaw e:)
+  projectionExprs (Expr e) = (e:)
   projectionResult _ = fromPersistValues
 
 instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) db (RestrictionHolder v c) a where

@@ -476,12 +476,12 @@ class NeverNull a
 -- | Used to uniformly represent fields, constants and more complex things, e.g., arithmetic expressions.
 -- A value should be converted to 'UntypedExpr' for usage in expressions
 data UntypedExpr db r where
-  ExprRaw :: forall db r a . PersistField a => Expr db r a -> UntypedExpr db r
+  ExprRaw :: QueryRaw db r -> UntypedExpr db r
   ExprField :: FieldChain -> UntypedExpr db r
   ExprPure :: forall db r a . PurePersistField a => a -> UntypedExpr db r
 
 -- | Expr with phantom type helps to keep type safety in complex expressions
-newtype Expr db r a = Expr (QueryRaw db r)
+newtype Expr db r a = Expr (UntypedExpr db r)
 instance Show (Expr db r a) where show _ = "Expr"
 instance Eq (Expr db r a) where (==) = error "(==): this instance Eq (Expr db r a) is made only for Num superclass constraint"
 

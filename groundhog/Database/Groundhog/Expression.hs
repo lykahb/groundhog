@@ -37,7 +37,7 @@ instance PurePersistField a => Expression db r a where
   toExpr = ExprPure
 
 instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
-  toExpr = ExprRaw
+  toExpr (Expr e) = e
 
 instance (EntityConstr v c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
   toExpr = ExprField . fieldChain

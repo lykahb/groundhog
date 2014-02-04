@@ -125,42 +125,42 @@ parseArr :: (DbDescriptor db, ArrayElem a) => Proxy db -> Parser (Array a)
 parseArr p = Array <$> (char '{' *> parseElem p `sepBy` char ',' <* char '}')
 
 (!) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b Int) => a -> b -> Expr Postgresql r elem
-(!) arr i = Expr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i) <> "]"]
+(!) arr i = mkExpr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i) <> "]"]
 
 (!:) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r i1 Int, ExpressionOf Postgresql r i2 Int) => a -> (i1, i2) -> Expr Postgresql r (Array elem)
-(!:) arr (i1, i2) = Expr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i1) <> ":" <> renderExpr esc (toExpr i2) <> "]"]
+(!:) arr (i1, i2) = mkExpr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i1) <> ":" <> renderExpr esc (toExpr i2) <> "]"]
 
 prepend :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Expr Postgresql r (Array elem)
-prepend a b = Expr $ function "array_prepend" [toExpr a, toExpr b]
+prepend a b = mkExpr $ function "array_prepend" [toExpr a, toExpr b]
 
 append :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b elem) => a -> b -> Expr Postgresql r (Array elem)
-append a b = Expr $ function "array_append" [toExpr a, toExpr b]
+append a b = mkExpr $ function "array_append" [toExpr a, toExpr b]
 
 arrayCat :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b (Array elem)) => a -> b -> Expr Postgresql r (Array elem)
-arrayCat a b = Expr $ function "array_cat" [toExpr a, toExpr b]
+arrayCat a b = mkExpr $ function "array_cat" [toExpr a, toExpr b]
 
 arrayDims :: (ExpressionOf Postgresql r a (Array elem)) => a -> Expr Postgresql r String
-arrayDims arr = Expr $ function "array_dims" [toExpr arr]
+arrayDims arr = mkExpr $ function "array_dims" [toExpr arr]
 
 arrayNDims :: (ExpressionOf Postgresql r a (Array elem)) => a -> Expr Postgresql r Int
-arrayNDims arr = Expr $ function "array_ndims" [toExpr arr]
+arrayNDims arr = mkExpr $ function "array_ndims" [toExpr arr]
 
 arrayLower :: (ExpressionOf Postgresql r a (Array elem)) => a -> Int -> Expr Postgresql r Int
-arrayLower arr dim = Expr $ function "array_lower" [toExpr arr, toExpr dim]
+arrayLower arr dim = mkExpr $ function "array_lower" [toExpr arr, toExpr dim]
 
 arrayUpper :: (ExpressionOf Postgresql r a (Array elem)) => a -> Int -> Expr Postgresql r Int
-arrayUpper arr dim = Expr $ function "array_upper" [toExpr arr, toExpr dim]
+arrayUpper arr dim = mkExpr $ function "array_upper" [toExpr arr, toExpr dim]
 
 arrayLength :: (ExpressionOf Postgresql r a (Array elem)) => a -> Int -> Expr Postgresql r Int
-arrayLength arr dim = Expr $ function "array_length" [toExpr arr, toExpr dim]
+arrayLength arr dim = mkExpr $ function "array_length" [toExpr arr, toExpr dim]
 
 -- | Concatenates array elements using supplied delimiter. array_to_string(ARRAY[1, 2, 3], '~^~') = 1~^~2~^~3
 arrayToString :: (ExpressionOf Postgresql r a (Array elem)) => a -> String -> Expr Postgresql r String
-arrayToString arr sep = Expr $ function "array_to_string" [toExpr arr, toExpr sep]
+arrayToString arr sep = mkExpr $ function "array_to_string" [toExpr arr, toExpr sep]
 
 -- | Splits string into array elements using supplied delimiter. string_to_array('xx~^~yy~^~zz', '~^~') = {xx,yy,zz}
 stringToArray :: (ExpressionOf Postgresql r a String) => a -> String -> Expr Postgresql r (Array String)
-stringToArray arr sep = Expr $ function "string_to_array" [toExpr arr, toExpr sep]
+stringToArray arr sep = mkExpr $ function "string_to_array" [toExpr arr, toExpr sep]
 
 any :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r
 any a arr = CondRaw $ Snippet $ \esc _ -> [renderExprPriority esc 37 (toExpr a) <> "=ANY" <> fromChar '(' <> renderExpr esc (toExpr arr) <> fromChar ')']
