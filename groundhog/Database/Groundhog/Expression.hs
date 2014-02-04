@@ -29,9 +29,9 @@ class Expression db r a where
   toExpr :: a -> UntypedExpr db r
 
 -- | This helper class can make type signatures more concise
-class (Expression db r a, Unifiable a a') => ExpressionOf db r a a'
+class (Expression db r a, PurePersistField a') => ExpressionOf db r a a'
 
-instance (Expression db r a, Unifiable a a') => ExpressionOf db r a a'
+instance (Expression db r a, Normalize HTrue a (flag, a'), PurePersistField a') => ExpressionOf db r a a'
 
 instance PurePersistField a => Expression db r a where
   toExpr = ExprPure
