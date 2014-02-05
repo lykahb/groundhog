@@ -19,6 +19,7 @@ module Database.Groundhog.Expression
   , (&&.), (||.)
   , (==.), (/=.), (<.), (<=.), (>.), (>=.)
   , isFieldNothing
+  , toArith
   ) where
 
 import Database.Groundhog.Core
@@ -144,3 +145,11 @@ isFieldNothing :: (Expression db r f, FieldLike f db r (Maybe a), PrimitivePersi
 isFieldNothing a = a `eq` Nothing where
   eq :: (Expression db r f, Expression db r a, FieldLike f db r a, Unifiable f a) => f -> a -> Cond db r
   eq = (==.)
+
+liftExpr :: ExpressionOf db r a a' => a -> Expr db r a'
+liftExpr a = Expr $ toExpr a
+
+-- | Convert field to an arithmetic value. It is kept for compatibility with older Groundhog versions and can be replaced with liftExpr.
+-- toArith :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r f a', FieldLike f db r a') => f -> Expr db r a'
+toArith :: ExpressionOf db r a a' => a -> Expr db r a'
+toArith = liftExpr

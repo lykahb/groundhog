@@ -37,7 +37,3 @@ lower a = mkExpr $ function "lower" [toExpr a]
 
 upper :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> Expr db r String
 upper a = mkExpr $ function "upper" [toExpr a]
-
--- | Convert field to an arithmetic value. It is kept for compatibility with older Groundhog versions and can be replaced with liftExpr.
-toArith :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r f a', FieldLike f db r a') => f -> Expr db r a'
-toArith = liftExpr

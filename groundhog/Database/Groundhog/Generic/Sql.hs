@@ -31,7 +31,6 @@ module Database.Groundhog.Generic.Sql
     , mkExpr
     , Snippet(..)
     , SqlDb(..)
-    , liftExpr
     , tableName
     , mainTableName
     ) where
@@ -140,8 +139,8 @@ instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Num a) => Num (Exp
   a - b = mkExpr $ operator 60 "-" a b
   a * b = mkExpr $ operator 70 "*" a b
   signum = error "Num Expr: no signum"
-  abs a = mkExpr $ Snippet $ \esc _ -> ["ABS(" <> renderExpr esc (toExpr a) <> fromChar ')']
-  fromInteger a = liftExpr' (fromIntegral a :: Int64)
+  abs a = mkExpr $ function "abs" [toExpr a]
+  fromInteger a = Expr $ toExpr (fromIntegral a :: Int64)
 
 {-# INLINABLE renderCond #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
@@ -269,12 +268,6 @@ renderUpdates esc upds = (case mapMaybe go upds of
     rend = renderExprExtended esc 0
     fs = concatMap rend (projectionExprs field [])
     guard a = if null fs then Nothing else Just a
-
-liftExpr :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a b) => a -> Expr db r b
-liftExpr a = liftExpr' a
-
-liftExpr' :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a) => a -> Expr db r b
-liftExpr' a = mkExpr $ Snippet $ \esc pr -> renderExprExtended esc pr (toExpr a)
 
 -- | Returns escaped table name optionally qualified with schema
 {-# SPECIALIZE tableName :: (Utf8 -> Utf8) -> EntityDef -> ConstructorDef -> Utf8 #-}
