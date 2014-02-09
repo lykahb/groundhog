@@ -120,46 +120,55 @@ instance PrimitivePersistField ByteString where
 instance PrimitivePersistField Int where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int8 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int16 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int32 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Int64 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word8 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word16 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word32 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Word64 where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
   fromPrimitivePersistValue _ (PersistInt64 a) = fromIntegral a
+  fromPrimitivePersistValue _ (PersistDouble a) = truncate a
   fromPrimitivePersistValue _ x = readHelper x ("Expected Integer, received: " ++ show x)
 
 instance PrimitivePersistField Double where

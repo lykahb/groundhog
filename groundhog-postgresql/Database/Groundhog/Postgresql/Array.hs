@@ -125,10 +125,10 @@ parseArr :: (DbDescriptor db, ArrayElem a) => Proxy db -> Parser (Array a)
 parseArr p = Array <$> (char '{' *> parseElem p `sepBy` char ',' <* char '}')
 
 (!) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b Int) => a -> b -> Expr Postgresql r elem
-(!) arr i = mkExpr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i) <> "]"]
+(!) arr i = mkExpr $ Snippet $ \conf _ -> [renderExpr conf (toExpr arr) <> "[" <> renderExpr conf (toExpr i) <> "]"]
 
 (!:) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r i1 Int, ExpressionOf Postgresql r i2 Int) => a -> (i1, i2) -> Expr Postgresql r (Array elem)
-(!:) arr (i1, i2) = mkExpr $ Snippet $ \esc _ -> [renderExpr esc (toExpr arr) <> "[" <> renderExpr esc (toExpr i1) <> ":" <> renderExpr esc (toExpr i2) <> "]"]
+(!:) arr (i1, i2) = mkExpr $ Snippet $ \conf _ -> [renderExpr conf (toExpr arr) <> "[" <> renderExpr conf (toExpr i1) <> ":" <> renderExpr conf (toExpr i2) <> "]"]
 
 prepend :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Expr Postgresql r (Array elem)
 prepend a b = mkExpr $ function "array_prepend" [toExpr a, toExpr b]
@@ -163,10 +163,10 @@ stringToArray :: (ExpressionOf Postgresql r a String) => a -> String -> Expr Pos
 stringToArray arr sep = mkExpr $ function "string_to_array" [toExpr arr, toExpr sep]
 
 any :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r
-any a arr = CondRaw $ Snippet $ \esc _ -> [renderExprPriority esc 37 (toExpr a) <> "=ANY" <> fromChar '(' <> renderExpr esc (toExpr arr) <> fromChar ')']
+any a arr = CondRaw $ Snippet $ \conf _ -> [renderExprPriority conf 37 (toExpr a) <> "=ANY" <> fromChar '(' <> renderExpr conf (toExpr arr) <> fromChar ')']
 
 all :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r
-all a arr = CondRaw $ Snippet $ \esc _ -> [renderExprPriority esc 37 (toExpr a) <> "=ALL" <> fromChar '(' <> renderExpr esc (toExpr arr) <> fromChar ')']
+all a arr = CondRaw $ Snippet $ \conf _ -> [renderExprPriority conf 37 (toExpr a) <> "=ALL" <> fromChar '(' <> renderExpr conf (toExpr arr) <> fromChar ')']
 
 -- | Contains. ARRAY[1,4,3] @> ARRAY[3,1] = t
 (@>) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r

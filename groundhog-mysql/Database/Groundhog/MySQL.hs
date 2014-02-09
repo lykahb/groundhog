@@ -56,26 +56,32 @@ instance DbDescriptor MySQL where
 
 instance SqlDb MySQL where
   append a b = mkExpr $ function "concat" [toExpr a, toExpr b]
+  signum' a = mkExpr $ function "sign" [toExpr a]
+  quotRem' x y = (mkExpr $ operator 70 " div " x y, mkExpr $ operator 70 " % " x y)
+
+instance FloatingSqlDb MySQL where
+  log' a = mkExpr $ function "log" [toExpr a]
+  logBase' b x = mkExpr $ function "log" [toExpr b, toExpr x]
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist MySQL m) where
   type PhantomDb (DbPersist MySQL m) = MySQL
   insert v = insert' v
   insert_ v = insert_' v
-  insertBy u v = H.insertBy escapeS queryRaw' True u v
-  insertByAll v = H.insertByAll escapeS queryRaw' True v
-  replace k v = H.replace escapeS queryRaw' executeRaw' insertIntoConstructorTable k v
-  replaceBy k v = H.replaceBy escapeS executeRaw' k v
-  select options = H.select escapeS queryRaw' noLimit renderCond' options
-  selectAll = H.selectAll escapeS queryRaw'
-  get k = H.get escapeS queryRaw' k
-  getBy k = H.getBy escapeS queryRaw' k
-  update upds cond = H.update escapeS executeRaw' renderCond' upds cond
-  delete cond = H.delete escapeS executeRaw' renderCond' cond
-  deleteBy k = H.deleteBy escapeS executeRaw' k
-  deleteAll v = H.deleteAll escapeS executeRaw' v
-  count cond = H.count escapeS queryRaw' renderCond' cond
-  countAll fakeV = H.countAll escapeS queryRaw' fakeV
-  project p options = H.project escapeS queryRaw' noLimit renderCond' p options
+  insertBy u v = H.insertBy renderConfig queryRaw' True u v
+  insertByAll v = H.insertByAll renderConfig queryRaw' True v
+  replace k v = H.replace renderConfig queryRaw' executeRaw' insertIntoConstructorTable k v
+  replaceBy k v = H.replaceBy renderConfig executeRaw' k v
+  select options = H.select renderConfig queryRaw' noLimit options
+  selectAll = H.selectAll renderConfig queryRaw'
+  get k = H.get renderConfig queryRaw' k
+  getBy k = H.getBy renderConfig queryRaw' k
+  update upds cond = H.update renderConfig executeRaw' upds cond
+  delete cond = H.delete renderConfig executeRaw' cond
+  deleteBy k = H.deleteBy renderConfig executeRaw' k
+  deleteAll v = H.deleteAll renderConfig executeRaw' v
+  count cond = H.count renderConfig queryRaw' cond
+  countAll fakeV = H.countAll renderConfig queryRaw' fakeV
+  project p options = H.project renderConfig queryRaw' noLimit p options
   migrate fakeV = migrate' fakeV
 
   executeRaw _ query ps = executeRaw' (fromString query) ps
@@ -243,10 +249,12 @@ executeRaw' query vals = do
     _ <- MySQL.execute conn stmt (map P vals)
     return ()
 
-renderCond' :: Cond MySQL r -> Maybe (RenderS MySQL r)
-renderCond' = renderCond escapeS renderEquals renderNotEquals where
-  renderEquals a b = a <> "<=>" <> b
-  renderNotEquals a b = "NOT(" <> a <> "<=>" <> b <> ")"
+renderConfig :: RenderConfig
+renderConfig = RenderConfig {
+    esc = escapeS
+  , rendEq = \a b -> a <> "<=>" <> b
+  , rendNotEq = \a b -> "NOT(" <> a <> "<=>" <> b <> ")"
+}
 
 escapeS :: Utf8 -> Utf8
 escapeS a = let q = fromChar '`' in q <> a <> q

@@ -19,6 +19,7 @@ module Database.Groundhog.Expression
   , (&&.), (||.)
   , (==.), (/=.), (<.), (<=.), (>.), (>=.)
   , isFieldNothing
+  , liftExpr
   , toArith
   ) where
 
@@ -30,9 +31,9 @@ class Expression db r a where
   toExpr :: a -> UntypedExpr db r
 
 -- | This helper class can make type signatures more concise
-class (Expression db r a, PurePersistField a') => ExpressionOf db r a a'
+class (Expression db r a, PersistField a') => ExpressionOf db r a a'
 
-instance (Expression db r a, Normalize HTrue a (flag, a'), PurePersistField a') => ExpressionOf db r a a'
+instance (Expression db r a, Normalize HTrue a (flag, a'), PersistField a') => ExpressionOf db r a a'
 
 instance PurePersistField a => Expression db r a where
   toExpr = ExprPure
@@ -146,10 +147,11 @@ isFieldNothing a = a `eq` Nothing where
   eq :: (Expression db r f, Expression db r a, FieldLike f db r a, Unifiable f a) => f -> a -> Cond db r
   eq = (==.)
 
+-- | Converts value to 'Expr'. It can help to pass values of different types into functions which expect arguments of the same type, like (+).
 liftExpr :: ExpressionOf db r a a' => a -> Expr db r a'
 liftExpr a = Expr $ toExpr a
 
--- | Convert field to an arithmetic value. It is kept for compatibility with older Groundhog versions and can be replaced with liftExpr.
--- toArith :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r f a', FieldLike f db r a') => f -> Expr db r a'
+{-# DEPRECATED toArith "Please use liftExpr instead" #-}
+-- | It is kept for compatibility with older Groundhog versions and can be replaced with "liftExpr".
 toArith :: ExpressionOf db r a a' => a -> Expr db r a'
 toArith = liftExpr

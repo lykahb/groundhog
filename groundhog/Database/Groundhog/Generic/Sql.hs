@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, OverloadedStrings, FlexibleInstances, TypeFamilies, UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, OverloadedStrings, FlexibleInstances, TypeFamilies, UndecidableInstances, RecordWildCards #-}
 {-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -16,11 +16,14 @@ module Database.Groundhog.Generic.Sql
     , renderExprPriority
     , renderExprExtended
     , renderPersistValue
+    , mkExprWithConf
+    , prerenderExpr
     , intercalateS
     , commasJoin
     , flatten
     , RenderS(..)
     , Utf8(..)
+    , RenderConfig(..)
     , fromUtf8
     , StringLike(..)
     , fromString
@@ -31,6 +34,7 @@ module Database.Groundhog.Generic.Sql
     , mkExpr
     , Snippet(..)
     , SqlDb(..)
+    , FloatingSqlDb(..)
     , tableName
     , mainTableName
     ) where
@@ -39,7 +43,6 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic (isSimple)
 import Database.Groundhog.Instances ()
 import qualified Blaze.ByteString.Builder.Char.Utf8 as B
-import Data.Int (Int64)
 import Data.Maybe (mapMaybe)
 import Data.Monoid
 import Data.String
@@ -65,20 +68,50 @@ instance StringLike Utf8 where
   fromChar = Utf8 . B.fromChar
 
 -- | Escape function, priority of the outer operator. The result is a list for the embedded data which may expand to several RenderS.
-newtype Snippet db r = Snippet ((Utf8 -> Utf8) -> Int -> [RenderS db r])
+newtype Snippet db r = Snippet (RenderConfig -> Int -> [RenderS db r])
 
--- Alas, GHC before 7.2 does not support superclass equality constraints (QueryRaw db ~ Snippet db).
+data RenderConfig = RenderConfig {
+    esc  :: Utf8 -> Utf8
+  , rendEq  :: Utf8 -> Utf8 -> Utf8
+  , rendNotEq  :: Utf8 -> Utf8 -> Utf8
+}
+
+-- Alas , GHC before 7.2 does not support superclass equality constraints (QueryRaw db ~ Snippet db).
 -- | This class distinguishes databases which support SQL-specific expressions. It contains ad hoc members for features whose syntax differs across the databases.
 class DbDescriptor db => SqlDb db where
   append :: (ExpressionOf db r a String, ExpressionOf db r b String) => a -> b -> Expr db r String
+  signum' :: (ExpressionOf db r x a, Num a) => x -> Expr db r a
+  quotRem' :: (ExpressionOf db r x a, ExpressionOf db r y a, Integral a) => x -> y -> (Expr db r a, Expr db r a)
 
-renderExpr :: (DbDescriptor db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> UntypedExpr db r -> RenderS db r
-renderExpr esc expr = renderExprPriority esc 0 expr
+-- | This class distinguishes databases which support trigonometry and other math functions. For example, PostgreSQL has them but Sqlite does not. It contains ad hoc members for features whose syntax differs across the databases.
+class SqlDb db => FloatingSqlDb db where
+  -- | Natural logarithm
+  log' :: (ExpressionOf db r x a, Floating a) => x -> Expr db r a
+  logBase' :: (ExpressionOf db r b a, ExpressionOf db r x a, Floating a) => b -> x -> Expr db r a
 
-renderExprPriority :: (DbDescriptor db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> Int -> UntypedExpr db r -> RenderS db r
-renderExprPriority esc p expr = (case expr of
-  ExprRaw (Snippet f) -> let vals = f esc p in ensureOne vals id
-  ExprField f -> let fs = renderChain esc f []
+-- | If we reuse complex expression several times, prerendering it saves time. `RenderConfig` can be obtained with `mkExprWithConf`
+prerenderExpr :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> Expr db r a -> Expr db r a
+prerenderExpr conf (Expr e) = Expr $ ExprRaw $ Snippet $ \_ _ -> prerendered where
+  -- Priority of outer operation is not known. Assuming that it is high ensures that parentheses won't be missing.
+  prerendered = renderExprExtended conf maxBound e
+
+-- | Helps creating an expression which depends on render configuration. It can be used in pair with `prerenderExpr`.
+-- @
+-- myExpr x = mkExprWithConf $ \conf _ -> let
+--        x' = prerenderExpr conf x
+--     in x' + x' * x'@
+-- @
+mkExprWithConf :: (SqlDb db, QueryRaw db ~ Snippet db, PersistField a) => (RenderConfig -> Int -> Expr db r a) -> Expr db r a
+mkExprWithConf f = expr where
+  expr = mkExpr $ Snippet $ \conf p -> [renderExprPriority conf p $ toExpr $ (f conf p) `asTypeOf` expr]
+
+renderExpr :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> UntypedExpr db r -> RenderS db r
+renderExpr conf expr = renderExprPriority conf 0 expr
+
+renderExprPriority :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
+renderExprPriority conf p expr = (case expr of
+  ExprRaw (Snippet f) -> let vals = f conf p in ensureOne vals id
+  ExprField f -> let fs = renderChain conf f []
                  in ensureOne fs $ \f' -> RenderS f' id
   ExprPure  a -> let vals = toPurePersistValues proxy a
                  in ensureOne (vals []) renderPersistValue) where
@@ -88,10 +121,10 @@ renderExprPriority esc p expr = (case expr of
       [x] -> f x
       xs' -> error $ "renderExprPriority: expected one column field, found " ++ show (length xs')
 
-renderExprExtended :: (DbDescriptor db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> Int -> UntypedExpr db r -> [RenderS db r]
-renderExprExtended esc p expr = (case expr of
-  ExprRaw (Snippet f) -> f esc p
-  ExprField f -> map (flip RenderS id) $ renderChain esc f []
+renderExprExtended :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
+renderExprExtended conf p expr = (case expr of
+  ExprRaw (Snippet f) -> f conf p
+  ExprField f -> map (flip RenderS id) $ renderChain conf f []
   ExprPure a -> let vals = toPurePersistValues proxy a []
                 in map renderPersistValue vals) where
   proxy = (undefined :: f db r -> Proxy db) expr
@@ -119,11 +152,11 @@ parens :: Int -> Int -> RenderS db r -> RenderS db r
 parens p1 p2 expr = if p1 < p2 then fromChar '(' <> expr <> fromChar ')' else expr
 
 operator :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a, Expression db r b) => Int -> String -> a -> b -> Snippet db r
-operator pr op = \a b -> Snippet $ \esc p ->
-  [parens pr p $ renderExprPriority esc pr (toExpr a) <> fromString op <> renderExprPriority esc pr (toExpr b)]
+operator pr op = \a b -> Snippet $ \conf p ->
+  [parens pr p $ renderExprPriority conf pr (toExpr a) <> fromString op <> renderExprPriority conf pr (toExpr b)]
 
 function :: (SqlDb db, QueryRaw db ~ Snippet db) => String -> [UntypedExpr db r] -> Snippet db r
-function func args = Snippet $ \esc _ -> [fromString func <> fromChar '(' <> commasJoin (map (renderExpr esc) args) <> fromChar ')']
+function func args = Snippet $ \conf _ -> [fromString func <> fromChar '(' <> commasJoin (map (renderExpr conf) args) <> fromChar ')']
 
 mkExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => Snippet db r -> Expr db r a
 mkExpr = Expr . ExprRaw
@@ -134,22 +167,12 @@ mkExpr = Expr . ExprRaw
 (<>) = mappend
 #endif
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Num a) => Num (Expr db r a) where
-  a + b = mkExpr $ operator 60 "+" a b
-  a - b = mkExpr $ operator 60 "-" a b
-  a * b = mkExpr $ operator 70 "*" a b
-  signum = error "Num Expr: no signum"
-  abs a = mkExpr $ function "abs" [toExpr a]
-  fromInteger a = Expr $ toExpr (fromIntegral a :: Int64)
-
 {-# INLINABLE renderCond #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
 renderCond :: forall r db . (SqlDb db, QueryRaw db ~ Snippet db)
-  => (Utf8 -> Utf8) -- ^ escape
-  -> (Utf8 -> Utf8 -> Utf8) -- ^ render equals
-  -> (Utf8 -> Utf8 -> Utf8) -- ^ render not equals
+  => RenderConfig
   -> Cond db r -> Maybe (RenderS db r)
-renderCond esc rendEq rendNotEq (cond :: Cond db r) = go cond 0 where
+renderCond conf@RenderConfig{..} (cond :: Cond db r) = go cond 0 where
   go (And a b)       p = perhaps andP p " AND " a b
   go (Or a b)        p = perhaps orP p " OR " a b
   go (Not a)         p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
@@ -160,7 +183,7 @@ renderCond esc rendEq rendNotEq (cond :: Cond db r) = go cond 0 where
     Lt -> renderComp orP p " OR " (\a b -> a <> fromChar '<' <> b) f1 f2
     Ge -> renderComp orP p " OR " (\a b -> a <> ">=" <> b) f1 f2
     Le -> renderComp orP p " OR " (\a b -> a <> "<=" <> b) f1 f2
-  go (CondRaw (Snippet f)) p = case f esc p of
+  go (CondRaw (Snippet f)) p = case f conf p of
     [] -> Nothing
     [a] -> Just a
     _ -> error "renderCond: cannot render CondRaw with many elements"
@@ -170,8 +193,8 @@ renderCond esc rendEq rendNotEq (cond :: Cond db r) = go cond 0 where
   orP = 20
 
   renderComp p pOuter logicOp op expr1 expr2 = result where
-    expr1' = renderExprExtended esc p' expr1
-    expr2' = renderExprExtended esc p' expr2
+    expr1' = renderExprExtended conf p' expr1
+    expr2' = renderExprExtended conf p' expr2
     liftOp f (RenderS a1 b1) (RenderS a2 b2) = RenderS (f a1 a2) (b1 . b2)
     (result, p') = case zipWith (liftOp op) expr1' expr2' of
       [clause] -> (Just clause, pOuter)
@@ -195,8 +218,8 @@ examples of prefixes
 [("val1", DbEmbedded False _), ("val4", EmbeddedDef False _), ("val5", EmbeddedDef True _)] -> "val4$val1"
 -}
 {-# INLINABLE renderChain #-}
-renderChain :: (Utf8 -> Utf8) -> FieldChain -> [Utf8] -> [Utf8]
-renderChain esc (f, prefix) acc = (case prefix of
+renderChain :: RenderConfig -> FieldChain -> [Utf8] -> [Utf8]
+renderChain RenderConfig{..} (f, prefix) acc = (case prefix of
   ((name, EmbeddedDef False _):fs) -> flattenP esc (goP (fromString name) fs) f acc
   _ -> flatten esc f acc) where
   goP p ((name, EmbeddedDef False _):fs) = goP (fromString name <> fromChar delim <> p) fs
@@ -216,38 +239,38 @@ defaultShowPrim (PersistNull) = "NULL"
 defaultShowPrim (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 {-# INLINABLE renderOrders #-}
-renderOrders :: forall db r . (Utf8 -> Utf8) -> [Order db r] -> Utf8
+renderOrders :: forall db r . RenderConfig -> [Order db r] -> Utf8
 renderOrders _ [] = mempty
-renderOrders esc xs = if null orders then mempty else " ORDER BY " <> commasJoin orders where
+renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoin orders where
   orders = foldr go [] xs
-  go (Asc a) acc = renderChain esc (fieldChain a) acc
-  go (Desc a) acc = renderChain (\f -> esc f <> " DESC") (fieldChain a) acc
+  go (Asc a) acc = renderChain conf (fieldChain a) acc
+  go (Desc a) acc = map (<> " DESC") $ renderChain conf (fieldChain a) acc
 
 {-# INLINABLE renderFields #-}
 -- Returns string with comma separated escaped fields like "name,age"
 -- If there are other columns before renderFields result, do not put comma because the result might be an empty string. This happens when the fields have no columns like ().
 -- One of the solutions is to add one more field with datatype that is known to have columns, eg renderFields id (("id", namedType (0 :: Int64)) : constrParams constr)
 renderFields :: (Utf8 -> Utf8) -> [(String, DbType)] -> Utf8
-renderFields esc = commasJoin . foldr (flatten esc) []
+renderFields escape = commasJoin . foldr (flatten escape) []
 
 -- TODO: merge code of flatten and flattenP
 flatten :: (Utf8 -> Utf8) -> (String, DbType) -> ([Utf8] -> [Utf8])
-flatten esc (fname, typ) acc = go typ where
+flatten escape (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbEmbedded emb _ -> handleEmb emb
-    _            -> esc fullName : acc
+    _            -> escape fullName : acc
   fullName = fromString fname
-  handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts
-  handleEmb (EmbeddedDef True  ts) = foldr (flatten esc) acc ts
+  handleEmb (EmbeddedDef False ts) = foldr (flattenP escape fullName) acc ts
+  handleEmb (EmbeddedDef True  ts) = foldr (flatten escape) acc ts
 
 flattenP :: (Utf8 -> Utf8) -> Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8])
-flattenP esc prefix (fname, typ) acc = go typ where
+flattenP escape prefix (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbEmbedded emb _ -> handleEmb emb
-    _            -> esc fullName : acc
+    _            -> escape fullName : acc
   fullName = prefix <> fromChar delim <> fromString fname
-  handleEmb (EmbeddedDef False ts) = foldr (flattenP esc fullName) acc ts
-  handleEmb (EmbeddedDef True  ts) = foldr (flatten esc) acc ts
+  handleEmb (EmbeddedDef False ts) = foldr (flattenP escape fullName) acc ts
+  handleEmb (EmbeddedDef True  ts) = foldr (flatten escape) acc ts
 
 commasJoin :: StringLike s => [s] -> s
 commasJoin = intercalateS (fromChar ',')
@@ -260,12 +283,12 @@ intercalateS a (x:xs) = x <> go xs where
   go (f:fs) = a <> f <> go fs
 
 {-# INLINABLE renderUpdates #-}
-renderUpdates :: (SqlDb db, QueryRaw db ~ Snippet db) => (Utf8 -> Utf8) -> [Update db r] -> Maybe (RenderS db r)
-renderUpdates esc upds = (case mapMaybe go upds of
+renderUpdates :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> [Update db r] -> Maybe (RenderS db r)
+renderUpdates conf upds = (case mapMaybe go upds of
   [] -> Nothing
   xs -> Just $ commasJoin xs) where
   go (Update field expr) = guard $ commasJoin $ zipWith (\f1 f2 -> f1 <> fromChar '=' <> f2) fs (rend expr) where
-    rend = renderExprExtended esc 0
+    rend = renderExprExtended conf 0
     fs = concatMap rend (projectionExprs field [])
     guard a = if null fs then Nothing else Just a
 

@@ -26,6 +26,7 @@ module Database.Groundhog (
   , (&&.), (||.)
   , (==.), (/=.), (<.), (<=.), (>.), (>=.)
   , isFieldNothing
+  , liftExpr
   -- * Migration
   , createMigration
   , executeMigration

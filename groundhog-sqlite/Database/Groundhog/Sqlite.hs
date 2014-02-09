@@ -11,6 +11,7 @@ module Database.Groundhog.Sqlite
 
 import Database.Groundhog
 import Database.Groundhog.Core
+import Database.Groundhog.Expression
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration hiding (MigrationPack(..))
 import qualified Database.Groundhog.Generic.Migration as GM
@@ -48,27 +49,31 @@ instance DbDescriptor Sqlite where
 
 instance SqlDb Sqlite where
   append a b = mkExpr $ operator 50 "||" a b
+  signum' x = mkExpr $ Snippet $ \esc _ -> let
+       x' = renderExpr esc (toExpr x)
+    in ["case when (" <> x' <> ") > 0 then 1 when (" <> x' <> ") < 0 then -1 else 0 end"]
+  quotRem' x y = (mkExpr $ operator 70 "/" x y, mkExpr $ operator 70 "%" x y)
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite (NoLoggingT IO)) #-}
   type PhantomDb (DbPersist Sqlite m) = Sqlite
   insert v = insert' v
   insert_ v = insert_' v
-  insertBy u v = H.insertBy escapeS queryRawCached' True u v
-  insertByAll v = H.insertByAll escapeS queryRawCached' True v
-  replace k v = H.replace escapeS queryRawCached' executeRawCached' insertIntoConstructorTable k v
-  replaceBy k v = H.replaceBy escapeS executeRawCached' k v
-  select options = H.select escapeS queryRawCached' "LIMIT -1" renderCond' options -- select' options
-  selectAll = H.selectAll escapeS queryRawCached'
-  get k = H.get escapeS queryRawCached' k
-  getBy k = H.getBy escapeS queryRawCached' k
-  update upds cond = H.update escapeS executeRawCached' renderCond' upds cond
-  delete cond = H.delete escapeS executeRawCached' renderCond' cond
-  deleteBy k = H.deleteBy escapeS executeRawCached' k
-  deleteAll v = H.deleteAll escapeS executeRawCached' v
-  count cond = H.count escapeS queryRawCached' renderCond' cond
-  countAll fakeV = H.countAll escapeS queryRawCached' fakeV
-  project p options = H.project escapeS queryRawCached' "LIMIT -1" renderCond' p options
+  insertBy u v = H.insertBy renderConfig queryRawCached' True u v
+  insertByAll v = H.insertByAll renderConfig queryRawCached' True v
+  replace k v = H.replace renderConfig queryRawCached' executeRawCached' insertIntoConstructorTable k v
+  replaceBy k v = H.replaceBy renderConfig executeRawCached' k v
+  select options = H.select renderConfig queryRawCached' "LIMIT -1"  options
+  selectAll = H.selectAll renderConfig queryRawCached'
+  get k = H.get renderConfig queryRawCached' k
+  getBy k = H.getBy renderConfig queryRawCached' k
+  update upds cond = H.update renderConfig executeRawCached' upds cond
+  delete cond = H.delete renderConfig executeRawCached' cond
+  deleteBy k = H.deleteBy renderConfig executeRawCached' k
+  deleteAll v = H.deleteAll renderConfig executeRawCached' v
+  count cond = H.count renderConfig queryRawCached' cond
+  countAll fakeV = H.countAll renderConfig queryRawCached' fakeV
+  project p options = H.project renderConfig queryRawCached' "LIMIT -1" p options
   migrate fakeV = migrate' fakeV
 
   executeRaw False query ps = executeRaw' (fromString query) ps
@@ -514,10 +519,12 @@ escape s = '\"' : s ++ "\""
 escapeS :: Utf8 -> Utf8
 escapeS a = let q = fromChar '"' in q <> a <> q
 
-renderCond' :: Cond Sqlite r -> Maybe (RenderS Sqlite r)
-renderCond' = renderCond escapeS renderEquals renderNotEquals where
-  renderEquals a b = a <> " IS " <> b
-  renderNotEquals a b = a <> " IS NOT " <> b
+renderConfig :: RenderConfig
+renderConfig = RenderConfig {
+    esc = escapeS
+  , rendEq = \a b -> a <> " IS " <> b
+  , rendNotEq = \a b -> a <> " IS NOT " <> b
+}
 
 defaultPriority, triggerPriority :: Int
 defaultPriority = 0

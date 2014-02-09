@@ -58,26 +58,32 @@ instance DbDescriptor Postgresql where
 
 instance SqlDb Postgresql where
   append a b = mkExpr $ operator 50 "||" a b
+  signum' x = mkExpr $ function "sign" [toExpr x]
+  quotRem' x y = (mkExpr $ operator 70 "/" x y, mkExpr $ operator 70 "%" x y)
+
+instance FloatingSqlDb Postgresql where
+  log' x = mkExpr $ function "ln" [toExpr x]
+  logBase' b x = log (liftExpr x) / log (liftExpr b)
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Postgresql m) where
   type PhantomDb (DbPersist Postgresql m) = Postgresql
   insert v = insert' v
   insert_ v = insert_' v
-  insertBy u v = H.insertBy escapeS queryRaw' True u v
-  insertByAll v = H.insertByAll escapeS queryRaw' True v
-  replace k v = H.replace escapeS queryRaw' executeRaw' (insertIntoConstructorTable False) k v
-  replaceBy k v = H.replaceBy escapeS executeRaw' k v
-  select options = H.select escapeS queryRaw' "" renderCond' options
-  selectAll = H.selectAll escapeS queryRaw'
-  get k = H.get escapeS queryRaw' k
-  getBy k = H.getBy escapeS queryRaw' k
-  update upds cond = H.update escapeS executeRaw' renderCond' upds cond
-  delete cond = H.delete escapeS executeRaw' renderCond' cond
-  deleteBy k = H.deleteBy escapeS executeRaw' k
-  deleteAll v = H.deleteAll escapeS executeRaw' v
-  count cond = H.count escapeS queryRaw' renderCond' cond
-  countAll fakeV = H.countAll escapeS queryRaw' fakeV
-  project p options = H.project escapeS queryRaw' "" renderCond' p options
+  insertBy u v = H.insertBy renderConfig queryRaw' True u v
+  insertByAll v = H.insertByAll renderConfig queryRaw' True v
+  replace k v = H.replace renderConfig queryRaw' executeRaw' (insertIntoConstructorTable False) k v
+  replaceBy k v = H.replaceBy renderConfig executeRaw' k v
+  select options = H.select renderConfig queryRaw' "" options
+  selectAll = H.selectAll renderConfig queryRaw'
+  get k = H.get renderConfig queryRaw' k
+  getBy k = H.getBy renderConfig queryRaw' k
+  update upds cond = H.update renderConfig executeRaw' upds cond
+  delete cond = H.delete renderConfig executeRaw' cond
+  deleteBy k = H.deleteBy renderConfig executeRaw' k
+  deleteAll v = H.deleteAll renderConfig executeRaw' v
+  count cond = H.count renderConfig queryRaw' cond
+  countAll fakeV = H.countAll renderConfig queryRaw' fakeV
+  project p options = H.project renderConfig queryRaw' "" p options
   migrate fakeV = migrate' fakeV
 
   executeRaw _ query ps = executeRaw' (fromString query) ps
@@ -247,10 +253,12 @@ executeRaw' query vals = do
     _ <- PG.execute conn stmt (map P vals)
     return ()
 
-renderCond' :: Cond Postgresql r -> Maybe (RenderS Postgresql r)
-renderCond' = renderCond escapeS renderEquals renderNotEquals where
-  renderEquals a b = a <> " IS NOT DISTINCT FROM " <> b
-  renderNotEquals a b = a <> " IS DISTINCT FROM " <> b
+renderConfig :: RenderConfig
+renderConfig = RenderConfig {
+    esc = escapeS
+  , rendEq = \a b -> a <> " IS NOT DISTINCT FROM " <> b
+  , rendNotEq = \a b -> a <> " IS DISTINCT FROM " <> b
+}
 
 escapeS :: Utf8 -> Utf8
 escapeS a = let q = fromChar '"' in q <> a <> q
@@ -752,4 +760,4 @@ explicitType a = castType a t where
 
 -- | Casts expression to a type. @castType value \"INT\"@ results in @value::INT@.
 castType :: Expression Postgresql r a => a -> String -> Expr Postgresql r a
-castType a t = mkExpr $ Snippet $ \esc _ -> ["(" <> renderExpr esc (toExpr a) <> ")::" <> fromString t] where
+castType a t = mkExpr $ Snippet $ \conf _ -> ["(" <> renderExpr conf (toExpr a) <> ")::" <> fromString t] where
