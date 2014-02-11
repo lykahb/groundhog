@@ -5,4 +5,5 @@ before_script:
   - mysql < test/init_mysql.sql
 
 script:
-  - cabal install ./groundhog-test --enable-tests --force-reinstalls
+  - cd groundhog-test
+  - cabal install --enable-tests --force-reinstalls
