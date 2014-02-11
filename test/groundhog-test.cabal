@@ -1,0 +1,128 @@
+name:            groundhog-test
+version:         0.0.1
+license:         BSD3
+license-file:    LICENSE
+author:          Boris Lykah <lykahb@gmail.com>
+maintainer:      Boris Lykah <lykahb@gmail.com>
+synopsis:        Tests for Groundhog
+description:     Tests for Groundhog
+category:        Database
+stability:       Stable
+cabal-version:   >= 1.8
+build-type:      Simple
+homepage:        http://github.com/lykahb/groundhog
+
+Flag sqlite
+   Description: test Slite
+   Default: False
+
+Flag postgresql
+   Description: test PostgreSQL
+   Default: False
+
+Flag mysql
+   Description: test MySQL
+   Default: False
+
+library
+    exposed-modules: GroundhogTest
+                     Database.Groundhog
+                     Database.Groundhog.Core
+                     Database.Groundhog.Expression
+                     Database.Groundhog.Generic
+                     Database.Groundhog.Generic.Migration
+                     Database.Groundhog.Generic.Sql
+                     Database.Groundhog.Generic.Sql.Functions
+                     Database.Groundhog.Generic.PersistBackendHelpers
+                     Database.Groundhog.Instances
+                     Database.Groundhog.TH
+                     Database.Groundhog.TH.Settings
+                     Database.Groundhog.TH.CodeGen
+                     Migration.New
+                     Migration.Old
+
+
+    hs-source-dirs: ., groundhog, groundhog-th, groundhog-sqlite, groundhog-postgresql, groundhog-mysql
+
+    ghc-options:   -Wall
+
+    build-depends:   base                     >= 4       && < 5
+                   , bytestring               >= 0.9
+                   , transformers             >= 0.2.1
+                   , mtl                      >= 2.0
+                   , time                     >= 1.1.4
+                   , text                     >= 0.8
+                   , blaze-builder            >= 0.3.0.0
+                   , containers               >= 0.2
+                   , monad-control            >= 0.3
+                   , monad-logger             >= 0.3
+                   , resource-pool            >= 0.2.1
+                   , transformers-base
+                   , HUnit
+                   , template-haskell
+                   , yaml                     >= 0.8.1
+                   , utf8-string              >= 0.3       && < 0.4
+                   , test-framework-hunit     >= 0.3
+                   , test-framework           >= 0.2
+
+   if flag(sqlite)
+     build-depends:
+                     direct-sqlite           >= 2.3.5
+                   , unordered-containers
+
+     exposed-modules:
+                     Database.Groundhog.Sqlite
+
+     cpp-options: -DWITH_SQLITE
+
+   if flag(postgresql)
+     build-depends:
+                     postgresql-simple     >= 0.2
+                   , postgresql-libpq      >= 0.6
+                   , attoparsec            >= 0.8.5.3
+     exposed-modules:
+                     Database.Groundhog.Postgresql
+                   , Database.Groundhog.Postgresql.Array
+                   , Database.Groundhog.Postgresql.Geometry
+
+     cpp-options: -DWITH_POSTGRESQL
+
+
+   if flag(mysql)
+     build-depends:
+                     mysql-simple          >= 0.2.2.3
+                   , mysql                 >= 0.1.1.3
+
+     exposed-modules:
+                     Database.Groundhog.MySQL
+
+     cpp-options: -DWITH_MYSQL
+
+
+test-suite test
+    type:          exitcode-stdio-1.0
+    main-is:       main.hs
+
+    build-depends:   base >= 4 && < 5
+                   , bytestring               >= 0.9
+                   , transformers             >= 0.2.1
+                   , groundhog-test
+                   , test-framework-hunit     >= 0.3
+                   , test-framework           >= 0.2
+                   , time                     >= 1.1.4
+                   , HUnit
+                   , containers               >= 0.2
+                   , monad-control            >= 0.3
+                   , monad-logger             >= 0.3
+
+    if flag(sqlite)
+        cpp-options: -DWITH_SQLITE
+    if flag(postgresql)
+        cpp-options: -DWITH_POSTGRESQL
+    if flag(mysql)
+        cpp-options: -DWITH_MYSQL
+
+
+source-repository head
+  type:     git
+  location: git://github.com/lykahb/groundhog.git
