@@ -2,7 +2,7 @@ language: haskell
 
 before_install:
   - cd groundhog-test
-  - cabal install --only-dependencies
+  - cabal install --only-dependencies -fsqlite -fpostgresql -fmysql
 
 install:
   - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
