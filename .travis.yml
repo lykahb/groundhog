@@ -5,7 +5,7 @@ before_install:
   - cabal install --only-dependencies
 
 install:
-  - cabal install --enable-tests -fsqlite -fpostgresql -fmysql
+  - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
   - cabal build
 
 before_script:
