@@ -1,1 +1,5 @@
 language: haskell
+
+before_script:
+  - psql -f test/init_postgresql.sql -U postgres
+  - mysql < test/init_mysql.sql

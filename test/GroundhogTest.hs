@@ -1,6 +1,63 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, CPP #-}
 
 -- ghc --make -fforce-recomp -DWITH_SQLITE -DWITH_POSTGRESQL -DWITH_MYSQL tests.hs
+module GroundhogTest (
+      testSelect
+    , testCond
+    , testArith
+    , testProjectionSql
+    , testNumber
+    , testPersistSettings
+    , testEmbedded
+    , testInsert
+    , testMaybe
+    , testCount
+    , testUpdate
+    , testComparison
+    , testEncoding
+    , testDelete
+    , testDeleteBy
+    , testDeleteAll
+    , testReplaceSingle
+    , testReplaceMulti
+    , testReplaceBy
+    , testTuple
+    , testTupleList
+    , testMigrateAddColumnSingle
+    , testMigrateAddUniqueConstraint
+    , testMigrateDropUniqueConstraint
+    , testMigrateAddUniqueIndex
+    , testMigrateDropUniqueIndex
+    , testMigrateAddDropNotNull
+    , testMigrateAddConstructorToMany
+    , testMigrateChangeType
+    , testLongNames
+    , testReference
+    , testMaybeReference
+    , testUniqueKey
+    , testForeignKeyUnique
+    , testProjection
+    , testKeyNormalization
+    , testAutoKeyField
+    , testTime
+    , testPrimitiveData
+    , testMigrateOrphanConstructors
+    , testSchemas
+    , testFloating
+    , testListTriggersOnDelete
+    , testListTriggersOnUpdate
+#if WITH_SQLITE
+    , testSchemaAnalysisSqlite
+#endif
+#if WITH_POSTGRESQL
+    , testSchemaAnalysisPostgresql
+    , testGeometry
+    , testArrays
+#endif
+#if WITH_MYSQL
+    , testSchemaAnalysisMySQL
+#endif
+) where
 
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
@@ -148,120 +205,11 @@ mkPersist defaultCodegenConfig [groundhog|
         fields: [foreignUniqueKey]
 |]
 
-main :: IO ()
-main = do
-#if WITH_POSTGRESQL
-  let postgresql = [testGroup "Database.Groundhog.Postgresql" $ concatMap ($ runPSQL) [mkTestSuite, mkSqlTestSuite, postgresqlTestSuite]]
-      runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runDbConn $ cleanPostgresql >> m
-#else
-  let postgresql = []
-#endif
-#if WITH_SQLITE
-  let sqlite = [testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite)  [mkTestSuite, mkSqlTestSuite, sqliteTestSuite]]
-      runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
-#else
-  let sqlite = []
-#endif
-#if WITH_MYSQL
-  let mysql = [testGroup "Database.Groundhog.MySQL" $ concatMap ($ runMySQL) [mkTestSuite, mkSqlTestSuite, mysqlTestSuite]]
-      mySQLConnInfo = defaultConnectInfo
-                        { connectHost     = "localhost"
-                        , connectUser     = "test"
-                        , connectPassword = "test"
-                        , connectDatabase = "test"
-                        }
-      runMySQL m = withMySQLConn mySQLConnInfo . runDbConn $ cleanMySQL >> m
-#else
-  let mysql = []
-#endif
-  defaultMain $ mysql ++ sqlite ++ postgresql
-
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
 migr v = do
   runMigration silentMigrationLogger (migrate v)
   m <- createMigration $ migrate v
   [] @=? filter (/= Right []) (Map.elems m)
-
-mkSqlTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => (m () -> IO ()) -> [Test]
-mkSqlTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testSelect", testSelect)
-  , ("testCond", testCond)
-  , ("testArith", testArith)
-  , ("testProjectionSql", testProjectionSql)
-  ]
-
-mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> [Test]
-mkTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testNumber", testNumber)
-  , ("testPersistSettings", testPersistSettings)
-  , ("testEmbedded", testEmbedded)
-  , ("testInsert", testInsert)
-  , ("testMaybe", testMaybe)
-  , ("testCount", testCount)
-  , ("testUpdate", testUpdate)
-  , ("testComparison", testComparison)
-  , ("testEncoding", testEncoding)
-  , ("testDelete", testDelete)
-  , ("testDeleteBy", testDeleteBy)
-  , ("testDeleteAll", testDeleteAll)
-  , ("testReplaceSingle", testReplaceSingle)
-  , ("testReplaceMulti", testReplaceMulti)
-  , ("testReplaceBy", testReplaceBy)
-  , ("testTuple", testTuple)
-  , ("testTupleList", testTupleList)
-  , ("testMigrateAddColumnSingle", testMigrateAddColumnSingle)
-  , ("testMigrateAddUniqueConstraint", testMigrateAddUniqueConstraint)
-  , ("testMigrateDropUniqueConstraint", testMigrateDropUniqueConstraint)
-  , ("testMigrateAddUniqueIndex", testMigrateAddUniqueIndex)
-  , ("testMigrateDropUniqueIndex", testMigrateDropUniqueIndex)
-  , ("testMigrateAddDropNotNull", testMigrateAddDropNotNull)
-  , ("testMigrateAddConstructorToMany", testMigrateAddConstructorToMany)
-  , ("testMigrateChangeType", testMigrateChangeType)
-  , ("testLongNames", testLongNames)
-  , ("testReference", testReference)
-  , ("testMaybeReference", testMaybeReference)
-  , ("testUniqueKey", testUniqueKey)
-  , ("testForeignKeyUnique", testForeignKeyUnique)
-  , ("testProjection", testProjection)
-  , ("testKeyNormalization", testKeyNormalization)
-  , ("testAutoKeyField", testAutoKeyField)
-  , ("testTime", testTime)
-  , ("testPrimitiveData", testPrimitiveData)
-  ]
-
-#if WITH_SQLITE
-sqliteTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist Sqlite m () -> IO ()) -> [Test]
-sqliteTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testMigrateOrphanConstructors", testMigrateOrphanConstructors)
-  , ("testSchemaAnalysisSqlite", testSchemaAnalysisSqlite)
-  , ("testListTriggersOnDelete", testListTriggersOnDelete)
-  , ("testListTriggersOnUpdate", testListTriggersOnUpdate)
-  ]
-#endif
-
-#if WITH_POSTGRESQL
-postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist Postgresql m () -> IO ()) -> [Test]
-postgresqlTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testGeometry", testGeometry)
-  , ("testArrays", testArrays)
-  , ("testSchemas", testSchemas)
-  , ("testSchemaAnalysisPostgresql", testSchemaAnalysisPostgresql)
-  , ("testFloating", testFloating)
-  , ("testListTriggersOnDelete", testListTriggersOnDelete)
-  , ("testListTriggersOnUpdate", testListTriggersOnUpdate)
-  ]
-#endif
-
-#if WITH_MYSQL
-mysqlTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist MySQL m () -> IO ()) -> [Test]
-mysqlTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testSchemas", testSchemas)
-  , ("testSchemaAnalysisMySQL", testSchemaAnalysisMySQL)
-  , ("testFloating", testFloating)
---  , ("testListTriggersOnDelete", testListTriggersOnDelete)  -- fails due to MySQL bug #11472
---  , ("testListTriggersOnUpdate", testListTriggersOnUpdate)  -- fails due to MySQL bug #11472
-  ]
-#endif
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
@@ -804,6 +752,36 @@ testSchemas = do
   let val2 = InAnotherSchema (Just k)
   Just val2 @=?? (insert val2 >>= get)
 
+testFloating :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, QueryRaw db ~ Snippet db, FloatingSqlDb db) => m ()
+testFloating = do
+  let val = Single (pi :: Double)
+  migr val
+  k <- insert val
+  let expected @=??~ expr = do
+        actual <- fmap head $ project expr $ AutoKeyField ==. k
+        liftIO $ unless (abs (expected - actual) < 0.0001) $ expected @=? actual
+  180 @=??~ degrees SingleField
+  pi  @=??~ radians (degrees SingleField)
+  0   @=??~ sin (liftExpr SingleField)
+  (-1)@=??~ cos (liftExpr SingleField)
+  1   @=??~ tan (liftExpr SingleField / 4)
+  0   @=??~ cot (liftExpr SingleField / 2)
+  (pi/2) @=??~ asin (sin $ liftExpr SingleField / 2)
+  pi  @=??~ acos (cos $ liftExpr SingleField)
+  exp 2   @=??~ exp 2
+  sqrt pi @=??~ sqrt (liftExpr SingleField)
+  exp pi @=??~ exp (liftExpr SingleField)
+  (pi ** 2) @=??~ (liftExpr SingleField ** 2)
+  log pi @=??~ log (liftExpr SingleField)
+  logBase 3 pi @=??~ logBase 3 (liftExpr SingleField)
+
+  sinh pi @=??~ sinh (liftExpr SingleField)
+  tanh pi @=??~ tanh (liftExpr SingleField)
+  cosh pi @=??~ cosh (liftExpr SingleField)
+  asinh pi @=??~ asinh (liftExpr SingleField)
+  atanh (pi / 4) @=??~ atanh (liftExpr SingleField / 4)
+  acosh (pi) @=??~ acosh (liftExpr SingleField)
+
 #if WITH_SQLITE
 testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m ()
 testSchemaAnalysisSqlite = do
@@ -887,36 +865,6 @@ testSchemaAnalysisPostgresql = do
   funcSql <- analyzeFunction Nothing "myFunction"
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
-
-testFloating :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, QueryRaw db ~ Snippet db, FloatingSqlDb db) => m ()
-testFloating = do
-  let val = Single (pi :: Double)
-  migr val
-  k <- insert val
-  let expected @=??~ expr = do
-        actual <- fmap head $ project expr $ AutoKeyField ==. k
-        liftIO $ unless (abs (expected - actual) < 0.0001) $ expected @=? actual
-  180 @=??~ degrees SingleField
-  pi  @=??~ radians (degrees SingleField)
-  0   @=??~ sin (liftExpr SingleField)
-  (-1)@=??~ cos (liftExpr SingleField)
-  1   @=??~ tan (liftExpr SingleField / 4)
-  0   @=??~ cot (liftExpr SingleField / 2)
-  (pi/2) @=??~ asin (sin $ liftExpr SingleField / 2)
-  pi  @=??~ acos (cos $ liftExpr SingleField)
-  exp 2   @=??~ exp 2
-  sqrt pi @=??~ sqrt (liftExpr SingleField)
-  exp pi @=??~ exp (liftExpr SingleField)
-  (pi ** 2) @=??~ (liftExpr SingleField ** 2)
-  log pi @=??~ log (liftExpr SingleField)
-  logBase 3 pi @=??~ logBase 3 (liftExpr SingleField)
-
-  sinh pi @=??~ sinh (liftExpr SingleField)
-  tanh pi @=??~ tanh (liftExpr SingleField)
-  cosh pi @=??~ cosh (liftExpr SingleField)
-  asinh pi @=??~ asinh (liftExpr SingleField)
-  atanh (pi / 4) @=??~ atanh (liftExpr SingleField / 4)
-  acosh (pi) @=??~ acosh (liftExpr SingleField)
 
 cleanPostgresql :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
 cleanPostgresql = forM_ ["public", "myschema"] $ \schema -> do
