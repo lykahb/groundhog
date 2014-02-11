@@ -3,7 +3,7 @@ language: haskell
 before_install:
   - cd groundhog-test
   - psql -f init_postgresql.sql -U postgres
-  - mysql < init_mysql.sql
+  - mysql -u root < init_mysql.sql
 
 install:
   - cabal install --force-reinstalls -fsqlite -fpostgresql -fmysql
