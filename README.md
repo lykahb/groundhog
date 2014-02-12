@@ -1,4 +1,4 @@
-## Interact with relational databases in Haskell
+## Interact with relational databases in Haskell [![Build Status](https://travis-ci.org/lykahb/groundhog.png?branch=master)](https://travis-ci.org/lykahb/groundhog)
 
 Migrate and access PostgreSQL, MySQL, and SQLite with type safety and detailed control. 
 Advanced migration capabilities allow you to precisely specify the schema description, fitting it to an existing database, or
