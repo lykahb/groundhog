@@ -39,10 +39,10 @@ like a b = CondRaw $ operator 40 " LIKE " a b
 notLike :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> String -> Cond db r
 notLike a b = CondRaw $ operator 40 " NOT LIKE " a b
 
-lower :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> Expr db r String
+lower :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> Expr db r a'
 lower a = mkExpr $ function "lower" [toExpr a]
 
-upper :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a String) => a -> Expr db r String
+upper :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> Expr db r a'
 upper a = mkExpr $ function "upper" [toExpr a]
 
 cot :: (FloatingSqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', Floating a') => a -> Expr db r a'
