@@ -8,3 +8,4 @@ before_install:
 install:
   - cabal install --force-reinstalls --enable-tests -fsqlite -fpostgresql -fmysql
 
+after_failure: cat dist/test/*.log
