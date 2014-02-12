@@ -1,12 +1,16 @@
 language: haskell
 
-before_script:
+before_install:
   - cd groundhog-test
+
+install:
+  - cabal install --only-dependencies --enable-tests -fsqlite -fpostgresql -fmysql
+
+before_script:
   - psql -f init_postgresql.sql -U postgres
   - mysql -u root < init_mysql.sql
 
 script:
-  - cabal install --only-dependencies --enable-tests -fsqlite -fpostgresql -fmysql
   - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
   - cabal build
   - cabal test --log=/dev/stdout
