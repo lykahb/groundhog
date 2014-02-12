@@ -6,5 +6,5 @@ before_install:
   - mysql -u root < init_mysql.sql
 
 install:
-  - cabal install --force-reinstalls -fsqlite -fpostgresql -fmysql
+  - cabal install --force-reinstalls --enable-tests -fsqlite -fpostgresql -fmysql
 
