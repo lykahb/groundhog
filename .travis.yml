@@ -6,6 +6,7 @@ before_install:
   - mysql -u root < init_mysql.sql
 
 install:
-  - cabal install --force-reinstalls --enable-tests -fsqlite -fpostgresql -fmysql
-
-after_failure: cat dist/test/*.log
+  - cabal install --only-dependencies --enable-tests -fsqlite -fpostgresql -fmysql
+  - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
+  - cabal build
+  - cabal test --log=/dev/stdout
