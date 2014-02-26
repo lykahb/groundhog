@@ -79,7 +79,7 @@ import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
 import Database.Groundhog.Postgresql.Array hiding (all, any, append)
 import qualified Database.Groundhog.Postgresql.Array as Arr
-import Database.Groundhog.Postgresql.Geometry
+import Database.Groundhog.Postgresql.Geometry hiding ((>>))
 #endif
 #if WITH_MYSQL
 import Database.Groundhog.MySQL
@@ -841,8 +841,8 @@ testArrays = do
   [] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.any (int 0) SingleField)
   [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.all (int 2) (SingleField !: (int 2, int 2)))
   [] @=?? project AutoKeyField (AutoKeyField ==. k &&. Arr.all (int 2) SingleField)
-  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. SingleField @> explicitType (Array [int 2, 1]))
-  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. explicitType (Array [int 2, 1]) <@ SingleField)
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. SingleField Arr.@> explicitType (Array [int 2, 1]))
+  [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. explicitType (Array [int 2, 1]) Arr.<@ SingleField)
   [k] @=?? project AutoKeyField (AutoKeyField ==. k &&. explicitType (Array [int 3..10]) `overlaps` SingleField)
   -- test escaping/unescaping
   let myString = ['\1'..'\255'] :: String

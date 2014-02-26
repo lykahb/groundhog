@@ -17,9 +17,6 @@ import Database.Groundhog.Sqlite
 #endif
 #if WITH_POSTGRESQL
 import Database.Groundhog.Postgresql
-import Database.Groundhog.Postgresql.Array hiding (all, any, append)
-import qualified Database.Groundhog.Postgresql.Array as Arr
-import Database.Groundhog.Postgresql.Geometry
 #endif
 #if WITH_MYSQL
 import Database.Groundhog.MySQL

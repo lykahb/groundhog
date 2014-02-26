@@ -168,11 +168,11 @@ any a arr = CondRaw $ Snippet $ \conf _ -> [renderExprPriority conf 37 (toExpr a
 all :: (ExpressionOf Postgresql r a elem, ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r
 all a arr = CondRaw $ Snippet $ \conf _ -> [renderExprPriority conf 37 (toExpr a) <> "=ALL" <> fromChar '(' <> renderExpr conf (toExpr arr) <> fromChar ')']
 
--- | Contains. ARRAY[1,4,3] @> ARRAY[3,1] = t
+-- | Contains. ARRAY[1,4,3] \@> ARRAY[3,1] = t
 (@>) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r
 (@>) a b = CondRaw $ operator 50 "@>" a b
 
--- | Is contained by. ARRAY[2,7] <@ ARRAY[1,7,4,2,6] = t
+-- | Is contained by. ARRAY[2,7] <\@ ARRAY[1,7,4,2,6] = t
 (<@) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b (Array elem)) => a -> b -> Cond Postgresql r
 (<@) a b = CondRaw $ operator 50 "<@" a b
 
