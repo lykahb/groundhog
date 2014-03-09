@@ -88,6 +88,7 @@ import Data.ByteString.Char8 (unpack)
 import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
 import qualified Data.Map as Map
+import qualified Data.String.Utils as Utils
 import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.Traversable as T
@@ -332,9 +333,17 @@ testCond :: forall m db . (PersistBackend m, MonadBaseControl IO m, MonadIO m, d
 testCond = do
   proxy <- phantomDb
   let rend :: forall r . Cond (PhantomDb m) r -> Maybe (RenderS (PhantomDb m) r)
-      rend = renderCond $ RenderConfig id (\a b -> a <> fromString "=" <> b) (\a b -> a <> fromString "<>" <> b)
+      rend = renderCond $ RenderConfig id
   let (===) :: forall r a. (PrimitivePersistField a) => (String, [a]) -> Cond (PhantomDb m) r -> m ()
-      (query, vals) === cond = let Just (RenderS q v) = rend cond in (query, map (toPrimitivePersistValue proxy) vals) @=? (unpack $ fromUtf8 $ q, v [])
+      (query, vals) === cond = let
+            Just (RenderS q v) = rend cond
+            equals = case backendName proxy of
+               "sqlite" -> " IS "
+               "postgresql" -> " IS NOT DISTINCT FROM "
+               "mysql" -> "<=>"
+               _ -> "="
+            query' = Utils.replace "=" equals query
+         in (query', map (toPrimitivePersistValue proxy) vals) @=? (unpack $ fromUtf8 $ q, v [])
 
   let intField f = f `asTypeOf` (undefined :: Field (Single (Int, Int)) c a)
       intNum = fromInteger :: Integer -> Expr db r Int
@@ -349,18 +358,20 @@ testCond = do
   ("?=single+?*?", [1, 2, 3 :: Int]) === ((1 :: Int) ==. liftExpr SingleField + 2 * 3)
 
 --  ("?-single=?", [1, 2 :: Int]) === (1 - liftExpr SingleField ==. (2 :: Int))
-  ("?*single>=single", [1 :: Int]) === (intNum 1 * liftExpr SingleField >=. SingleField)
+  ("?*single>single", [1 :: Int]) === (intNum 1 * liftExpr SingleField >. SingleField)
 --  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + liftExpr SingleField >=. liftExpr SingleField - 2)
   
   -- test parentheses
   ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
   ("single=? AND (?<? OR ?<?)", [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) &&. (1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int))
-  ("NOT (single=? AND (single=single OR single<>single))", [0 :: Int]) === (Not $ SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField /=. SingleField))
+  ("NOT (single=? AND (single=single OR single<single))", [0 :: Int]) === (Not $ SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField <. SingleField))
   
   -- test empty conditions
   ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
   ("single#val0=? AND single#val1=?", ["abc", "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
-  
+
+  -- test conditions used as expressions
+  ("(?=?)=(?=?)", [1, 1, 0, 0 :: Int]) === (((1 :: Int) ==. (1 :: Int)) ==. ((0 :: Int) ==. (0 :: Int)))
 
 testCount :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testCount = do
@@ -865,12 +876,6 @@ testSchemaAnalysisPostgresql = do
   funcSql <- analyzeFunction Nothing "myFunction"
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
-
-cleanPostgresql :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
-cleanPostgresql = forM_ ["public", "myschema"] $ \schema -> do
-  executeRaw True ("drop schema if exists " ++ schema ++ " cascade") []
-  executeRaw True ("create schema " ++ schema) []
-  executeRaw True ("alter schema " ++ schema ++ " owner to test") []
 #endif
 
 #if WITH_MYSQL
@@ -889,15 +894,6 @@ testSchemaAnalysisMySQL = do
   funcSql <- analyzeFunction Nothing "myfunc"
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN 42" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
-
-cleanMySQL :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist MySQL m ()
-cleanMySQL = do
-  executeRaw True "SET FOREIGN_KEY_CHECKS = 0" []
-  forM_ ["test", "myschema"] $ \schema -> do
-    executeRaw True ("drop database if exists " ++ schema) []
-    executeRaw True ("create database " ++ schema) []
-  executeRaw True ("use test") []
-  executeRaw True "SET FOREIGN_KEY_CHECKS = 1" []
 #endif
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()

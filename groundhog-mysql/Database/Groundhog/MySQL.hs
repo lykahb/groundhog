@@ -58,6 +58,8 @@ instance SqlDb MySQL where
   append a b = mkExpr $ function "concat" [toExpr a, toExpr b]
   signum' a = mkExpr $ function "sign" [toExpr a]
   quotRem' x y = (mkExpr $ operator 70 " div " x y, mkExpr $ operator 70 " % " x y)
+  equalsOperator a b = a <> "<=>" <> b
+  notEqualsOperator a b = "NOT(" <> a <> "<=>" <> b <> ")"
 
 instance FloatingSqlDb MySQL where
   log' a = mkExpr $ function "log" [toExpr a]
@@ -252,8 +254,6 @@ executeRaw' query vals = do
 renderConfig :: RenderConfig
 renderConfig = RenderConfig {
     esc = escapeS
-  , rendEq = \a b -> a <> "<=>" <> b
-  , rendNotEq = \a b -> "NOT(" <> a <> "<=>" <> b <> ")"
 }
 
 escapeS :: Utf8 -> Utf8

@@ -53,6 +53,8 @@ instance SqlDb Sqlite where
        x' = renderExpr esc (toExpr x)
     in ["case when (" <> x' <> ") > 0 then 1 when (" <> x' <> ") < 0 then -1 else 0 end"]
   quotRem' x y = (mkExpr $ operator 70 "/" x y, mkExpr $ operator 70 "%" x y)
+  equalsOperator a b = a <> " IS " <> b
+  notEqualsOperator a b = a <> " IS NOT " <> b
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Sqlite m) where
   {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite (NoLoggingT IO)) #-}
@@ -522,8 +524,6 @@ escapeS a = let q = fromChar '"' in q <> a <> q
 renderConfig :: RenderConfig
 renderConfig = RenderConfig {
     esc = escapeS
-  , rendEq = \a b -> a <> " IS " <> b
-  , rendNotEq = \a b -> a <> " IS NOT " <> b
 }
 
 defaultPriority, triggerPriority :: Int

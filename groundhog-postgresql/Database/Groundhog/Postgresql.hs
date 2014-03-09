@@ -60,6 +60,8 @@ instance SqlDb Postgresql where
   append a b = mkExpr $ operator 50 "||" a b
   signum' x = mkExpr $ function "sign" [toExpr x]
   quotRem' x y = (mkExpr $ operator 70 "/" x y, mkExpr $ operator 70 "%" x y)
+  equalsOperator a b = a <> " IS NOT DISTINCT FROM " <> b
+  notEqualsOperator a b = a <> " IS DISTINCT FROM " <> b
 
 instance FloatingSqlDb Postgresql where
   log' x = mkExpr $ function "ln" [toExpr x]
@@ -256,8 +258,6 @@ executeRaw' query vals = do
 renderConfig :: RenderConfig
 renderConfig = RenderConfig {
     esc = escapeS
-  , rendEq = \a b -> a <> " IS NOT DISTINCT FROM " <> b
-  , rendNotEq = \a b -> a <> " IS DISTINCT FROM " <> b
 }
 
 escapeS :: Utf8 -> Utf8

@@ -43,7 +43,7 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic (isSimple)
 import Database.Groundhog.Instances ()
 import qualified Blaze.ByteString.Builder.Char.Utf8 as B
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, maybeToList)
 import Data.Monoid
 import Data.String
 
@@ -70,10 +70,8 @@ instance StringLike Utf8 where
 -- | Escape function, priority of the outer operator. The result is a list for the embedded data which may expand to several RenderS.
 newtype Snippet db r = Snippet (RenderConfig -> Int -> [RenderS db r])
 
-data RenderConfig = RenderConfig {
+newtype RenderConfig = RenderConfig {
     esc  :: Utf8 -> Utf8
-  , rendEq  :: Utf8 -> Utf8 -> Utf8
-  , rendNotEq  :: Utf8 -> Utf8 -> Utf8
 }
 
 -- Alas , GHC before 7.2 does not support superclass equality constraints (QueryRaw db ~ Snippet db).
@@ -83,6 +81,9 @@ class DbDescriptor db => SqlDb db where
   signum' :: (ExpressionOf db r x a, Num a) => x -> Expr db r a
   quotRem' :: (ExpressionOf db r x a, ExpressionOf db r y a, Integral a) => x -> y -> (Expr db r a, Expr db r a)
 
+  equalsOperator :: RenderS db r -> RenderS db r -> RenderS db r
+  notEqualsOperator :: RenderS db r -> RenderS db r -> RenderS db r
+
 -- | This class distinguishes databases which support trigonometry and other math functions. For example, PostgreSQL has them but Sqlite does not. It contains ad hoc members for features whose syntax differs across the databases.
 class SqlDb db => FloatingSqlDb db where
   -- | Natural logarithm
@@ -90,7 +91,7 @@ class SqlDb db => FloatingSqlDb db where
   logBase' :: (ExpressionOf db r b a, ExpressionOf db r x a, Floating a) => b -> x -> Expr db r a
 
 -- | If we reuse complex expression several times, prerendering it saves time. `RenderConfig` can be obtained with `mkExprWithConf`
-prerenderExpr :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> Expr db r a -> Expr db r a
+prerenderExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> Expr db r a -> Expr db r a
 prerenderExpr conf (Expr e) = Expr $ ExprRaw $ Snippet $ \_ _ -> prerendered where
   -- Priority of outer operation is not known. Assuming that it is high ensures that parentheses won't be missing.
   prerendered = renderExprExtended conf maxBound e
@@ -105,28 +106,32 @@ mkExprWithConf :: (SqlDb db, QueryRaw db ~ Snippet db, PersistField a) => (Rende
 mkExprWithConf f = expr where
   expr = mkExpr $ Snippet $ \conf p -> [renderExprPriority conf p $ toExpr $ (f conf p) `asTypeOf` expr]
 
-renderExpr :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> UntypedExpr db r -> RenderS db r
+renderExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> UntypedExpr db r -> RenderS db r
 renderExpr conf expr = renderExprPriority conf 0 expr
 
-renderExprPriority :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
+renderExprPriority :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
 renderExprPriority conf p expr = (case expr of
   ExprRaw (Snippet f) -> let vals = f conf p in ensureOne vals id
   ExprField f -> let fs = renderChain conf f []
                  in ensureOne fs $ \f' -> RenderS f' id
   ExprPure  a -> let vals = toPurePersistValues proxy a
-                 in ensureOne (vals []) renderPersistValue) where
+                 in ensureOne (vals []) renderPersistValue
+  ExprCond  a -> case renderCondPriority conf p a of
+                   Nothing -> error "renderExprPriority: empty condition"
+                   Just x -> x) where
     proxy = (undefined :: f db r -> Proxy db) expr
     ensureOne :: [a] -> (a -> b) -> b
     ensureOne xs f = case xs of
       [x] -> f x
       xs' -> error $ "renderExprPriority: expected one column field, found " ++ show (length xs')
 
-renderExprExtended :: (DbDescriptor db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
+renderExprExtended :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
 renderExprExtended conf p expr = (case expr of
   ExprRaw (Snippet f) -> f conf p
   ExprField f -> map (flip RenderS id) $ renderChain conf f []
   ExprPure a -> let vals = toPurePersistValues proxy a []
-                in map renderPersistValue vals) where
+                in map renderPersistValue vals
+  ExprCond a -> maybeToList $ renderCondPriority conf p a) where
   proxy = (undefined :: f db r -> Proxy db) expr
 
 renderPersistValue :: PersistValue -> RenderS db r
@@ -172,17 +177,31 @@ mkExpr = Expr . ExprRaw
 renderCond :: forall r db . (SqlDb db, QueryRaw db ~ Snippet db)
   => RenderConfig
   -> Cond db r -> Maybe (RenderS db r)
-renderCond conf@RenderConfig{..} (cond :: Cond db r) = go cond 0 where
+renderCond conf cond = renderCondPriority conf 0 cond where
+
+{-# INLINABLE renderCondPriority #-}
+-- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
+renderCondPriority :: forall r db . (SqlDb db, QueryRaw db ~ Snippet db)
+  => RenderConfig
+  -> Int -> Cond db r -> Maybe (RenderS db r)
+renderCondPriority conf@RenderConfig{..} priority (cond :: Cond db r) = go cond priority where
   go (And a b)       p = perhaps andP p " AND " a b
   go (Or a b)        p = perhaps orP p " OR " a b
   go (Not a)         p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
-  go (Compare op f1 f2) p = case op of
-    Eq -> renderComp andP p " AND " rendEq f1 f2
-    Ne -> renderComp orP p " OR " rendNotEq f1 f2
-    Gt -> renderComp orP p " OR " (\a b -> a <> fromChar '>' <> b) f1 f2
-    Lt -> renderComp orP p " OR " (\a b -> a <> fromChar '<' <> b) f1 f2
-    Ge -> renderComp orP p " OR " (\a b -> a <> ">=" <> b) f1 f2
-    Le -> renderComp orP p " OR " (\a b -> a <> "<=" <> b) f1 f2
+  go (Compare compOp f1 f2) p = (case compOp of
+    Eq -> renderComp andP " AND " 37 equalsOperator f1 f2
+    Ne -> renderComp orP " OR " 50 notEqualsOperator f1 f2
+    Gt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '>' <> b) f1 f2
+    Lt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '<' <> b) f1 f2
+    Ge -> renderComp orP " OR " 38 (\a b -> a <> ">=" <> b) f1 f2
+    Le -> renderComp orP " OR " 38 (\a b -> a <> "<=" <> b) f1 f2) where
+      renderComp interP interOp opP op expr1 expr2 = result where
+        expr1' = renderExprExtended conf opP expr1
+        expr2' = renderExprExtended conf opP expr2
+        result = case zipWith op expr1' expr2' of
+          [] -> Nothing
+          [clause] -> Just $ parens (opP - 1) p clause  -- put lower priority to make parentheses appear when the same operator is nested
+          clauses  -> Just $ parens interP p $ intercalateS interOp clauses
   go (CondRaw (Snippet f)) p = case f conf p of
     [] -> Nothing
     [a] -> Just a
@@ -192,18 +211,10 @@ renderCond conf@RenderConfig{..} (cond :: Cond db r) = go cond 0 where
   andP = 30
   orP = 20
 
-  renderComp p pOuter logicOp op expr1 expr2 = result where
-    expr1' = renderExprExtended conf p' expr1
-    expr2' = renderExprExtended conf p' expr2
-    liftOp f (RenderS a1 b1) (RenderS a2 b2) = RenderS (f a1 a2) (b1 . b2)
-    (result, p') = case zipWith (liftOp op) expr1' expr2' of
-      [clause] -> (Just clause, pOuter)
-      [] -> (Nothing, pOuter)
-      clauses -> (Just $ parens p pOuter $ intercalateS logicOp clauses, p)
   perhaps :: Int -> Int -> Utf8 -> Cond db r -> Cond db r -> Maybe (RenderS db r)
   perhaps p pOuter op a b = result where
     -- we don't know if the current operator is present until we render both operands. Rendering requires priority of the outer operator. We tie a knot to defer calculating the priority
-    (priority, result) = case (go a priority, go b priority) of
+    (p', result) = case (go a p', go b p') of
        (Just a', Just b') -> (p, Just $ parens p pOuter $ a' <> RenderS op id <> b')
        (Just a', Nothing) -> (pOuter, Just a')
        (Nothing, Just b') -> (pOuter, Just b')

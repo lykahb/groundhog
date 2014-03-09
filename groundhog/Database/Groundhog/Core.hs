@@ -479,6 +479,7 @@ data UntypedExpr db r where
   ExprRaw :: QueryRaw db r -> UntypedExpr db r
   ExprField :: FieldChain -> UntypedExpr db r
   ExprPure :: forall db r a . PurePersistField a => a -> UntypedExpr db r
+  ExprCond :: Cond db r -> UntypedExpr db r
 
 -- | Expr with phantom type helps to keep type safety in complex expressions
 newtype Expr db r a = Expr (UntypedExpr db r)

@@ -54,6 +54,9 @@ instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolde
       => Expression db r' (u (UniqueMarker v)) where
   toExpr = ExprField . fieldChain
 
+instance (db' ~ db, r' ~ r) => Expression db' r' (Cond db r) where
+  toExpr = ExprCond
+
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.
 -- Example: Int -> Field v c Int, but Entity -> Field v c (Entity / Key Entity)
 class Unifiable a b
@@ -72,6 +75,7 @@ instance NormalizeValue (Key v (Unique u)) (isPlain, r) => Normalize HFalse (u (
 instance r ~ (HFalse, Key v (Unique u))                 => Normalize HTrue  (u (UniqueMarker v)) r
 instance NormalizeValue (Key v BackendSpecific) (isPlain, r) => Normalize HFalse (AutoKeyField v c) (HFalse, r)
 instance r ~ (HFalse, Key v BackendSpecific)                 => Normalize HTrue  (AutoKeyField v c) r
+instance r ~ (HTrue, Bool) => Normalize counterpart (Cond db r') r -- there is no ambiguity for its counterpart (Bool vs Key Bool)
 instance NormalizeValue t r => Normalize HFalse t r
 instance r ~ (HTrue, t)     => Normalize HTrue  t r
 

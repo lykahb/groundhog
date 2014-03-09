@@ -60,6 +60,7 @@ library
                    , transformers-base
                    , HUnit
                    , template-haskell
+                   , MissingH
                    , yaml                     >= 0.8.1
                    , utf8-string              >= 0.3       && < 0.4
                    , test-framework-hunit     >= 0.3
@@ -111,6 +112,7 @@ test-suite test
                    , test-framework           >= 0.2
                    , time                     >= 1.1.4
                    , HUnit
+                   , MissingH
                    , containers               >= 0.2
                    , monad-control            >= 0.3
                    , monad-logger             >= 0.3
