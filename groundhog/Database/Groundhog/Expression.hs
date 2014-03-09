@@ -75,7 +75,8 @@ instance NormalizeValue (Key v (Unique u)) (isPlain, r) => Normalize HFalse (u (
 instance r ~ (HFalse, Key v (Unique u))                 => Normalize HTrue  (u (UniqueMarker v)) r
 instance NormalizeValue (Key v BackendSpecific) (isPlain, r) => Normalize HFalse (AutoKeyField v c) (HFalse, r)
 instance r ~ (HFalse, Key v BackendSpecific)                 => Normalize HTrue  (AutoKeyField v c) r
-instance r ~ (HTrue, Bool) => Normalize counterpart (Cond db r') r -- there is no ambiguity for its counterpart (Bool vs Key Bool)
+instance r ~ (HTrue, Bool) => Normalize HFalse (Cond db r') r
+instance r ~ (HTrue, Bool) => Normalize HTrue  (Cond db r') r
 instance NormalizeValue t r => Normalize HFalse t r
 instance r ~ (HTrue, t)     => Normalize HTrue  t r
 
