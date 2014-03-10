@@ -1,3 +1,8 @@
+0.4.2
+* Cond can be used as expression
+* expressions instances for Fractional, Floating, Integral
+* case_ operator
+
 0.4.1
 * added functions replaceBy and deleteAll
 * renamed deleteByKey to deleteBy

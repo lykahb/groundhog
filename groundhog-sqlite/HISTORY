@@ -1,3 +1,6 @@
+0.4.2
+* Sqlite-specific mathematical functions (signum, quotRem)
+
 0.4.1
 * added functions replaceBy and deleteAll
 

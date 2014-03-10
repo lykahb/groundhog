@@ -128,16 +128,3 @@ case_ cases else_ = mkExpr $ Snippet $ \conf _ ->
   rend conf (cond, a) = case renderCond conf cond of
     Nothing -> error "case_: empty condition"
     Just cond' -> "when " <> cond' <> " then " <> renderExpr conf (toExpr a)
-
-{-
-divInt32#, modInt32# :: Int32# -> Int32# -> Int32#
-x `div` y 
-    | (x > 0) && (y < 0) = ((x - y) - 1) / y
-    | (x < 0) && (y > 0) = ((x - y) + 1) / y
-    | otherwise                = x / y
-x `mod` y
-    | (x > 0) && (y < 0) || (x < 0) && (y > 0) = if x % y <> 0 then x % y + y else 0
-    | otherwise = x % y
-
-case when (x > 0) and (y < 0) then ((x - y) - 1) / y when (x < 0) and (y > 0) then ((x - y) + 1) / y else x / y end
--}

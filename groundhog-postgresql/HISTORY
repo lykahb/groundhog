@@ -1,3 +1,7 @@
+0.4.2
+* Postgresql-specific mathematical functions (signum, quotRem)
+* Geometric operators
+
 0.4.1
 * added functions replaceBy and deleteAll
 * added type casting functions explicitType and castType
