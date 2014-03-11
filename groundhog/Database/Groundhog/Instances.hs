@@ -458,6 +458,10 @@ instance PersistField a => Projection (Expr db r a) db r a where
   projectionExprs (Expr e) = (e:)
   projectionResult _ = fromPersistValues
 
+instance a ~ Bool => Projection (Cond db r) db r a where
+  projectionExprs cond = (ExprCond cond:)
+  projectionResult _ = fromPersistValues
+
 instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) db (RestrictionHolder v c) a where
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues

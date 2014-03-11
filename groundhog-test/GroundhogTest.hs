@@ -689,8 +689,8 @@ testProjection = do
   let val = Single ("abc", 5 :: Int)
   migr val
   k <- insert val
-  result <- project (AutoKeyField, SingleConstructor, SingleField, SingleField ~> Tuple2_1Selector) ("" ==. "")
-  [(k, val, ("abc", 5 :: Int), 5 :: Int)] @=? result
+  result <- project (AutoKeyField, SingleConstructor, SingleField, SingleField ~> Tuple2_1Selector, SingleField ==. SingleField) ("" ==. "")
+  [(k, val, ("abc", 5 :: Int), 5 :: Int, True)] @=? result
   let uVal = UniqueKeySample 1 2 (Just 3)
   migr uVal
   insert uVal
