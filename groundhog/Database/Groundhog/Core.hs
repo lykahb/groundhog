@@ -228,7 +228,7 @@ orderBy :: (HasSelectOptions a db r, HasOrder a ~ HFalse) => a -> [Order db r] -
 orderBy opts ord = case getSelectOptions opts of
   SelectOptions c lim off _ -> SelectOptions c lim off ord
 
-newtype Monad m => DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
+newtype DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
   deriving (Monad, MonadIO, Functor, Applicative, MonadTrans, MonadReader conn)
 
 instance MonadBase IO m => MonadBase IO (DbPersist conn m) where

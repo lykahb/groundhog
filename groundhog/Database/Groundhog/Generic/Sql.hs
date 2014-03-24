@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables, OverloadedStrings, FlexibleInstances, TypeFamilies, UndecidableInstances, RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts, OverloadedStrings, FlexibleInstances, TypeFamilies, RecordWildCards #-}
 {-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -174,17 +174,17 @@ mkExpr = Expr . ExprRaw
 
 {-# INLINABLE renderCond #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
-renderCond :: forall r db . (SqlDb db, QueryRaw db ~ Snippet db)
+renderCond :: (SqlDb db, QueryRaw db ~ Snippet db)
   => RenderConfig
   -> Cond db r -> Maybe (RenderS db r)
 renderCond conf cond = renderCondPriority conf 0 cond where
 
 {-# INLINABLE renderCondPriority #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
-renderCondPriority :: forall r db . (SqlDb db, QueryRaw db ~ Snippet db)
+renderCondPriority :: (SqlDb db, QueryRaw db ~ Snippet db)
   => RenderConfig
   -> Int -> Cond db r -> Maybe (RenderS db r)
-renderCondPriority conf@RenderConfig{..} priority (cond :: Cond db r) = go cond priority where
+renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
   go (And a b)       p = perhaps andP p " AND " a b
   go (Or a b)        p = perhaps orP p " OR " a b
   go (Not a)         p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
@@ -211,7 +211,6 @@ renderCondPriority conf@RenderConfig{..} priority (cond :: Cond db r) = go cond 
   andP = 30
   orP = 20
 
-  perhaps :: Int -> Int -> Utf8 -> Cond db r -> Cond db r -> Maybe (RenderS db r)
   perhaps p pOuter op a b = result where
     -- we don't know if the current operator is present until we render both operands. Rendering requires priority of the outer operator. We tie a knot to defer calculating the priority
     (p', result) = case (go a p', go b p') of
@@ -250,7 +249,7 @@ defaultShowPrim (PersistNull) = "NULL"
 defaultShowPrim (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 {-# INLINABLE renderOrders #-}
-renderOrders :: forall db r . RenderConfig -> [Order db r] -> Utf8
+renderOrders :: RenderConfig -> [Order db r] -> Utf8
 renderOrders _ [] = mempty
 renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoin orders where
   orders = foldr go [] xs

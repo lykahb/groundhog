@@ -3,7 +3,7 @@
 module Database.Groundhog.Instances (Selector(..)) where
 
 import Database.Groundhog.Core
-import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, pureFromPersistValue, phantomDb)
+import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, phantomDb)
 
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -481,7 +481,7 @@ instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionH
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chains = map (\f -> (f, [])) uFields
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
-  projectionResult _ = pureFromPersistValue
+  projectionResult _ = fromPersistValues
 
 instance (Projection a1 db r a1', Projection a2 db r a2') => Projection (a1, a2) db r (a1', a2') where
   projectionExprs (a1, a2) = projectionExprs a1 . projectionExprs a2
