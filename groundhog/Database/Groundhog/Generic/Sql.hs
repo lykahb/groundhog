@@ -254,7 +254,8 @@ renderOrders _ [] = mempty
 renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoin orders where
   orders = foldr go [] xs
   go (Asc a) acc = renderChain conf (fieldChain a) acc
-  go (Desc a) acc = map (<> " DESC") $ renderChain conf (fieldChain a) acc
+  go (Desc a) acc = renderChain conf' (fieldChain a) acc where
+     conf' = conf { esc = \f -> esc conf f <> " DESC" }
 
 {-# INLINABLE renderFields #-}
 -- Returns string with comma separated escaped fields like "name,age"
