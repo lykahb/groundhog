@@ -15,7 +15,7 @@ extra-source-files:
     changelog
 
 library
-    build-depends:   base                     >= 4
+    build-depends:   base                     >= 4         && < 5
                    , bytestring               >= 0.9
                    , groundhog                >= 0.4.2.2   && < 0.5.0
                    , template-haskell
