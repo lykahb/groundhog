@@ -1,0 +1,46 @@
+0.4.2.2
+* Create missing schemas (or databases in MySQL terminology) during migration
+* Replace datatype Proxy with type variable
+
+0.4.2
+* Switched from utf8-string to text
+
+0.4.0.3
+* Added "primitive" mapping which creates PrimitivePersistField instances based on Show/Read or Enum.
+
+0.4.0.2
+* Fixed order of unique constraint fields
+
+0.4.0.1
+* Fixed a warning in generated code
+
+0.4.0
+* References to tables not mapped by groundhog
+* Default column values
+* Check for already existing unique key phantom datatypes
+
+0.3.1
+* Generation of SinglePersistField and PurePersistField instances for keys
+
+0.3
+* Reference clauses ON DELETE and ON UPDATE
+* Schema qualification
+* Added unique constraints of type PRIMARY
+
+0.2
+* Improvements of YAML parsing error reporting
+* Database indexes
+* Support DB-specific column types
+
+0.1.0.3
+* Removed upper bound for bytestring
+* Support embedded datatypes as part of an unique constraint
+
+0.1.0.2
+* Removed upper bound for yaml
+
+0.1.0.1
+* Removed upper bound for containers
+
+0.1.0
+The first release. The modules were moved from the groundhog package.

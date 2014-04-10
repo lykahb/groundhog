@@ -1,0 +1,45 @@
+0.4.2.2
+* Create missing schemas (or databases in MySQL terminology) during migration
+* Replace datatype Proxy with type variable
+
+0.4.2
+* Sqlite-specific mathematical functions (signum, quotRem)
+
+0.4.1
+* Added functions replaceBy and deleteAll
+
+0.4.0.2
+* Added createSqlitePool
+
+0.4.0.1
+* Exposed connection constructor
+
+0.4.0
+* Query logging
+* Default column values
+* Switched to direct-sqlite backend
+
+0.3.0
+* Switched from pool-conduit to resource-pool
+* Schema qualified tables
+* Support for savepoints
+
+0.2.0
+* Database indexes
+* Support DB-specific column types
+
+0.1.0.2
+* Removed overly restrictive upper bound for bytestring package
+* Support zoned time
+* Merged changes from direct-sqlite
+
+0.1.0.1
+* Removed overly restrictive upper bound for containers package
+
+0.1.0
+The library supports new features of groundhog-0.1.0: composite keys, projections, etc.
+* Updated sqlite3 C sources to 3.7.13
+* Migration analyzes schema instead of comparing CREATE statements as strings
+
+0.0.1
+The first release.
