@@ -1,0 +1,66 @@
+0.4.2.2
+* Create missing schemas (or databases in MySQL terminology) during migration
+* Replace datatype Proxy with type variable
+
+0.4.2
+* Cond can be used as expression
+* Expressions instances for Fractional, Floating, Integral
+* Operator case_
+
+0.4.1
+* Added functions replaceBy and deleteAll
+* Renamed deleteByKey to deleteBy
+* Instances of UTCTime and ZonedTime can read both values with time zone and without it
+
+0.4.0.3
+* Added function runDbConnNoTransaction to run a monadic action without creating a transaction around it
+
+0.4.0.2
+* Fix for nullable fields in unique constraint
+
+0.4.0.1
+* Added migration helper function Database.Groundhog.Generic.getQueries
+* Added comparison function Database.Groundhog.Expression.isFieldNothing
+
+0.4.0
+* References to tables not mapped by groundhog
+* Default column values
+* Better type inference for expressions
+* Constructor for empty condition CondEmpty
+* Logging queries based on monad-logger
+
+0.3.1
+* Removed superclass constraints SinglePersistField and PurePersistField for PrimitivePersistField
+* Fixed prefixing columns of nested embedded datatypes when not all names are specified
+
+0.3
+* Custom compositional functions and operators
+* ConnectionManager which helps to extract connections from pools, application state, etc.
+* Support for savepoints
+* Schema qualified tables
+* Added unique constraints of type PRIMARY
+* Reference clauses ON DELETE and ON UPDATE.
+* Exposed database introspection capabilities with class SchemaAnalyzer
+
+0.2
+* Database indexes
+* Support DB-specific column types
+* Renaming and refactoring
+
+0.1.0.2
+* Removed overly restrictive upper bound for bytestring package
+
+0.1.0.1
+* Compatibility with GHC 7.6
+
+0.1.0
+The library was almost completely overhauled.
+* Support for embedded datatypes
+* New syntax for select
+* Embedded datatypes
+* Composite foreign keys and natural keys
+* Projections of datatype fields
+* Codegeneration modules are moved to groundhog-th package
+
+0.0.1
+The first release. It has support for polymorphic datatypes and sum types.

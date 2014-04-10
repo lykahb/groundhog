@@ -1,0 +1,22 @@
+0.4.2.2
+* Create missing schemas (or databases in MySQL terminology) during migration
+* Replace datatype Proxy with type variable
+
+0.4.2
+* MySQL-specific mathematical functions (signum, quotRem)
+
+0.4.1
+* Added functions replaceBy and deleteAll
+
+0.4.0.2
+* Added createMySQLPool
+
+0.4.0.1
+* Exposed connection constructor
+
+0.4.0
+* Query logging
+* Default column values
+
+0.3.0
+The first release.

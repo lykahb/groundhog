@@ -62,7 +62,7 @@ library
                    , template-haskell
                    , MissingH
                    , yaml                     >= 0.8.1
-                   , utf8-string              >= 0.3       && < 0.4
+                   , utf8-string              >= 0.3
                    , test-framework-hunit     >= 0.3
                    , test-framework           >= 0.2
 
