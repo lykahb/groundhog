@@ -747,8 +747,8 @@ getGetter (PG.Oid oid) = case oid of
 unBinary :: PG.Binary a -> a
 unBinary (PG.Binary x) = x
 
-proxy :: Proxy Postgresql
-proxy = error "Proxy Postgresql"
+proxy :: proxy Postgresql
+proxy = error "proxy Postgresql"
 
 withSchema :: Maybe String -> String -> String
 withSchema sch name = maybe "" (\x -> escape x ++ ".") sch ++ escape name

@@ -216,7 +216,7 @@ mkAutoKeyPrimitivePersistFieldInstance def = case thAutoKey def of
     toPrim' <- do
       proxy <- newName "p"
       x <- newName "x"
-      let body = [| toPrimitivePersistValue $(varE proxy) $ ((fromPrimitivePersistValue :: DbDescriptor db => Proxy db -> PersistValue -> AutoKeyType db) $(varE proxy)) $(varE x) |]
+      let body = [| toPrimitivePersistValue $(varE proxy) $ ((fromPrimitivePersistValue :: DbDescriptor db => proxy db -> PersistValue -> AutoKeyType db) $(varE proxy)) $(varE x) |]
       funD 'toPrimitivePersistValue [clause [varP proxy, conP conName [varP x]] (normalB body) []]
     fromPrim' <- funD 'fromPrimitivePersistValue [clause [wildP] (normalB $ conE conName) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)

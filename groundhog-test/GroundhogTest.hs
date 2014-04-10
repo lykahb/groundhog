@@ -901,7 +901,7 @@ assertExc err m = do
   happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\(_ :: SomeException) -> runInIO $ return True)
   unless happened $ liftIO (H.assertFailure err)
 
-reescape :: DbDescriptor db => Proxy db -> String -> String
+reescape :: DbDescriptor db => proxy db -> String -> String
 reescape proxy query = if backendName proxy == "mysql"
   then map (\c -> if c == '"' then '`' else c) query
   else query

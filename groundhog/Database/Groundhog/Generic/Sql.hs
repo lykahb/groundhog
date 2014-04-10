@@ -119,7 +119,7 @@ renderExprPriority conf p expr = (case expr of
   ExprCond  a -> case renderCondPriority conf p a of
                    Nothing -> error "renderExprPriority: empty condition"
                    Just x -> x) where
-    proxy = (undefined :: f db r -> Proxy db) expr
+    proxy = (undefined :: f db r -> proxy db) expr
     ensureOne :: [a] -> (a -> b) -> b
     ensureOne xs f = case xs of
       [x] -> f x
@@ -132,7 +132,7 @@ renderExprExtended conf p expr = (case expr of
   ExprPure a -> let vals = toPurePersistValues proxy a []
                 in map renderPersistValue vals
   ExprCond a -> maybeToList $ renderCondPriority conf p a) where
-  proxy = (undefined :: f db r -> Proxy db) expr
+  proxy = (undefined :: f db r -> proxy db) expr
 
 renderPersistValue :: PersistValue -> RenderS db r
 renderPersistValue (PersistCustom s as) = RenderS s (as++)

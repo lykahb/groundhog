@@ -531,8 +531,8 @@ defaultPriority, triggerPriority :: Int
 defaultPriority = 0
 triggerPriority = 1
 
-proxy :: Proxy Sqlite
-proxy = error "Proxy Sqlite"
+proxy :: proxy Sqlite
+proxy = error "proxy Sqlite"
 
 delim' :: Utf8
 delim' = fromChar delim

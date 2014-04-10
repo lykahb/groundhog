@@ -649,8 +649,8 @@ getGetter MySQLBase.Enum       = convertPV PersistString
 getGetter other = error $ "MySQL.getGetter: type " ++
                   show other ++ " not supported."
 
-proxy :: Proxy MySQL
-proxy = error "Proxy MySQL"
+proxy :: proxy MySQL
+proxy = error "proxy MySQL"
 
 noLimit :: Utf8
 noLimit = "LIMIT 18446744073709551615"

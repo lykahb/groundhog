@@ -57,8 +57,8 @@ instance (ArrayElem a, PersistField a) => PersistField (Array a) where
 
 class ArrayElem a where
   -- this function is added to avoid GHC bug 7126 which appears when PrimitivePersistField is added as class constraint
-  toElem :: DbDescriptor db => Proxy db -> a -> PersistValue
-  parseElem :: DbDescriptor db => Proxy db -> Parser a
+  toElem :: DbDescriptor db => proxy db -> a -> PersistValue
+  parseElem :: DbDescriptor db => proxy db -> Parser a
 
 instance ArrayElem a => ArrayElem (Array a) where
   toElem p (Array xs) = PersistCustom ("ARRAY[" <> query <> fromChar ']') (vals []) where
@@ -121,7 +121,7 @@ doubleQuote, backslash :: Word8
 doubleQuote = 34
 backslash = 92
   
-parseArr :: (DbDescriptor db, ArrayElem a) => Proxy db -> Parser (Array a)
+parseArr :: (DbDescriptor db, ArrayElem a) => proxy db -> Parser (Array a)
 parseArr p = Array <$> (char '{' *> parseElem p `sepBy` char ',' <* char '}')
 
 (!) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b Int) => a -> b -> Expr Postgresql r elem

@@ -470,10 +470,10 @@ instance EntityConstr v c => Projection (c (ConstructorMarker v)) db (Restrictio
   projectionExprs c = ((map ExprField chains)++) where
     chains = map (\f -> (f, [])) $ constrParams constr
     e = entityDef ((undefined :: c (ConstructorMarker v) -> v) c)
-    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> Proxy v) c) c
+    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
     constr = constructors e !! cNum
   projectionResult c xs = toSinglePersistValue cNum >>= \cNum' -> fromEntityPersistValues (cNum':xs) where
-    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> Proxy v) c) c
+    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
 
 instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v c)
       => Projection (u (UniqueMarker v)) db r k where
@@ -530,7 +530,7 @@ instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) db (R
     k = (undefined :: AutoKeyField v c -> AutoKey v) a
 
     e = entityDef ((undefined :: AutoKeyField v c -> v) a)
-    cNum = entityConstrNum ((undefined :: AutoKeyField v c -> Proxy v) a) ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
+    cNum = entityConstrNum ((undefined :: AutoKeyField v c -> proxy v) a) ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
 
 instance (EntityConstr v c, PersistField a) => FieldLike (SubField v c a) db (RestrictionHolder v c) a where
   fieldChain (SubField a) = a
@@ -546,7 +546,7 @@ instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionH
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
 
 instance (PersistEntity v, EntityConstr' (IsSumType v) c) => EntityConstr v c where
-  entityConstrNum v = entityConstrNum' $ (undefined :: Proxy v -> IsSumType v) v
+  entityConstrNum v = entityConstrNum' $ (undefined :: proxy v -> IsSumType v) v
 class EntityConstr' flag c where
   entityConstrNum' :: flag -> c (a :: * -> *) -> Int
 instance EntityConstr' HFalse c where

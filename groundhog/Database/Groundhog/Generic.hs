@@ -207,10 +207,10 @@ primFromPersistValue :: (PersistBackend m, PrimitivePersistField a) => [PersistV
 primFromPersistValue (x:xs) = phantomDb >>= \p -> return (fromPrimitivePersistValue p x, xs)
 primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
 
-primToPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => Proxy db -> a -> ([PersistValue] -> [PersistValue])
+primToPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => proxy db -> a -> ([PersistValue] -> [PersistValue])
 primToPurePersistValues p a = (toPrimitivePersistValue p a:)
 
-primFromPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => Proxy db -> [PersistValue] -> (a, [PersistValue])
+primFromPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => proxy db -> [PersistValue] -> (a, [PersistValue])
 primFromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
 primFromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
 
@@ -287,7 +287,7 @@ mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
 mapAllRows f pop = go where
   go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
 
-phantomDb :: PersistBackend m => m (Proxy (PhantomDb m))
+phantomDb :: PersistBackend m => m (proxy (PhantomDb m))
 phantomDb = return $ error "phantomDb"
 
 isSimple :: [ConstructorDef] -> Bool
