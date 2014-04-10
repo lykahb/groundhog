@@ -44,7 +44,7 @@ import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (groupBy, intercalate, intersect, partition, stripPrefix)
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Pool
 
 newtype MySQL = MySQL MySQL.Connection
@@ -93,6 +93,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   getList k = getList' k
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist MySQL m) where
+  schemaExists schema = queryRaw' "SELECT 1 FROM information_schema.schemata WHERE schema_name=?" [toPrimitivePersistValue proxy schema] (fmap isJust)
   listTables schema = queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,database())" [toPrimitivePersistValue proxy schema] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTableTriggers schema name = queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,database()) AND event_object_table=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   analyzeTable = analyzeTable'
@@ -271,7 +272,8 @@ migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) =
 migrate' v = do
   x <- lift $ queryRaw' "SELECT database()" [] id
   let schema = fst $ fromPurePersistValues proxy $ fromJust x
-  migrateRecursively (migrateEntity $ migrationPack schema) (migrateList $ migrationPack schema) v
+      migPack = migrationPack schema
+  migrateRecursively (migrateSchema migPack) (migrateEntity migPack) (migrateList migPack) v
 
 migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> GM.MigrationPack (DbPersist MySQL m)
 migrationPack currentSchema = GM.MigrationPack
@@ -386,6 +388,8 @@ showAlterDb _ (AddTriggerOnDelete schTrg trigName schTbl tName body) = Right [(F
 showAlterDb _ (AddTriggerOnUpdate schTrg trigName schTbl tName _ body) = Right [(False, triggerPriority, "CREATE TRIGGER " ++ withSchema schTrg trigName ++ " AFTER UPDATE ON " ++ withSchema schTbl tName ++ " FOR EACH ROW BEGIN " ++ body ++ "END")]
 showAlterDb _ (CreateOrReplaceFunction s) = Right [(False, functionPriority, s)]
 showAlterDb _ (DropFunction sch funcName) = Right [(False, functionPriority, "DROP FUNCTION " ++ withSchema sch funcName ++ "()")]
+showAlterDb _ (CreateSchema sch ifNotExists) = Right [(False, schemaPriority, "CREATE DATABASE " ++ ifNotExists' ++ escape sch)] where
+  ifNotExists' = if ifNotExists then "IF NOT EXISTS " else ""
 
 showAlterTable :: String -> String -> AlterTable -> [(Bool, Int, String)]
 showAlterTable _ table (AddColumn col) = [(False, defaultPriority, concat
@@ -538,11 +542,12 @@ compareDefaults def1 def2 = not . null $ f def1 `intersect` f def2 where
   f def = [Just def, stripQuotes def]
   stripQuotes = stripPrefix "'" >=> fmap reverse . stripPrefix "'" . reverse
 
-defaultPriority, referencePriority, functionPriority, triggerPriority :: Int
-defaultPriority = 0
-referencePriority = 1
-functionPriority = 2
-triggerPriority = 3
+defaultPriority, schemaPriority, referencePriority, functionPriority, triggerPriority :: Int
+defaultPriority = 1
+schemaPriority = 0
+referencePriority = 2
+functionPriority = 3
+triggerPriority = 4
 
 mainTableId :: String
 mainTableId = "id"

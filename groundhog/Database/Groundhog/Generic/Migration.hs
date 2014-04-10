@@ -12,6 +12,7 @@ module Database.Groundhog.Generic.Migration
   , SchemaAnalyzer(..)
   , mkColumns
   , migrateRecursively
+  , migrateSchema
   , migrateEntity
   , migrateList
   , getAlters
@@ -22,10 +23,10 @@ module Database.Groundhog.Generic.Migration
 
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Sql (tableName)
+import Database.Groundhog.Generic.Sql (mainTableName, tableName)
 
 import Control.Arrow ((***), (&&&))
-import Control.Monad (liftM)
+import Control.Monad (liftM, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (StateT (..), gets, modify)
 import Data.Function (on)
@@ -80,6 +81,8 @@ data AlterDB = AddTable String
              | CreateOrReplaceFunction String
              -- | Function schema, function name
              | DropFunction (Maybe String) String
+             -- | Schema name, if not exists
+             | CreateSchema String Bool
   deriving Show
 
 data UniqueDef' = UniqueDef' {
@@ -153,24 +156,34 @@ traverseDbType f (columnName, dbtype) = snd $ go "" (columnName, dbtype) where
 -- The stateful Map is used to avoid duplicate migrations when an entity type
 -- occurs several times in a datatype
 migrateRecursively :: (Monad m, PersistEntity v) => 
-     (EntityDef -> m SingleMigration) -- ^ migrate entity
+     (String    -> m SingleMigration)    -- ^ migrate schema
+  -> (EntityDef -> m SingleMigration) -- ^ migrate entity
   -> (DbType    -> m SingleMigration) -- ^ migrate list
   -> v                                -- ^ initial entity
   -> StateT NamedMigrations m ()
-migrateRecursively migE migL = go . dbType where
-  go l@(DbList lName t) = f lName (migL l) (go t)
+migrateRecursively migS migE migL = go . dbType where
+  go l@(DbList lName t) = f ("list " ++ lName) (migL l) (go t)
   go (DbEmbedded (EmbeddedDef _ ts) ref) = mapM_ (go . snd) ts >> migRef ref
   go (DbTypePrimitive _ _ _ ref) = migRef ref
+  allSubtypes = map snd . concatMap constrParams . constructors
+  migRef ref = case ref of
+    Just (Left (e, _), _, _) -> do
+      case entitySchema e of
+        Just name -> f ("schema " ++ name) (migS name) (return ())
+        Nothing -> return ()
+      f ("entity " ++ mainTableName id e) (migE e) (mapM_ go (allSubtypes e))
+    _ -> return ()
   f name mig cont = do
     v <- gets (Map.lookup name)
-    case v of
-      Nothing -> lift mig >>= modify . Map.insert name >> cont
-      _ -> return ()
-  allSubtypes = map snd . concatMap constrParams . constructors
-  -- TODO: use schema-qualified name
-  migRef ref = case ref of
-    Just (Left (e, _), _, _) -> f (entityName e) (migE e) (mapM_ go (allSubtypes e))
-    _ -> return ()
+    when (v == Nothing) $
+      lift mig >>= modify . Map.insert name >> cont
+
+migrateSchema :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> String -> m SingleMigration
+migrateSchema MigrationPack{..} schema = do
+  x <- schemaExists schema
+  return $ if x
+    then Right []
+    else showAlterDb $ CreateSchema schema False
 
 migrateEntity :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> m SingleMigration
 migrateEntity m@MigrationPack{..} e = do
@@ -358,6 +371,8 @@ readReferenceAction c = case c of
   _ -> Nothing
 
 class Monad m => SchemaAnalyzer m where
+  schemaExists :: String -- ^ Schema name
+               -> m Bool
   listTables :: Maybe String -- ^ Schema name
              -> m [String]
   listTableTriggers :: Maybe String -- ^ Schema name

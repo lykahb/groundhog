@@ -43,7 +43,7 @@ import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (groupBy, intercalate, stripPrefix)
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Monoid
 import Data.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
@@ -95,6 +95,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   getList k = getList' k
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist Postgresql m) where
+  schemaExists schema = queryRaw' "SELECT 1 FROM information_schema.schemata WHERE schema_name=?" [toPrimitivePersistValue proxy schema] (fmap isJust)
   listTables schema = queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue proxy schema] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTableTriggers schema name = queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   analyzeTable = analyzeTable'
@@ -275,7 +276,8 @@ migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) =
 migrate' v = do
   x <- lift $ queryRaw' "SELECT current_schema()" [] id
   let schema = fst $ fromPurePersistValues proxy $ fromJust x
-  migrateRecursively (migrateEntity $ migrationPack schema) (migrateList $ migrationPack schema) v
+      migPack = migrationPack schema
+  migrateRecursively (migrateSchema migPack) (migrateEntity migPack) (migrateList migPack) v
 
 migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> GM.MigrationPack (DbPersist Postgresql m)
 migrationPack currentSchema = GM.MigrationPack
@@ -434,6 +436,8 @@ showAlterDb (AddTriggerOnUpdate schTrg trigName schTbl tName fName body) = Right
     fName' = maybe (error $ "showAlterDb: AddTriggerOnUpdate does not have fieldName for trigger " ++ trigName) escape fName
 showAlterDb (CreateOrReplaceFunction s) = Right [(False, functionPriority, s)]
 showAlterDb (DropFunction sch funcName) = Right [(False, functionPriority, "DROP FUNCTION " ++ withSchema sch funcName ++ "()")]
+showAlterDb (CreateSchema sch ifNotExists) = Right [(False, schemaPriority, "CREATE SCHEMA " ++ ifNotExists' ++ escape sch)] where
+  ifNotExists' = if ifNotExists then "IF NOT EXISTS " else ""
 
 showAlterTable :: String -> AlterTable -> [(Bool, Int, String)]
 showAlterTable table (AddColumn col) = [(False, defaultPriority, concat
@@ -619,11 +623,12 @@ compareDefaults def1 def2 = Just def2 `elem` [Just def1, stripType def1, stripTy
   stripType = fmap reverse . stripPrefix "::" . dropWhile (\c -> isAlphaNum c || isSpace c) . reverse
   stripParens = stripPrefix "(" >=> fmap reverse . stripPrefix ")" . reverse
 
-defaultPriority, referencePriority, functionPriority, triggerPriority :: Int
-defaultPriority = 0
-referencePriority = 1
-functionPriority = 2
-triggerPriority = 3
+defaultPriority, schemaPriority, referencePriority, functionPriority, triggerPriority :: Int
+defaultPriority = 1
+schemaPriority = 0
+referencePriority = 2
+functionPriority = 3
+triggerPriority = 4
 
 mainTableId :: String
 mainTableId = "id"
@@ -747,7 +752,6 @@ proxy = error "Proxy Postgresql"
 
 withSchema :: Maybe String -> String -> String
 withSchema sch name = maybe "" (\x -> escape x ++ ".") sch ++ escape name
-
 
 -- | Put explicit type for expression. It is useful for values which are defaulted to a wrong type.
 -- For example, a literal Int from a 64bit machine can be defaulted to a 32bit int by Postgresql. 

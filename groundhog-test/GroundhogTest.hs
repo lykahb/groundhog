@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, CPP #-}
+{-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 
--- ghc --make -fforce-recomp -DWITH_SQLITE -DWITH_POSTGRESQL -DWITH_MYSQL tests.hs
 module GroundhogTest (
       testSelect
     , testCond
@@ -239,7 +239,7 @@ testPersistSettings = do
   migr val
   singleKey <- insert val
   let settable = Settable "abc" (Just singleKey) (1, ("qqq", Nothing))
-  m <- fmap (Map.lookup "sqlsettable") $ createMigration $ migrate settable
+  m <- fmap (Map.lookup "entity sqlsettable") $ createMigration $ migrate settable
   let queries = case m of
         Just (Right qs) -> intercalate ";" $ map (\(_, _, q) -> q) qs
         t -> fail $ "Unexpected migration result: " ++ show m
@@ -701,7 +701,7 @@ testProjectionSql :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ P
 testProjectionSql = do
   let val = Single ("abc", 5 :: Int)
   migr val
-  k <- insert val
+  insert val
   result <- project ("hello " `append` (upper $ SingleField ~> Tuple2_0Selector), liftExpr (SingleField ~> Tuple2_1Selector) + 1) (() ==. ())
   [("hello ABC", 6 :: Int)] @=? result
 
@@ -898,7 +898,7 @@ testSchemaAnalysisMySQL = do
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()
 assertExc err m = do
-  happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\(e :: SomeException) -> runInIO $ return True)
+  happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\(_ :: SomeException) -> runInIO $ return True)
   unless happened $ liftIO (H.assertFailure err)
 
 reescape :: DbDescriptor db => Proxy db -> String -> String
