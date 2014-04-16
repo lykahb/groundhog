@@ -301,23 +301,18 @@ testSelect = do
   let val1 = Single (5 :: Int, "abc")
   let val2 = Single (7 :: Int, "DEF")
   let val3 = Single (11 :: Int, "ghc")
-  k1 <- insert val1
-  k2 <- insert val2
-  k3 <- insert val3
-  vals1 <- select $ (SingleField ~> Tuple2_0Selector >. (5 :: Int)) `orderBy` [Asc (SingleField ~> Tuple2_1Selector)] `offsetBy` 1
-  [val3] @=? vals1
-  vals2 <- select $ (SingleField ~> Tuple2_0Selector >. (5 :: Int)) `orderBy` [Asc (SingleField ~> Tuple2_1Selector)] `limitTo` 1
-  [val2] @=? vals2
-  vals3 <- select $ (SingleField >=. (6 :: Int, "something") &&. SingleField ~> Tuple2_1Selector <. "ghc") `limitTo` 1
-  [val2] @=? vals3
-  vals4 <- select $ liftExpr (SingleField ~> Tuple2_0Selector) + 1 >. (10 :: Int)
-  [val3] @=? vals4
-  vals5 <- select $ (SingleField ~> Tuple2_1Selector) `like` "%E%"
-  [val2] @=? vals5
-  vals6 <- select $ lower (SingleField ~> Tuple2_1Selector) ==. "def"
-  [val2] @=? vals6
-  vals7 <- select $ ((SingleField ~> Tuple2_0Selector) `in_` [7 :: Int, 5]) `orderBy` [Asc (SingleField ~> Tuple2_0Selector)]
-  [val1, val2] @=? vals7
+  insert val1
+  insert val2
+  insert val3
+  [val3] @=?? (select $ (SingleField ~> Tuple2_0Selector >. (5 :: Int)) `orderBy` [Asc (SingleField ~> Tuple2_1Selector)] `offsetBy` 1)
+  [val2] @=?? (select $ (SingleField ~> Tuple2_0Selector >. (5 :: Int)) `orderBy` [Asc (SingleField ~> Tuple2_1Selector)] `limitTo` 1)
+  [val2] @=?? (select $ (SingleField >=. (6 :: Int, "something") &&. SingleField ~> Tuple2_1Selector <. "ghc") `limitTo` 1)
+  [val3] @=?? (select $ liftExpr (SingleField ~> Tuple2_0Selector) + 1 >. (10 :: Int))
+  [val2] @=?? (select $ (SingleField ~> Tuple2_1Selector) `like` "%E%")
+  [val2] @=?? (select $ lower (SingleField ~> Tuple2_1Selector) ==. "def")
+  [val1, val2] @=?? (select $ ((SingleField ~> Tuple2_0Selector) `in_` [7 :: Int, 5]) `orderBy` [Asc (SingleField ~> Tuple2_0Selector)])
+  [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField] `limitTo` 1)
+  [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField, Desc SingleField] `limitTo` 1)
 
 testArith :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => m ()
 testArith = do

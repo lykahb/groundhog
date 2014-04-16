@@ -149,8 +149,8 @@ data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 data Update db r = forall f a . Assignable f db r a => Update f (UntypedExpr db r)
 
 -- | Defines sort order of a result-set
-data Order db r = forall a f . (FieldLike f db r a) => Asc  f
-                | forall a f . (FieldLike f db r a) => Desc f
+data Order db r = forall a f . (Projection f db r a) => Asc  f
+                | forall a f . (Projection f db r a) => Desc f
 
 -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
 type FieldChain = ((String, DbType), [(String, EmbeddedDef)])

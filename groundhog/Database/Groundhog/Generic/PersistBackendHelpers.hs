@@ -69,17 +69,16 @@ select conf@RenderConfig{..} queryFunc noLimit options = doSelectQuery where
   e = entityDef (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
   orders = renderOrders conf ords
-  (lim, limps) = case (limit, offset) of
-        (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" " <> noLimit <> " OFFSET ?", [toPrimitivePersistValue proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
+  lim = case (limit, offset) of
+          (Nothing, Nothing) -> mempty
+          (Nothing, o) -> RenderS (" " <> noLimit <> " OFFSET ?") (toPurePersistValues proxy o)
+          (l, Nothing) -> RenderS " LIMIT ?" (toPurePersistValues proxy l)
+          (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues proxy (l, o))
   cond' = renderCond conf cond
-  fields = renderFields esc (constrParams constr)
-  query = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> whereClause <> orders <> lim
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery = queryFunc query binds $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
-  binds = maybe id getValues cond' $ limps
+  fields = RenderS (renderFields esc (constrParams constr)) id
+  RenderS query binds = "SELECT " <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
+  whereClause = maybe "" (" WHERE " <>) cond'
+  doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
   cNum = entityConstrNum (undefined :: proxy v) (undefined :: c a)
   constr = constructors e !! cNum
 
@@ -125,18 +124,17 @@ project conf@RenderConfig{..} queryFunc noLimit p options = doSelectQuery where
   e = entityDef (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
   orders = renderOrders conf ords
-  (lim, limps) = case (limit, offset) of
-        (Nothing, Nothing) -> ("", [])
-        (Nothing, o) -> (" " <> noLimit <> " OFFSET ?", [toPrimitivePersistValue proxy o])
-        (l, Nothing) -> (" LIMIT ?", [toPrimitivePersistValue proxy l])
-        (l, o) -> (" LIMIT ? OFFSET ?", [toPrimitivePersistValue proxy l, toPrimitivePersistValue proxy o])
+  lim = case (limit, offset) of
+          (Nothing, Nothing) -> mempty
+          (Nothing, o) -> RenderS (" " <> noLimit <> " OFFSET ?") (toPurePersistValues proxy o)
+          (l, Nothing) -> RenderS " LIMIT ?" (toPurePersistValues proxy l)
+          (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues proxy (l, o))
   cond' = renderCond conf cond
   chains = projectionExprs p []
-  RenderS fields fieldVals = commasJoin $ concatMap (renderExprExtended conf 0) chains
-  query = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> whereClause <> orders <> lim
-  whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  doSelectQuery = queryFunc query binds $ mapAllRows $ liftM fst . projectionResult p
-  binds = fieldVals . maybe id getValues cond' $ limps
+  fields = commasJoin $ concatMap (renderExprExtended conf 0) chains
+  RenderS query binds = "SELECT " <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
+  whereClause = maybe "" (" WHERE " <>) cond'
+  doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . projectionResult p
   constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
 
 count :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)

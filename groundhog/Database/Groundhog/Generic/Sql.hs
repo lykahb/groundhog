@@ -249,12 +249,13 @@ defaultShowPrim (PersistNull) = "NULL"
 defaultShowPrim (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 {-# INLINABLE renderOrders #-}
-renderOrders :: RenderConfig -> [Order db r] -> Utf8
+renderOrders :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> [Order db r] -> RenderS db r
 renderOrders _ [] = mempty
 renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoin orders where
-  orders = foldr go [] xs
-  go (Asc a) acc = renderChain conf (fieldChain a) acc
-  go (Desc a) acc = renderChain conf' (fieldChain a) acc where
+  orders = concatMap go xs
+  rend conf' a = map (commasJoin . renderExprExtended conf' 0) $ projectionExprs a []
+  go (Asc a) = rend conf a
+  go (Desc a) = rend conf' a where
      conf' = conf { esc = \f -> esc conf f <> " DESC" }
 
 {-# INLINABLE renderFields #-}

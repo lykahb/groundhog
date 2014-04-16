@@ -107,7 +107,7 @@ type instance Not HFalse = HTrue
 -- | Update field
 infixr 3 =.
 (=.) ::
-  ( FieldLike f db r a'
+  ( Assignable f db r a'
   , Expression db r b
   , Unifiable f b)
   => f -> b -> Update db r
@@ -147,9 +147,9 @@ a >=. b = Compare Ge (toExpr a) (toExpr b)
 
 -- | This function more limited than (==.), but has better type inference.
 -- If you want to compare your value to Nothing with @(==.)@ operator, you have to write the types explicitly @myExpr ==. (Nothing :: Maybe Int)@.
-isFieldNothing :: (Expression db r f, FieldLike f db r (Maybe a), PrimitivePersistField (Maybe a), Unifiable f (Maybe a)) => f -> Cond db r
+isFieldNothing :: (Expression db r f, Projection f db r (Maybe a), PrimitivePersistField (Maybe a), Unifiable f (Maybe a)) => f -> Cond db r
 isFieldNothing a = a `eq` Nothing where
-  eq :: (Expression db r f, Expression db r a, FieldLike f db r a, Unifiable f a) => f -> a -> Cond db r
+  eq :: (Expression db r f, Expression db r a, Projection f db r a, Unifiable f a) => f -> a -> Cond db r
   eq = (==.)
 
 -- | Converts value to 'Expr'. It can help to pass values of different types into functions which expect arguments of the same type, like (+).
