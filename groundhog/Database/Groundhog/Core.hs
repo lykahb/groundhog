@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls #-}
+{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds #-}
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
 module Database.Groundhog.Core
@@ -90,6 +90,7 @@ import Data.Int (Int64)
 import Data.Map (Map)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, zonedTimeToLocalTime, zonedTimeZone)
+import GHC.Exts (Constraint)
 
 -- | Only instances of this class can be persisted in a database
 class (PersistField v, PurePersistField (AutoKey v)) => PersistEntity v where
@@ -146,27 +147,29 @@ data Cond db r =
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
-data Update db r = forall f a . Assignable f db r a => Update f (UntypedExpr db r)
+data Update db r = forall f a . (Assignable f a, ProjectionDb f db, ProjectionRestriction f r) => Update f (UntypedExpr db r)
 
 -- | Defines sort order of a result-set
-data Order db r = forall a f . (Projection f db r a) => Asc  f
-                | forall a f . (Projection f db r a) => Desc f
+data Order db r = forall a f . (Projection f a, ProjectionDb f db, ProjectionRestriction f r) => Asc  f
+                | forall a f . (Projection f a, ProjectionDb f db, ProjectionRestriction f r) => Desc f
 
 -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
 type FieldChain = ((String, DbType), [(String, EmbeddedDef)])
 
 -- | Any data that can be fetched from a database
-class PersistField a => Projection p db r a | p -> db r a where
+class PersistField a => Projection p a | p -> a where
+  type ProjectionDb p db :: Constraint
+  type ProjectionRestriction p r :: Constraint
   -- | It returns multiple expressions that can be transformed into values which can be selected. Difflist is used for concatenation efficiency.
-  projectionExprs :: p -> [UntypedExpr db r] -> [UntypedExpr db r]
+  projectionExprs :: (ProjectionDb p db, ProjectionRestriction p r) => p -> [UntypedExpr db r] -> [UntypedExpr db r]
   -- | It is like 'fromPersistValues'. However, we cannot use it for projections in all cases. For the 'PersistEntity' instances 'fromPersistValues' expects entity id instead of the entity values.
   projectionResult :: PersistBackend m => p -> [PersistValue] -> m (a, [PersistValue])
 
 -- | This subset of Projection instances is for things that behave like fields. Namely, they can occur in condition expressions (for example, Field and SubField) and on the left side of update statements. For example \"lower(field)\" is a valid Projection, but not Field like because it cannot be on the left side. Datatypes that index PostgreSQL arrays \"arr[5]\" or access composites \"(comp).subfield\" are valid instances of Assignable.
-class Projection f db r a => Assignable f db r a | f -> r a
+class Projection f a => Assignable f a | f -> a
 
 -- | This subset of Assignable is for plain database fields.
-class Assignable f db r a => FieldLike f db r a | f -> r a where
+class Assignable f a => FieldLike f a | f -> a where
   fieldChain :: f -> FieldChain
 
 class PersistField v => Embedded v where
@@ -175,7 +178,7 @@ class PersistField v => Embedded v where
 
 infixl 5 ~>
 -- | Accesses fields of the embedded datatypes. For example, @SomeField ==. (\"abc\", \"def\") ||. SomeField ~> Tuple2_0Selector ==. \"def\"@
-(~>) :: (EntityConstr v c, FieldLike f db (RestrictionHolder v c) a, Embedded a) => f -> Selector a a' -> SubField v c a'
+(~>) :: (EntityConstr v c, FieldLike f a, ProjectionRestriction f (RestrictionHolder v c), Embedded a) => f -> Selector a a' -> SubField v c a'
 field ~> sel = case fieldChain field of
   ((name, typ), prefix) -> case typ of
     DbEmbedded emb@(EmbeddedDef _ ts) _ -> SubField (ts !! selectorNum sel, (name, emb):prefix)
@@ -298,7 +301,7 @@ class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | Count total number of records with all constructors. The entity parameter is used only for type inference
   countAll      :: PersistEntity v => v -> m Int
   -- | Fetch projection of some fields. Example: @project (SecondField, ThirdField) $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`offsetBy\` 100@
-  project       :: (PersistEntity v, EntityConstr v c, Projection p (PhantomDb m) (RestrictionHolder v c) a, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
+  project       :: (PersistEntity v, EntityConstr v c, Projection p a, ProjectionDb p (PhantomDb m), ProjectionRestriction p (RestrictionHolder v c), HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
                 => p
                 -> opts
                 -> m [a]

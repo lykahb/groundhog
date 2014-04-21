@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, CPP #-}
+{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, CPP, ConstraintKinds #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 
@@ -454,27 +454,39 @@ instance (DbDescriptor db, PersistEntity v) => PersistField (KeyForBackend db v)
   fromPersistValues = primFromPersistValue
   dbType a = dbType ((undefined :: KeyForBackend db v -> v) a)
 
-instance (EntityConstr v c, PersistField a) => Projection (Field v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => Projection (Field v c a) a where
+  type ProjectionDb (Field v c a) db = ()
+  type ProjectionRestriction (Field v c a) r = r ~ RestrictionHolder v c
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance (EntityConstr v c, PersistField a) => Projection (SubField v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => Projection (SubField v c a) a where
+  type ProjectionDb (SubField v c a) db = ()
+  type ProjectionRestriction (SubField v c a) r = r ~ RestrictionHolder v c
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance PersistField a => Projection (Expr db r a) db r a where
+instance PersistField a => Projection (Expr db r a) a where
+  type ProjectionDb (Expr db r a) db' = db ~ db'
+  type ProjectionRestriction (Expr db r a) r' = r ~ r'
   projectionExprs (Expr e) = (e:)
   projectionResult _ = fromPersistValues
 
-instance a ~ Bool => Projection (Cond db r) db r a where
+instance a ~ Bool => Projection (Cond db r) a where
+  type ProjectionDb (Cond db r) db' = db ~ db'
+  type ProjectionRestriction (Cond db r) r' = r ~ r'
   projectionExprs cond = (ExprCond cond:)
   projectionResult _ = fromPersistValues
 
-instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) a where
+  type ProjectionDb (AutoKeyField v c) db = ()
+  type ProjectionRestriction (AutoKeyField v c) r = r ~ RestrictionHolder v c
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance EntityConstr v c => Projection (c (ConstructorMarker v)) db (RestrictionHolder v c) v where
+instance EntityConstr v c => Projection (c (ConstructorMarker v)) v where
+  type ProjectionDb (c (ConstructorMarker v)) db = ()
+  type ProjectionRestriction (c (ConstructorMarker v)) r = r ~ RestrictionHolder v c
   projectionExprs c = ((map ExprField chains)++) where
     chains = map (\f -> (f, [])) $ constrParams constr
     e = entityDef ((undefined :: c (ConstructorMarker v) -> v) c)
@@ -483,22 +495,28 @@ instance EntityConstr v c => Projection (c (ConstructorMarker v)) db (Restrictio
   projectionResult c xs = toSinglePersistValue cNum >>= \cNum' -> fromEntityPersistValues (cNum':xs) where
     cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v c)
-      => Projection (u (UniqueMarker v)) db r k where
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u))
+      => Projection (u (UniqueMarker v)) k where
+  type ProjectionDb (u (UniqueMarker v)) db = ()
+  type ProjectionRestriction (u (UniqueMarker v)) (RestrictionHolder v' c) = v ~ v'
   projectionExprs u = ((map ExprField chains)++) where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chains = map (\f -> (f, [])) uFields
     constr = head $ constructors (entityDef ((undefined :: u (UniqueMarker v) -> v) u))
   projectionResult _ = fromPersistValues
 
-instance (Projection a1 db r a1', Projection a2 db r a2') => Projection (a1, a2) db r (a1', a2') where
+instance (Projection a1 a1', Projection a2 a2') => Projection (a1, a2) (a1', a2') where
+  type ProjectionDb (a1, a2) db = (ProjectionDb a1 db, ProjectionDb a2 db)
+  type ProjectionRestriction (a1, a2) r = (ProjectionRestriction a1 r, ProjectionRestriction a2 r)
   projectionExprs (a1, a2) = projectionExprs a1 . projectionExprs a2
   projectionResult (a', b') xs = do
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
     return ((a, b), rest1)
 
-instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3') => Projection (a1, a2, a3) db r (a1', a2', a3') where
+instance (Projection a1 a1', Projection a2 a2', Projection a3 a3') => Projection (a1, a2, a3) (a1', a2', a3') where
+  type ProjectionDb (a1, a2, a3) db = (ProjectionDb (a1, a2) db, ProjectionDb a3 db)
+  type ProjectionRestriction (a1, a2, a3) r = (ProjectionRestriction (a1, a2) r, ProjectionRestriction a3 r)
   projectionExprs (a1, a2, a3) = projectionExprs a1 . projectionExprs a2 . projectionExprs a3
   projectionResult (a', b', c') xs = do
     (a, rest0) <- projectionResult a' xs
@@ -506,7 +524,9 @@ instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3'
     (c, rest2) <- projectionResult c' rest1
     return ((a, b, c), rest2)
 
-instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3', Projection a4 db r a4') => Projection (a1, a2, a3, a4) db r (a1', a2', a3', a4') where
+instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4 a4') => Projection (a1, a2, a3, a4) (a1', a2', a3', a4') where
+  type ProjectionDb (a1, a2, a3, a4) db = (ProjectionDb (a1, a2, a3) db, ProjectionDb a4 db)
+  type ProjectionRestriction (a1, a2, a3, a4) r = (ProjectionRestriction (a1, a2, a3) r, ProjectionRestriction a4 r)
   projectionExprs (a1, a2, a3, a4) = projectionExprs a1 . projectionExprs a2 . projectionExprs a3 . projectionExprs a4
   projectionResult (a', b', c', d') xs = do
     (a, rest0) <- projectionResult a' xs
@@ -515,7 +535,9 @@ instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3'
     (d, rest3) <- projectionResult d' rest2
     return ((a, b, c, d), rest3)
 
-instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3', Projection a4 db r a4', Projection a5 db r a5') => Projection (a1, a2, a3, a4, a5) db r (a1', a2', a3', a4', a5') where
+instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4 a4', Projection a5 a5') => Projection (a1, a2, a3, a4, a5) (a1', a2', a3', a4', a5') where
+  type ProjectionDb (a1, a2, a3, a4, a5) db = (ProjectionDb (a1, a2, a3, a4) db, ProjectionDb a5 db)
+  type ProjectionRestriction (a1, a2, a3, a4, a5) r = (ProjectionRestriction (a1, a2, a3, a4) r, ProjectionRestriction a5 r)
   projectionExprs (a1, a2, a3, a4, a5) = projectionExprs a1 . projectionExprs a2 . projectionExprs a3 . projectionExprs a4 . projectionExprs a5
   projectionResult (a', b', c', d', e') xs = do
     (a, rest0) <- projectionResult a' xs
@@ -525,12 +547,12 @@ instance (Projection a1 db r a1', Projection a2 db r a2', Projection a3 db r a3'
     (e, rest4) <- projectionResult e' rest3
     return ((a, b, c, d, e), rest4)
 
-instance (EntityConstr v c, Projection (AutoKeyField v c) db r a') => Assignable (AutoKeyField v c) db r a'
-instance (EntityConstr v c, Projection (SubField v c a) db r a') => Assignable (SubField v c a) db r a'
-instance (EntityConstr v c, Projection (Field v c a) db r a') => Assignable (Field v c a) db r a'
-instance (PersistEntity v, IsUniqueKey (Key v (Unique u)), Projection (u (UniqueMarker v)) db r a') => Assignable (u (UniqueMarker v)) db r a'
+instance (EntityConstr v c, a ~ AutoKey v) => Assignable (AutoKeyField v c) a
+instance (EntityConstr v c, PersistField a) => Assignable (SubField v c a) a
+instance (EntityConstr v c, PersistField a) => Assignable (Field v c a) a
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u)) => Assignable (u (UniqueMarker v)) k
 
-instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) a where
   fieldChain a = chain where
     chain = ((name, dbType k), [])
     -- if it is Nothing, the name would not be used because the type will be () with no columns
@@ -540,14 +562,14 @@ instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) db (R
     e = entityDef ((undefined :: AutoKeyField v c -> v) a)
     cNum = entityConstrNum ((undefined :: AutoKeyField v c -> proxy v) a) ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
 
-instance (EntityConstr v c, PersistField a) => FieldLike (SubField v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => FieldLike (SubField v c a) a where
   fieldChain (SubField a) = a
 
-instance (EntityConstr v c, PersistField a) => FieldLike (Field v c a) db (RestrictionHolder v c) a where
+instance (EntityConstr v c, PersistField a) => FieldLike (Field v c a) a where
   fieldChain = entityFieldChain
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), r ~ RestrictionHolder v c)
-      => FieldLike (u (UniqueMarker v)) db r k where
+instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u))
+      => FieldLike (u (UniqueMarker v)) k where
   fieldChain u = chain where
     UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
     chain = (("will_be_ignored", DbEmbedded (EmbeddedDef True uFields) Nothing), [])

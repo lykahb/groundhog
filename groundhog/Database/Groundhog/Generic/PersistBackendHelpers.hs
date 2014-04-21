@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, FlexibleContexts, OverloadedStrings, RecordWildCards, Rank2Types, TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleContexts, OverloadedStrings, RecordWildCards, Rank2Types, TypeFamilies, ConstraintKinds #-}
 
 -- | This helper module contains generic versions of PersistBackend functions
 module Database.Groundhog.Generic.PersistBackendHelpers
@@ -117,7 +117,7 @@ getBy conf@RenderConfig{..} queryFunc (k :: Key v (Unique u)) = do
     Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
     Nothing -> return Nothing
 
-project :: forall m db r v c p opts a'. (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p db r a', HasSelectOptions opts db r)
+project :: forall m db r v c p opts a'. (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p a', ProjectionDb p db, ProjectionRestriction p r, HasSelectOptions opts db r)
         => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> p -> opts -> m [a']
 project conf@RenderConfig{..} queryFunc noLimit p options = doSelectQuery where
   SelectOptions cond limit offset ords = getSelectOptions options
