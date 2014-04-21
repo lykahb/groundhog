@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, OverlappingInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Database.Groundhog.Instances (Selector(..)) where
 
@@ -8,7 +8,11 @@ import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, pri
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
+#if MIN_VERSION_base(4, 7, 0)
+import Data.Bits (finiteBitSize)
+#else
 import Data.Bits (bitSize)
+#endif
 import Data.ByteString.Char8 (ByteString, unpack)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)
@@ -267,7 +271,11 @@ instance PersistField Int where
   persistName _ = "Int"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType a = DbTypePrimitive (if bitSize a == 32 then DbInt32 else DbInt64) False Nothing Nothing
+  dbType a = DbTypePrimitive (if finiteBitSize a == 32 then DbInt32 else DbInt64) False Nothing Nothing where
+#if !MIN_VERSION_base(4, 7, 0)
+    finiteBitSize = bitSize
+#endif
+
 
 instance PersistField Int8 where
   persistName _ = "Int8"

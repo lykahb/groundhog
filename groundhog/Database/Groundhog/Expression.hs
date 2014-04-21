@@ -31,7 +31,7 @@ class Expression db r a where
   toExpr :: a -> UntypedExpr db r
 
 -- | This helper class can make type signatures more concise
-class (Expression db r a, PersistField a') => ExpressionOf db r a a'
+class (Expression db r a, PersistField a') => ExpressionOf db r a a' | a -> a'
 
 instance (Expression db r a, Normalize HTrue a (flag, a'), PersistField a') => ExpressionOf db r a a'
 
@@ -83,11 +83,11 @@ instance r ~ (HTrue, t)     => Normalize HTrue  t r
 class NormalizeValue t r | t -> r
 -- Normalize @Key v u@ to @v@ only if this key is used for storing @v@.
 instance (TypeEq (DefaultKey v) (Key v u) isDef,
-         NormalizeKey isDef (Key v u) k,
+         NormalizeKey isDef v u k,
          r ~ (Not isDef, Maybe k))
          => NormalizeValue (Maybe (Key v u)) r
 instance (TypeEq (DefaultKey v) (Key v u) isDef,
-         NormalizeKey isDef (Key v u) k,
+         NormalizeKey isDef v u k,
          r ~ (Not isDef, k))
          => NormalizeValue (Key v u) r
 instance r ~ (HTrue, a) => NormalizeValue a r
@@ -96,9 +96,9 @@ class TypeEq x y b | x y -> b
 instance b ~ HFalse => TypeEq x y b
 instance TypeEq x x HTrue
 
-class NormalizeKey isDef key r | isDef key -> r, r -> key
-instance r ~ v => NormalizeKey HTrue (Key v u) r
-instance r ~ a => NormalizeKey HFalse a r
+class NormalizeKey isDef v u k | isDef v u -> k, k -> v
+instance k ~ v => NormalizeKey HTrue v u k
+instance k ~ Key v u => NormalizeKey HFalse v u k
 
 type family Not bool
 type instance Not HTrue  = HFalse

@@ -186,7 +186,7 @@ mkEmbeddedPurePersistFieldInstance def = do
 
 mkAutoKeyPersistFieldInstance :: THEntityDef -> Q [Dec]
 mkAutoKeyPersistFieldInstance def = case thAutoKey def of
-  Just autoKey -> do
+  Just _ -> do
     let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
     keyType <- [t| Key $(return entity) BackendSpecific |]
     
@@ -426,8 +426,8 @@ mkPersistEntityInstance def = do
   autoKey' <- do
     autoType <- case thAutoKey def of
       Nothing -> conT ''()
-      Just k -> [t| Key $(return entity) BackendSpecific |]
-    return $ TySynInstD ''AutoKey [entity] autoType
+      Just _ -> [t| Key $(return entity) BackendSpecific |]
+    return $ mkTySynInstD ''AutoKey [entity] autoType
     
   defaultKey' <- do
     let keyType = case thAutoKey def of
@@ -435,13 +435,13 @@ mkPersistEntityInstance def = do
          _ -> let unique = head $ filter thUniqueKeyIsDef $ thUniqueKeys def
               in  [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName unique) |]
     typ <- [t| Key $(return entity) $keyType |]
-    return $ TySynInstD ''DefaultKey [entity] typ
+    return $ mkTySynInstD ''DefaultKey [entity] typ
 
   isSumType' <- do
     let isSumType = ConT $ if length (thConstructors def) == 1
           then ''HFalse
           else ''HTrue
-    return $ TySynInstD ''IsSumType [entity] isSumType
+    return $ mkTySynInstD ''IsSumType [entity] isSumType
   
   fields' <- do
     cParam <- newName "c"
@@ -466,7 +466,7 @@ mkPersistEntityInstance def = do
               else [| undefined :: $(return $ thFieldType f) |]
             typ = mkType f nvar
         [| (fname, $typ) |]
-    let constrs = listE $ zipWith mkConstructorDef [0..] $ thConstructors def
+    let constrs = listE $ zipWith mkConstructorDef [0 :: Int ..] $ thConstructors def
         mkConstructorDef cNum c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef cNum name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
           fields = zipWith (\i f -> (thFieldName f, mkField c i f)) [0..] params
           mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef uName uType $(listE $ map getField uFields) |]
@@ -782,3 +782,11 @@ mkType THFieldDef{..} nvar = t2 where
   t2 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent) of
     (Nothing, Nothing, Nothing, Nothing) -> t1
     _ -> [| applyDbTypeSettings $(lift psField) $t1 |]
+
+mkTySynInstD :: Name -> [Type] -> Type -> Dec
+mkTySynInstD name ts t =
+#if MIN_VERSION_template_haskell(2, 9, 0)
+  TySynInstD name $ TySynEqn ts t
+#else
+  TySynInstD name ts t
+#endif
