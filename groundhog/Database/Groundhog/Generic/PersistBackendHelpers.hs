@@ -61,7 +61,7 @@ get RenderConfig{..} queryFunc (k :: Key v BackendSpecific) = do
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
 
-select :: forall m db r v c opts . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, HasSelectOptions opts db r)
+select :: forall m db r v c opts . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, HasSelectOptions opts db r)
        => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> opts -> m [v]
 select conf@RenderConfig{..} queryFunc noLimit options = doSelectQuery where
   SelectOptions cond limit offset ords = getSelectOptions options
@@ -117,7 +117,7 @@ getBy conf@RenderConfig{..} queryFunc (k :: Key v (Unique u)) = do
     Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
     Nothing -> return Nothing
 
-project :: forall m db r v c p opts a'. (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p db r a', HasSelectOptions opts db r)
+project :: forall m db r v c p opts a'. (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p db r a', HasSelectOptions opts db r)
         => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> p -> opts -> m [a']
 project conf@RenderConfig{..} queryFunc noLimit p options = doSelectQuery where
   SelectOptions cond limit offset ords = getSelectOptions options
@@ -137,7 +137,7 @@ project conf@RenderConfig{..} queryFunc noLimit p options = doSelectQuery where
   doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . projectionResult p
   constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
 
-count :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
+count :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
       => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Cond db r -> m Int
 count conf@RenderConfig{..} queryFunc cond = do
   let e = entityDef (undefined :: v)
@@ -209,7 +209,7 @@ replaceBy conf@RenderConfig{..} execFunc u v = do
       updateQuery = "UPDATE " <> tableName esc e constr <> " SET " <> upds <> " WHERE " <> cond
   execFunc updateQuery (updsVals . condVals $ [])
 
-update :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
+update :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => RenderConfig -> (Utf8 -> [PersistValue] -> m ()) -> [Update db r] -> Cond db r -> m ()
 update conf@RenderConfig{..} execFunc upds cond = do
   let e = entityDef (undefined :: v)
@@ -222,7 +222,7 @@ update conf@RenderConfig{..} execFunc upds cond = do
       execFunc query (getValues upds' <> maybe mempty getValues cond' $ [])
     Nothing -> return ()
 
-delete :: forall m db r v c . (SqlDb db, QueryRaw db ~ Snippet db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
+delete :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => RenderConfig -> (Utf8 -> [PersistValue] -> m ()) -> Cond db r -> m ()
 delete conf@RenderConfig{..} execFunc cond = execFunc query (maybe [] (($ []) . getValues) cond') where
   e = entityDef (undefined :: v)

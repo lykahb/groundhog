@@ -74,9 +74,8 @@ newtype RenderConfig = RenderConfig {
     esc  :: Utf8 -> Utf8
 }
 
--- Alas , GHC before 7.2 does not support superclass equality constraints (QueryRaw db ~ Snippet db).
 -- | This class distinguishes databases which support SQL-specific expressions. It contains ad hoc members for features whose syntax differs across the databases.
-class DbDescriptor db => SqlDb db where
+class (DbDescriptor db, QueryRaw db ~ Snippet db) => SqlDb db where
   append :: (ExpressionOf db r a String, ExpressionOf db r b String) => a -> b -> Expr db r String
   signum' :: (ExpressionOf db r x a, Num a) => x -> Expr db r a
   quotRem' :: (ExpressionOf db r x a, ExpressionOf db r y a, Integral a) => x -> y -> (Expr db r a, Expr db r a)
@@ -91,7 +90,7 @@ class SqlDb db => FloatingSqlDb db where
   logBase' :: (ExpressionOf db r b a, ExpressionOf db r x a, Floating a) => b -> x -> Expr db r a
 
 -- | If we reuse complex expression several times, prerendering it saves time. `RenderConfig` can be obtained with `mkExprWithConf`
-prerenderExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> Expr db r a -> Expr db r a
+prerenderExpr :: SqlDb db => RenderConfig -> Expr db r a -> Expr db r a
 prerenderExpr conf (Expr e) = Expr $ ExprRaw $ Snippet $ \_ _ -> prerendered where
   -- Priority of outer operation is not known. Assuming that it is high ensures that parentheses won't be missing.
   prerendered = renderExprExtended conf maxBound e
@@ -102,14 +101,14 @@ prerenderExpr conf (Expr e) = Expr $ ExprRaw $ Snippet $ \_ _ -> prerendered whe
 --        x' = prerenderExpr conf x
 --     in x' + x' * x'@
 -- @
-mkExprWithConf :: (SqlDb db, QueryRaw db ~ Snippet db, PersistField a) => (RenderConfig -> Int -> Expr db r a) -> Expr db r a
+mkExprWithConf :: (SqlDb db, PersistField a) => (RenderConfig -> Int -> Expr db r a) -> Expr db r a
 mkExprWithConf f = expr where
   expr = mkExpr $ Snippet $ \conf p -> [renderExprPriority conf p $ toExpr $ (f conf p) `asTypeOf` expr]
 
-renderExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> UntypedExpr db r -> RenderS db r
+renderExpr :: SqlDb db => RenderConfig -> UntypedExpr db r -> RenderS db r
 renderExpr conf expr = renderExprPriority conf 0 expr
 
-renderExprPriority :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
+renderExprPriority :: SqlDb db => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
 renderExprPriority conf p expr = (case expr of
   ExprRaw (Snippet f) -> let vals = f conf p in ensureOne vals id
   ExprField f -> let fs = renderChain conf f []
@@ -125,7 +124,7 @@ renderExprPriority conf p expr = (case expr of
       [x] -> f x
       xs' -> error $ "renderExprPriority: expected one column field, found " ++ show (length xs')
 
-renderExprExtended :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
+renderExprExtended :: SqlDb db => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
 renderExprExtended conf p expr = (case expr of
   ExprRaw (Snippet f) -> f conf p
   ExprField f -> map (flip RenderS id) $ renderChain conf f []
@@ -156,14 +155,14 @@ instance StringLike String where
 parens :: Int -> Int -> RenderS db r -> RenderS db r
 parens p1 p2 expr = if p1 < p2 then fromChar '(' <> expr <> fromChar ')' else expr
 
-operator :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a, Expression db r b) => Int -> String -> a -> b -> Snippet db r
+operator :: (SqlDb db, Expression db r a, Expression db r b) => Int -> String -> a -> b -> Snippet db r
 operator pr op = \a b -> Snippet $ \conf p ->
   [parens pr p $ renderExprPriority conf pr (toExpr a) <> fromString op <> renderExprPriority conf pr (toExpr b)]
 
-function :: (SqlDb db, QueryRaw db ~ Snippet db) => String -> [UntypedExpr db r] -> Snippet db r
+function :: SqlDb db => String -> [UntypedExpr db r] -> Snippet db r
 function func args = Snippet $ \conf _ -> [fromString func <> fromChar '(' <> commasJoin (map (renderExpr conf) args) <> fromChar ')']
 
-mkExpr :: (SqlDb db, QueryRaw db ~ Snippet db) => Snippet db r -> Expr db r a
+mkExpr :: SqlDb db => Snippet db r -> Expr db r a
 mkExpr = Expr . ExprRaw
 
 #if !MIN_VERSION_base(4, 5, 0)
@@ -174,14 +173,14 @@ mkExpr = Expr . ExprRaw
 
 {-# INLINABLE renderCond #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
-renderCond :: (SqlDb db, QueryRaw db ~ Snippet db)
+renderCond :: SqlDb db
   => RenderConfig
   -> Cond db r -> Maybe (RenderS db r)
 renderCond conf cond = renderCondPriority conf 0 cond where
 
 {-# INLINABLE renderCondPriority #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
-renderCondPriority :: (SqlDb db, QueryRaw db ~ Snippet db)
+renderCondPriority :: SqlDb db
   => RenderConfig
   -> Int -> Cond db r -> Maybe (RenderS db r)
 renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
@@ -249,7 +248,7 @@ defaultShowPrim (PersistNull) = "NULL"
 defaultShowPrim (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 {-# INLINABLE renderOrders #-}
-renderOrders :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> [Order db r] -> RenderS db r
+renderOrders :: SqlDb db => RenderConfig -> [Order db r] -> RenderS db r
 renderOrders _ [] = mempty
 renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoin orders where
   orders = concatMap go xs
@@ -295,7 +294,7 @@ intercalateS a (x:xs) = x <> go xs where
   go (f:fs) = a <> f <> go fs
 
 {-# INLINABLE renderUpdates #-}
-renderUpdates :: (SqlDb db, QueryRaw db ~ Snippet db) => RenderConfig -> [Update db r] -> Maybe (RenderS db r)
+renderUpdates :: SqlDb db => RenderConfig -> [Update db r] -> Maybe (RenderS db r)
 renderUpdates conf upds = (case mapMaybe go upds of
   [] -> Nothing
   xs -> Just $ commasJoin xs) where

@@ -295,7 +295,7 @@ testMaybe = do
   migr val
   Just val @=?? (insert val >>= get)
 
-testSelect :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => m ()
+testSelect :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => m ()
 testSelect = do
   migr (undefined :: Single (Int, String))
   let val1 = Single (5 :: Int, "abc")
@@ -314,7 +314,7 @@ testSelect = do
   [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField] `limitTo` 1)
   [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField, Desc SingleField] `limitTo` 1)
 
-testArith :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => m ()
+testArith :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => m ()
 testArith = do
   let val = Single (1 :: Int)
   migr val
@@ -324,7 +324,7 @@ testArith = do
   [(-6, -1)] @=?? project (quotRem (liftExpr SingleField - 20) 3) (AutoKeyField ==. k)
   [(-7, 2)] @=?? project (divMod (liftExpr SingleField - 20) 3) (AutoKeyField ==. k)
 
-testCond :: forall m db . (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => m ()
+testCond :: forall m db . (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => m ()
 testCond = do
   proxy <- phantomDb
   let rend :: forall r . Cond (PhantomDb m) r -> Maybe (RenderS (PhantomDb m) r)
@@ -692,7 +692,7 @@ testProjection = do
   result2 <- project Unique_key_two_columns ("" ==. "")
   [extractUnique uVal] @=? result2
 
-testProjectionSql :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => m ()
+testProjectionSql :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => m ()
 testProjectionSql = do
   let val = Single ("abc", 5 :: Int)
   migr val
@@ -758,7 +758,7 @@ testSchemas = do
   let val2 = InAnotherSchema (Just k)
   Just val2 @=?? (insert val2 >>= get)
 
-testFloating :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, QueryRaw db ~ Snippet db, FloatingSqlDb db) => m ()
+testFloating :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, FloatingSqlDb db) => m ()
 testFloating = do
   let val = Single (pi :: Double)
   migr val

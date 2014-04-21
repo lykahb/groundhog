@@ -23,36 +23,36 @@ import Database.Groundhog.Core
 import Database.Groundhog.Expression
 import Database.Groundhog.Generic.Sql
 
-in_ :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
+in_ :: (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
     a -> [b] -> Cond db r
 in_ _ [] = CondEmpty
 in_ a bs = CondRaw $ Snippet $ \conf p -> [parens 45 p $ renderExpr conf (toExpr a) <> " IN (" <> commasJoin (map (renderExpr conf . toExpr) bs) <> ")"]
 
-notIn_ :: (SqlDb db, QueryRaw db ~ Snippet db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
+notIn_ :: (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
        a -> [b] -> Cond db r
 notIn_ _ [] = CondEmpty
 notIn_ a bs = CondRaw $ Snippet $ \conf p -> [parens 45 p $ renderExpr conf (toExpr a) <> " NOT IN (" <> commasJoin (map (renderExpr conf . toExpr) bs) <> ")"]
 
-like :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> String -> Cond db r
+like :: (SqlDb db, ExpressionOf db r a a', IsString a') => a -> String -> Cond db r
 like a b = CondRaw $ operator 40 " LIKE " a b
 
-notLike :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> String -> Cond db r
+notLike :: (SqlDb db, ExpressionOf db r a a', IsString a') => a -> String -> Cond db r
 notLike a b = CondRaw $ operator 40 " NOT LIKE " a b
 
-lower :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> Expr db r a'
+lower :: (SqlDb db, ExpressionOf db r a a', IsString a') => a -> Expr db r a'
 lower a = mkExpr $ function "lower" [toExpr a]
 
-upper :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', IsString a') => a -> Expr db r a'
+upper :: (SqlDb db, ExpressionOf db r a a', IsString a') => a -> Expr db r a'
 upper a = mkExpr $ function "upper" [toExpr a]
 
-cot :: (FloatingSqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', Floating a') => a -> Expr db r a'
+cot :: (FloatingSqlDb db, ExpressionOf db r a a', Floating a') => a -> Expr db r a'
 cot a = mkExpr $ function "cot" [toExpr a]
 
-radians, degrees :: (FloatingSqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', Floating a') => a -> Expr db r a'
+radians, degrees :: (FloatingSqlDb db, ExpressionOf db r a a', Floating a') => a -> Expr db r a'
 radians x = mkExpr $ function "radians" [toExpr x]
 degrees x = mkExpr $ function "degrees" [toExpr x]
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Num a) => Num (Expr db r a) where
+instance (SqlDb db, PersistField a, Num a) => Num (Expr db r a) where
   a + b = mkExpr $ operator 60 "+" a b
   a - b = mkExpr $ operator 60 "-" a b
   a * b = mkExpr $ operator 70 "*" a b
@@ -60,11 +60,11 @@ instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Num a) => Num (Exp
   abs a = mkExpr $ function "abs" [toExpr a]
   fromInteger a = Expr $ toExpr (fromIntegral a :: Int64)
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Fractional a) => Fractional (Expr db r a) where
+instance (SqlDb db, PersistField a, Fractional a) => Fractional (Expr db r a) where
   a / b = mkExpr $ operator 70 "/" a b
   fromRational a = Expr $ toExpr (fromRational a :: Double)
 
-instance (FloatingSqlDb db, QueryRaw db ~ Snippet db, PersistField a, Floating a) => Floating (Expr db r a) where
+instance (FloatingSqlDb db, PersistField a, Floating a) => Floating (Expr db r a) where
   pi = mkExpr $ function "pi" []
   exp x = mkExpr $ function "exp" [toExpr x]
   sqrt x = mkExpr $ function "sqrt" [toExpr x]
@@ -84,20 +84,20 @@ instance (FloatingSqlDb db, QueryRaw db ~ Snippet db, PersistField a, Floating a
   atanh x = log ((1 + x) / (1 - x)) / 2
   acosh x = log $ x + sqrt (x * x - 1)
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Ord a) => Ord (Expr db r a) where
+instance (SqlDb db, PersistField a, Ord a) => Ord (Expr db r a) where
   compare = error "compare: instance Ord (Expr db r a) does not have implementation"
   (<=) = error "(<=): instance Ord (Expr db r a) does not have implementation"
   max a b = mkExpr $ function "max" [toExpr a, toExpr b]
   min a b = mkExpr $ function "min" [toExpr a, toExpr b]
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Real a) => Real (Expr db r a) where
+instance (SqlDb db, PersistField a, Real a) => Real (Expr db r a) where
   toRational = error "toRational: instance Real (Expr db r a) is made only for Integral superclass constraint"
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PersistField a, Enum a) => Enum (Expr db r a) where
+instance (SqlDb db, PersistField a, Enum a) => Enum (Expr db r a) where
   toEnum = error "toEnum: instance Enum (Expr db r a) is made only for Integral superclass constraint"
   fromEnum = error "fromEnum: instance Enum (Expr db r a) is made only for Integral superclass constraint"
 
-instance (SqlDb db, QueryRaw db ~ Snippet db, PurePersistField a, Integral a) => Integral (Expr db r a) where
+instance (SqlDb db, PurePersistField a, Integral a) => Integral (Expr db r a) where
   quotRem x y = quotRem' x y
   divMod x y = (div', mod') where
     div' = mkExprWithConf $ \conf _ -> let
@@ -115,7 +115,7 @@ instance (SqlDb db, QueryRaw db ~ Snippet db, PurePersistField a, Integral a) =>
     zero = 0 `asTypeOf` ((undefined :: Expr db r a -> a) x)
   toInteger = error "toInteger: instance Integral (Expr db r a) does not have implementation"
 
-case_ :: (SqlDb db, QueryRaw db ~ Snippet db, ExpressionOf db r a a', ExpressionOf db r b a')
+case_ :: (SqlDb db, ExpressionOf db r a a', ExpressionOf db r b a')
       => [(Cond db r, a)] -- ^ Conditions
       -> b          -- ^ It is returned when none of conditions is true
       -> Expr db r a'

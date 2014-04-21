@@ -69,7 +69,7 @@ cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 1" []
 #endif
 
-mkSqlTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db, QueryRaw db ~ Snippet db) => (m () -> IO ()) -> [Test]
+mkSqlTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => (m () -> IO ()) -> [Test]
 mkSqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testSelect", testSelect)
   , ("testCond", testCond)
