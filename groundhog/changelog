@@ -1,6 +1,11 @@
+0.5.0
+* Reimplemented projections with constraint kinds
+* Moved QueryRaw constraint into class SqlDb simplifying SQL function signatures
+* Compatibility with GHC 7.8
+
 0.4.2.2
 * Create missing schemas (or databases in MySQL terminology) during migration
-* Replace datatype Proxy with type variable
+* Replaced datatype Proxy with type variable
 
 0.4.2
 * Cond can be used as expression
