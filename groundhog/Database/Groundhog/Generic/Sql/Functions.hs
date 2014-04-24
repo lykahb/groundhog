@@ -25,7 +25,7 @@ import Database.Groundhog.Generic.Sql
 
 in_ :: (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
     a -> [b] -> Cond db r
-in_ _ [] = CondEmpty
+in_ _ [] = Not CondEmpty
 in_ a bs = CondRaw $ Snippet $ \conf p -> [parens 45 p $ renderExpr conf (toExpr a) <> " IN (" <> commasJoin (map (renderExpr conf . toExpr) bs) <> ")"]
 
 notIn_ :: (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>

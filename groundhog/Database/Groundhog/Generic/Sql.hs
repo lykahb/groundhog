@@ -186,6 +186,7 @@ renderCondPriority :: SqlDb db
 renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
   go (And a b)       p = perhaps andP p " AND " a b
   go (Or a b)        p = perhaps orP p " OR " a b
+  go (Not CondEmpty) _ = Just "(1=0)" -- special case for False
   go (Not a)         p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
   go (Compare compOp f1 f2) p = (case compOp of
     Eq -> renderComp andP " AND " 37 equalsOperator f1 f2
@@ -206,6 +207,7 @@ renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
     [a] -> Just a
     _ -> error "renderCond: cannot render CondRaw with many elements"
   go CondEmpty _ = Nothing
+ 
   notP = 35
   andP = 30
   orP = 20

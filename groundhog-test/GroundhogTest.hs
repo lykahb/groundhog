@@ -313,6 +313,7 @@ testSelect = do
   [val1, val2] @=?? (select $ ((SingleField ~> Tuple2_0Selector) `in_` [7 :: Int, 5]) `orderBy` [Asc (SingleField ~> Tuple2_0Selector)])
   [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField] `limitTo` 1)
   [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField, Desc SingleField] `limitTo` 1)
+  ([] :: [Single (Int, String)]) @=?? (select $ Not CondEmpty)
 
 testArith :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => m ()
 testArith = do
