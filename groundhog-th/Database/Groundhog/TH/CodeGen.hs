@@ -642,7 +642,7 @@ mkPrimitivePersistFieldInstance def = do
   fromPersistValues' <- funD 'fromPersistValues [clause [] (normalB [| primFromPersistValue |]) []]
   toPersistValues' <- funD 'toPersistValues [clause [] (normalB [| primToPersistValue |]) []]
   dbType' <- do
-    let typ = if thPrimitiveStringRepresentation def
+    let typ = if thPrimitiveStringEnumRepresentation def
           then [| DbTypePrimitive DbString False Nothing Nothing |]
           else [| DbTypePrimitive DbInt32  False Nothing Nothing |]
     funD 'dbType $ [ clause [wildP] (normalB typ) [] ]
@@ -657,7 +657,7 @@ mkPrimitivePrimitivePersistFieldInstance def = do
   toPrim' <- do
     proxy <- newName "p"
     x <- newName "x"
-    let value = if thPrimitiveStringRepresentation def
+    let value = if thPrimitiveStringEnumRepresentation def
           then [| show $(varE x) |]
           else [| fromEnum $(varE x) |]
         body = [| toPrimitivePersistValue $(varE proxy) $value |]
@@ -666,7 +666,7 @@ mkPrimitivePrimitivePersistFieldInstance def = do
     proxy <- newName "p"
     x <- newName "x"
     let value = [| fromPrimitivePersistValue $(varE proxy) $(varE x) |]
-        body = if thPrimitiveStringRepresentation def
+        body = if thPrimitiveStringEnumRepresentation def
           then [| read $value |]
           else [| toEnum $value |]
     funD 'fromPrimitivePersistValue [clause [varP proxy, varP x] (normalB body) []]

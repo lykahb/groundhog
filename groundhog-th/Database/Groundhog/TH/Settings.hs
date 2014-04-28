@@ -56,15 +56,15 @@ data THAutoKeyDef = THAutoKeyDef {
 data THEmbeddedDef = THEmbeddedDef {
     thEmbeddedName :: Name
   , thEmbeddedConstructorName :: Name
-  , thDbEmbeddedName :: String -- used only to set polymorphic part of name of its container
+  , thDbEmbeddedName :: String -- ^ It is used only to set polymorphic part of name of its container
   , thEmbeddedTypeParams :: [TyVarBndr]
   , thEmbeddedFields :: [THFieldDef]
 } deriving Show
 
 data THPrimitiveDef = THPrimitiveDef {
     thPrimitiveName :: Name
-  , thPrimitiveDbName :: String -- used only to set polymorphic part of name of its container
-  , thPrimitiveStringRepresentation :: Bool -- store in database as string using Show/Read instances or as integer using Enum instance
+  , thPrimitiveDbName :: String -- ^ It is used only to set polymorphic part of name of its container
+  , thPrimitiveStringEnumRepresentation :: Bool -- ^ Store in database as string using Show/Read instances (True) or as integer using Enum instance (False).
 } deriving Show
 
 data THConstructorDef = THConstructorDef {
@@ -90,16 +90,17 @@ data THFieldDef = THFieldDef {
 data THUniqueDef = THUniqueDef {
     thUniqueName :: String
   , thUniqueType :: UniqueType
-  , thUniqueFields :: [String]
+  , thUniqueFields :: [String] -- ^ Names of fields, not column names, i.e, thFieldName
 } deriving Show
 
 data THUniqueKeyDef = THUniqueKeyDef {
     thUniqueKeyName :: String
   , thUniqueKeyPhantomName :: String
   , thUniqueKeyConstrName :: String
-  , thUniqueKeyDbName :: String -- used only to set polymorphic part of name of its container
+  , thUniqueKeyDbName :: String -- ^ It is used only to set polymorphic part of name of its container
+    -- | It should repeat fields from THUniqueDef but it may give different settings for them. It is done to allow foreign key fields to be different from parent fields of the entity. These fields are used for creating a the key constructor and instances for it. For example, it can have a default value, or even a different type (INT8 may reference INT4).
   , thUniqueKeyFields :: [THFieldDef]
-  , thUniqueKeyMakeEmbedded :: Bool -- whether to make it an instance of Embedded
+  , thUniqueKeyMakeEmbedded :: Bool -- ^ If True, make it an instance of Embedded
   , thUniqueKeyIsDef :: Bool
 } deriving Show
 
@@ -114,14 +115,14 @@ data PSEntityDef = PSEntityDef {
 
 data PSEmbeddedDef = PSEmbeddedDef {
     psEmbeddedName :: String
-  , psDbEmbeddedName :: Maybe String -- used only to set polymorphic part of name of its container
+  , psDbEmbeddedName :: Maybe String -- ^ It is used only to set polymorphic part of name of its container
   , psEmbeddedFields :: Maybe [PSFieldDef]
 } deriving Show
 
 data PSPrimitiveDef = PSPrimitiveDef {
     psPrimitiveName :: String
-  , psPrimitiveDbName :: Maybe String -- used only to set polymorphic part of name of its container
-  , psPrimitiveStringRepresentation :: Maybe Bool -- store in database as string using Show/Read instances or as integer using Enum instance
+  , psPrimitiveDbName :: Maybe String -- ^ It is used only to set polymorphic part of name of its container
+  , psPrimitiveStringEnumRepresentation :: Maybe Bool -- ^ Store in database as string using Show/Read instances (True) or as integer using Enum instance (False).
 } deriving Show
 
 data PSConstructorDef = PSConstructorDef {
@@ -160,7 +161,7 @@ instance Lift PersistDefinition where
   lift (PSPrimitiveDef' e) = [| PSPrimitiveDef' e |]
 
 instance Lift PSPrimitiveDef where
-  lift (PSPrimitiveDef {..}) = [| PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveStringRepresentation) |]
+  lift (PSPrimitiveDef {..}) = [| PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveStringEnumRepresentation) |]
 
 instance Lift PersistDefinitions where
   lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift definitions) |]

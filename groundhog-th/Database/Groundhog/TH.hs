@@ -274,7 +274,7 @@ applyEmbeddedSettings PSEmbeddedDef{..} def@(THEmbeddedDef{..}) =
 applyPrimitiveSettings :: PSPrimitiveDef -> THPrimitiveDef -> THPrimitiveDef
 applyPrimitiveSettings PSPrimitiveDef{..} def@(THPrimitiveDef{..}) =
   def { thPrimitiveDbName = fromMaybe thPrimitiveDbName psPrimitiveDbName
-      , thPrimitiveStringRepresentation = fromMaybe thPrimitiveStringRepresentation psPrimitiveStringRepresentation
+      , thPrimitiveStringEnumRepresentation = fromMaybe thPrimitiveStringEnumRepresentation psPrimitiveStringEnumRepresentation
       }
 
 mkFieldsForUniqueKey :: NamingStyle -> String -> THUniqueKeyDef -> THConstructorDef -> [THFieldDef]
