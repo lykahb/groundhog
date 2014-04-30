@@ -46,6 +46,7 @@ module GroundhogTest (
     , testFloating
     , testListTriggersOnDelete
     , testListTriggersOnUpdate
+    , testSchemaAnalysis
 #if WITH_SQLITE
     , testSchemaAnalysisSqlite
 #endif
@@ -68,7 +69,7 @@ import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Migration (SchemaAnalyzer(..))
+import Database.Groundhog.Generic.Migration
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Generic.Sql.Functions
 import Database.Groundhog.TH
@@ -79,12 +80,14 @@ import Database.Groundhog.Sqlite
 import Database.Groundhog.Postgresql
 import Database.Groundhog.Postgresql.Array hiding (all, any, append)
 import qualified Database.Groundhog.Postgresql.Array as Arr
-import Database.Groundhog.Postgresql.Geometry hiding ((>>))
+import Database.Groundhog.Postgresql.Geometry hiding ((>>), (&&))
+import qualified Database.Groundhog.Postgresql.Geometry as Geo
 #endif
 #if WITH_MYSQL
 import Database.Groundhog.MySQL
 #endif
 import Data.ByteString.Char8 (unpack)
+import Data.Function (on)
 import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
 import qualified Data.Map as Map
@@ -180,10 +183,12 @@ mkPersist defaultCodegenConfig [groundhog|
     - name: UniqueKeySample
       uniques:
         - name: unique_key_one_column
-          type: primary
           fields: [uniqueKey1]
         - name: unique_key_two_columns
           fields: [uniqueKey2, uniqueKey3]
+        - name: unique_primary
+          type: primary
+          fields: [uniqueKey1, uniqueKey2]
 - entity: InCurrentSchema
 - entity: InAnotherSchema
   schema: myschema
@@ -208,9 +213,13 @@ mkPersist defaultCodegenConfig [groundhog|
 
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
 migr v = do
-  runMigration silentMigrationLogger (migrate v)
-  m <- createMigration $ migrate v
-  [] @=? filter (/= Right []) (Map.elems m)
+  m1 <- createMigration $ migrate v
+  executeMigration silentMigrationLogger m1
+  m2 <- createMigration $ migrate v
+  let afterMigration = filter (/= Right []) (Map.elems m2)
+  liftIO $ unless (null afterMigration) $
+    H.assertFailure $ ("first migration: " ++ show (Map.elems m1) ++ "\nsecond migration:" ++ show afterMigration)
+    
 
 (@=?) :: (Eq a, Show a, MonadBaseControl IO m, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
@@ -788,6 +797,30 @@ testFloating = do
   asinh pi @=??~ asinh (liftExpr SingleField)
   atanh (pi / 4) @=??~ atanh (liftExpr SingleField / 4)
   acosh (pi) @=??~ acosh (liftExpr SingleField)
+
+testSchemaAnalysis :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, SchemaAnalyzer m) => m ()
+testSchemaAnalysis = do
+  let val = Single (UniqueKeySample 1 2 (Just 3))
+  migr val
+  singleInfo <- analyzeTable Nothing $ persistName val
+  uniqueInfo <- analyzeTable Nothing $ persistName (undefined :: UniqueKeySample)
+  let match (TableInfo cols1 uniqs1 refs1) (TableInfo cols2 uniqs2 refs2) =
+           haveSameElems ((==) `on` \x -> x {colDefault = Nothing}) cols1 cols2
+        && haveSameElems ((==) `on` \x -> x {uniqueDefName = Nothing}) uniqs1 uniqs2
+        && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` referencedTableName) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2 ) refs1 refs2
+      expectedSingleInfo = TableInfo [Column "id" False DbInt64 Nothing, Column "single#uniqueKey2" False DbInt64 Nothing, Column "single#uniqueKey3" True DbInt64 Nothing]
+        [UniqueDef' Nothing (UniquePrimary True) ["id"]]
+        [(Nothing, Reference Nothing "UniqueKeySample" [("single#uniqueKey2","uniqueKey2"), ("single#uniqueKey3","uniqueKey3")] Nothing Nothing)]
+      expectedUniqueInfo = TableInfo [Column "uniqueKey1" False DbInt64 Nothing, Column "uniqueKey2" False DbInt64 Nothing, Column "uniqueKey3" True DbInt64 Nothing]
+        [UniqueDef' Nothing UniqueConstraint ["uniqueKey1"], UniqueDef' Nothing UniqueConstraint ["uniqueKey2","uniqueKey3"], UniqueDef' Nothing (UniquePrimary False) ["uniqueKey1", "uniqueKey2"]]
+        []
+
+  case singleInfo of
+    Just t | match t expectedSingleInfo -> return ()
+    _ -> liftIO $ H.assertFailure $ "Single does not match the expected schema: " ++ show singleInfo
+  case uniqueInfo of
+    Just t | match t expectedUniqueInfo -> return ()
+    _ -> liftIO $ H.assertFailure $ "UniqueKeySample does not match the expected schema: " ++ show uniqueInfo
 
 #if WITH_SQLITE
 testSchemaAnalysisSqlite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m ()

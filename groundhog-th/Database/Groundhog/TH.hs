@@ -319,7 +319,10 @@ validateEntity def = do
          let uniqueNames = map thUniqueName $ thConstrUniques $ head constrs
          in  forM_ (thUniqueKeys def) $ \cKey -> unless (thUniqueKeyName cKey `elem` uniqueNames) $
              fail $ "Unique key mentions unknown unique: " ++ thUniqueKeyName cKey ++ " in datatype " ++ show (thDataName def)
-  let primaryConstraints = length $ filter ((== UniquePrimary) . thUniqueType) $ concatMap thConstrUniques constrs 
+  let isPrimary x = case x of
+            UniquePrimary _ -> True
+            _ -> False
+      primaryConstraints = length $ filter (isPrimary . thUniqueType) $ concatMap thConstrUniques constrs 
   if length constrs > 1
     then when (primaryConstraints > 0) $
            fail $ "Custom primary keys may exist only for datatypes with single constructor: " ++ show (thDataName def)

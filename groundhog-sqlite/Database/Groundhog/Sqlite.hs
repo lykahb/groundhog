@@ -212,16 +212,16 @@ analyzeTable' _ tName = do
     rawColumns -> do
       let mkColumn :: (Int, (String, String, Int, Maybe String, Int)) -> Column
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
-      let primaryKeyColumnNames = foldr (\(_ , (name, _, _, _, isPrimary)) xs -> if isPrimary == 1 then name:xs else xs) [] rawColumns
-      let columns = map mkColumn rawColumns
+          primaryKeyColumnNames = foldr (\(_ , (name, _, _, _, primaryIndex)) xs -> if primaryIndex > 0 then name:xs else xs) [] rawColumns
+          columns = map mkColumn rawColumns
       indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
         uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
         sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue proxy name] id
         let columnNames = map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
-        let uType = if sql == Just [PersistNull]
-              then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary else UniqueConstraint
+            uType = if sql == Just [PersistNull]
+              then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary False else UniqueConstraint
               else UniqueIndex
         return $ UniqueDef' (Just name) uType columnNames
       foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
@@ -231,28 +231,31 @@ analyzeTable' _ tName = do
               mkAction c = Just $ fromMaybe (error $ "unknown reference action type: " ++ c) $ readReferenceAction c
           forM foreigns $ \rows -> do 
             let (_, (_, foreignTable, _, (onUpdate, onDelete, _))) = head rows
-            refs <- forM rows $ \(_, (_, _, (child, parent), _)) -> case parent of
+                (children, parents) = unzip $ map (\(_, (_, _, pair, _)) -> pair) rows
+            parents' <- case head parents of
               Nothing -> analyzePrimaryKey foreignTable >>= \x -> case x of
-                Just primaryKeyName -> return (child, primaryKeyName)
+                Just primaryCols -> return primaryCols
                 Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
-              Just columnName -> return (child, columnName)
+              Just _ -> return $ map (fromMaybe (error "analyzeTable: all parents must be either NULL or values")) parents
+            let refs = zip children parents'
             return (Nothing, Reference Nothing foreignTable refs (mkAction onDelete) (mkAction onUpdate))
-      let uniques' = uniques ++ 
-            if all ((/= UniquePrimary) . uniqueDefType) uniques && not (null primaryKeyColumnNames)
-              then  [UniqueDef' Nothing UniquePrimary primaryKeyColumnNames]
+      let notPrimary x = case x of
+            UniquePrimary _ -> False
+            _ -> True
+          uniques' = uniques ++ 
+            if all (notPrimary . uniqueDefType) uniques && not (null primaryKeyColumnNames)
+              then  [UniqueDef' Nothing (UniquePrimary True) primaryKeyColumnNames]
               else []
       return $ Just $ TableInfo columns uniques' foreigns
 
-analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe String)
+analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe [String])
 analyzePrimaryKey tName = do
   tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
-  let rawColumns :: [(Int, (String, String, Int, Maybe String, Int))]
-      rawColumns = filter (\(_ , (_, _, _, _, isPrimary)) -> isPrimary == 1) tableInfo
-  return $ case rawColumns of
-    [(_, (name, _, _, _, _))] -> Just name
-    -- if the list is empty, there is no primary key
-    -- if the list has more than 1 element, the key is read by pragma index_list as a unique constraint in another place
-    _ -> Nothing
+  let cols = map (\(_ , (name, _, _, _, primaryIndex)) -> (primaryIndex, name)) (tableInfo ::  [(Int, (String, String, Int, Maybe String, Int))])
+      cols' = map snd $ sort $ filter ((> 0) . fst) cols
+  return $ if null cols'
+    then Nothing
+    else Just cols'
 
 getStatementCached :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> DbPersist Sqlite m S.Statement
 getStatementCached sql = do
@@ -329,14 +332,14 @@ sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape 
 
 sqlUnique :: UniqueDef' -> String
 sqlUnique (UniqueDef' name typ cols) = concat [
-    maybe "" ((" CONSTRAINT " ++) . escape) name
+    maybe "" (\x -> "CONSTRAINT " ++ escape x ++ " ") name
   , constraintType
   , intercalate "," $ map escape cols
   , ")"
   ] where
     constraintType = case typ of
-      UniquePrimary -> " PRIMARY KEY("
-      UniqueConstraint -> " UNIQUE("
+      UniquePrimary _ -> "PRIMARY KEY("
+      UniqueConstraint -> "UNIQUE("
       UniqueIndex -> error "sqlUnique: does not handle indexes"
 
 insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Sqlite m (AutoKey v)
@@ -541,9 +544,7 @@ toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m, Pers
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-compareUniqs (UniqueDef' _ UniquePrimary cols1) (UniqueDef' _ UniquePrimary cols2) = haveSameElems (==) cols1 cols2
--- only one of the uniques is primary
-compareUniqs (UniqueDef' _ type1 _) (UniqueDef' _ type2 _) | UniquePrimary `elem` [type1, type2] = False
+compareUniqs (UniqueDef' _ (UniquePrimary _) cols1) (UniqueDef' _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
 compareUniqs (UniqueDef' _ type1 cols1) (UniqueDef' _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool

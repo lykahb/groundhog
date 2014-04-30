@@ -181,7 +181,7 @@ instance Lift PSUniqueDef where
 instance Lift UniqueType where
   lift UniqueConstraint = [| UniqueConstraint |]
   lift UniqueIndex = [| UniqueIndex |]
-  lift UniquePrimary = [| UniquePrimary |]
+  lift (UniquePrimary x) = [| UniquePrimary $(lift x) |]
 
 instance Lift ReferenceActionType where
   lift NoAction = [| NoAction |]
@@ -253,7 +253,7 @@ instance FromJSON PSUniqueDef where
 instance FromJSON UniqueType where
   parseJSON o = do
     x <- parseJSON o
-    let vals = [("constraint", UniqueConstraint), ("index", UniqueIndex), ("primary", UniquePrimary)]
+    let vals = [("constraint", UniqueConstraint), ("index", UniqueIndex), ("primary", UniquePrimary False)]
     case lookup x vals of
       Just a -> return a
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x

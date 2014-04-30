@@ -42,7 +42,7 @@ import Data.Char (isAlphaNum, isSpace, toUpper)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
-import Data.List (groupBy, intercalate, stripPrefix)
+import Data.List (groupBy, intercalate, isPrefixOf, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Monoid
 import Data.Pool
@@ -372,7 +372,6 @@ analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
     Just _ -> do
-      -- omit primary keys
       let colQuery = "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.datetime_precision, c.interval_type, a.attndims AS array_dims, te.typname AS array_elem\
 \  FROM pg_catalog.pg_attribute a\
 \  INNER JOIN pg_catalog.pg_class cl ON cl.oid = a.attrelid\
@@ -390,7 +389,10 @@ analyzeTable' schema name = do
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace WHERE sch.nspname = coalesce(?, current_schema()) AND tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
-      let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes ++ mkUniqs UniquePrimary uniqPrimary
+          isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
+                                [c] -> colType c `elem` [DbInt32, DbInt64] && maybe False ("nextval" `isPrefixOf`) (colDefault c)
+                                _ -> False
+      let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes ++ mkUniqs (UniquePrimary isAutoincremented) uniqPrimary
       references <- analyzeTableReferences schema name
       return $ Just $ TableInfo cols uniqs references
     Nothing -> return Nothing
@@ -471,7 +473,7 @@ showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = [(False, 
   , intercalate "," $ map escape cols
   , ")"
   ])]
-showAlterTable table (AddUnique (UniqueDef' uName UniquePrimary cols)) = [(False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef' uName (UniquePrimary _) cols)) = [(False, defaultPriority, concat
   [ "ALTER TABLE "
   , table
   , " ADD"
@@ -600,9 +602,7 @@ showSqlType t = case t of
   DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-compareUniqs (UniqueDef' _ UniquePrimary cols1) (UniqueDef' _ UniquePrimary cols2) = haveSameElems (==) cols1 cols2
--- only one of the uniques is primary
-compareUniqs (UniqueDef' _ type1 _) (UniqueDef' _ type2 _) | UniquePrimary `elem` [type1, type2] = False
+compareUniqs (UniqueDef' _ (UniquePrimary _) cols1) (UniqueDef' _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
 compareUniqs (UniqueDef' name1 type1 cols1) (UniqueDef' name2 type2 cols2) = fromMaybe True (liftM2 (==) name1 name2) && type1 == type2 && haveSameElems (==) cols1 cols2
 
 compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool

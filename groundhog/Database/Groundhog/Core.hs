@@ -385,7 +385,10 @@ data UniqueDef = UniqueDef {
 } deriving (Show, Eq)
 
 -- | Defines how to treat the unique set of fields for a datatype
-data UniqueType = UniqueConstraint | UniqueIndex | UniquePrimary deriving (Show, Eq)
+data UniqueType = UniqueConstraint
+                | UniqueIndex
+                | UniquePrimary Bool -- ^ is autoincremented
+  deriving (Show, Eq, Ord)
 
 data ReferenceActionType = NoAction
                          | Restrict

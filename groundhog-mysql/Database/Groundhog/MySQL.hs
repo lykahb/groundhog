@@ -31,7 +31,7 @@ import qualified Database.MySQL.Simple.Types  as MySQL
 import qualified Database.MySQL.Base          as MySQLBase
 import qualified Database.MySQL.Base.Types    as MySQLBase
 
-import Control.Arrow ((***))
+import Control.Arrow (first, (***))
 import Control.Monad (liftM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (MonadLogger, logDebugS)
@@ -43,7 +43,7 @@ import Data.Char (toUpper)
 import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.List (groupBy, intercalate, intersect, partition, stripPrefix)
+import Data.List (groupBy, intercalate, intersect, isInfixOf, partition, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Pool
 
@@ -343,25 +343,27 @@ analyzeTable' schema name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, database()) AND table_name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
   case table of
     Just _ -> do
-      -- omit primary keys
-      let colQuery = "SELECT c.column_name, c.is_nullable, c.data_type, c.column_type, c.column_default, c.character_maximum_length, c.numeric_precision, c.numeric_scale\
+      let colQuery = "SELECT c.column_name, c.is_nullable, c.data_type, c.column_type, c.column_default, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.extra\
 \  FROM information_schema.columns c\
 \  WHERE c.table_schema = coalesce(?, database()) AND c.table_name=?\
 \  ORDER BY c.ordinal_position"
 
-      cols <- queryRaw' colQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . getColumn name . fst . fromPurePersistValues proxy)
+      cols <- queryRaw' colQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . first getColumn . fst . fromPurePersistValues proxy)
       -- MySQL has no difference between unique keys and indexes
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.key_column_usage u USING (constraint_catalog, constraint_schema, constraint_name, table_schema, table_name) WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,database()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
-      let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniquePrimary uniqPrimary
+          isAutoincremented = case filter (\c -> colName (fst c) `elem` map snd uniqPrimary) cols of
+                                [(c, extra)] -> colType c `elem` [DbInt32, DbInt64] && "auto_increment" `isInfixOf` (extra :: String)
+                                _ -> False
+          uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs (UniquePrimary isAutoincremented) uniqPrimary
       references <- analyzeTableReferences schema name
-      return $ Just $ TableInfo cols uniqs references
+      return $ Just $ TableInfo (map fst cols) uniqs references
     Nothing -> return Nothing
 
-getColumn :: String -> ((String, String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int)) -> Column
-getColumn _ ((column_name, is_nullable, data_type, column_type, d), modifiers) = Column column_name (is_nullable == "YES") t d where
+getColumn :: ((String, String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int)) -> Column
+getColumn ((column_name, is_nullable, data_type, column_type, d), modifiers) = Column column_name (is_nullable == "YES") t d where
   t = readSqlType data_type column_type modifiers
 
 analyzeTableReferences :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist MySQL m [(Maybe String, Reference)]
@@ -445,7 +447,7 @@ showAlterTable _ table (AddUnique (UniqueDef' uName UniqueIndex cols)) = [(False
   , intercalate "," $ map escape cols
   , ")"
   ])]
-showAlterTable _ table (AddUnique (UniqueDef' uName UniquePrimary cols)) = [(False, defaultPriority, concat
+showAlterTable _ table (AddUnique (UniqueDef' uName (UniquePrimary _) cols)) = [(False, defaultPriority, concat
   [ "ALTER TABLE "
   , table
   , " ADD"
@@ -517,9 +519,7 @@ showSqlType t = case t of
   DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-compareUniqs (UniqueDef' _ UniquePrimary cols1) (UniqueDef' _ UniquePrimary cols2) = haveSameElems (==) cols1 cols2
--- only one of the uniques is primary
-compareUniqs (UniqueDef' _ type1 _) (UniqueDef' _ type2 _) | UniquePrimary `elem` [type1, type2] = False
+compareUniqs (UniqueDef' _ (UniquePrimary _) cols1) (UniqueDef' _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
 compareUniqs (UniqueDef' name1 _ cols1) (UniqueDef' name2 _ cols2) = fromMaybe True (liftM2 (==) name1 name2) && haveSameElems (==) cols1 cols2
 
 compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool

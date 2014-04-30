@@ -89,7 +89,7 @@ data UniqueDef' = UniqueDef' {
     uniqueDefName :: Maybe String
   , uniqueDefType :: UniqueType
   , uniqueDefColumns :: [String]
-} deriving Show
+} deriving (Show, Eq, Ord)
 
 data MigrationPack m = MigrationPack {
     compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
@@ -190,7 +190,7 @@ migrateEntity m@MigrationPack{..} e = do
   let name = entityName e
       constrs = constructors e
       mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ primaryKeyTypeName ++ ", discr INTEGER NOT NULL)"
-      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef' Nothing UniquePrimary ["id"]] []
+      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef' Nothing (UniquePrimary True) ["id"]] []
 
   if isSimple constrs
     then do
@@ -227,7 +227,7 @@ migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valuesName = mainName ++ delim : "values"
       (valueCols, valueRefs) = (($ []) . mkColumns) &&& mkReferences $ ("value", t)
       refs' = Reference Nothing mainName [("id", "id")] (Just Cascade) Nothing : valueRefs
-      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef' Nothing UniquePrimary ["id"]] []
+      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef' Nothing (UniquePrimary True) ["id"]] []
       mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ primaryKeyTypeName ++ ")"
       (addInCreate, addInAlters) = addUniquesReferences [] refs'
       expectedValuesStructure = TableInfo valueColumns [] (map (\x -> (Nothing, x)) refs')
@@ -261,7 +261,7 @@ getAlters m@MigrationPack{..} (TableInfo oldColumns oldUniques oldRefs) (TableIn
     (oldOnlyColumns, newOnlyColumns, commonColumns) = matchElements ((==) `on` colName) oldColumns newColumns
     (oldOnlyUniques, newOnlyUniques, commonUniques) = matchElements compareUniqs oldUniques newUniques
     (oldOnlyRefs, newOnlyRefs, _) = matchElements compareRefs oldRefs newRefs
-    primaryColumns = concatMap uniqueDefColumns $ filter ((== UniquePrimary) . uniqueDefType) oldUniques
+    primaryColumns = concatMap uniqueDefColumns $ filter ((== UniquePrimary True) . uniqueDefType) oldUniques
 
     colAlters = mapMaybe (\(a, b) -> mkAlterColumn b $ migrateColumn m a b) (filter ((`notElem` primaryColumns) . colName . fst) commonColumns)
     mkAlterColumn col alters = if null alters then Nothing else Just $ AlterColumn col alters
@@ -300,7 +300,7 @@ dropUnique :: UniqueDef' -> AlterTable
 dropUnique (UniqueDef' name typ _) = (case typ of
   UniqueConstraint -> DropConstraint name'
   UniqueIndex -> DropIndex name'
-  UniquePrimary -> DropConstraint name') where
+  UniquePrimary _ -> DropConstraint name') where
   name' = fromMaybe (error $ "dropUnique: constraint which should be dropped does not have a name") name
   
 defaultMigConstr :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
@@ -314,23 +314,23 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
   (triggerExisted, delTrigger) <- migTriggerOnDelete schema cName dels
   updTriggers <- liftM (concatMap snd) $ migTriggerOnUpdate schema cName dels
   
-  let (columns, refs) = foldr mkColumns [] &&& concatMap mkReferences $ constrParams constr
-      (expectedTableStructure, (addTable, addInAlters)) = case constrAutoKeyName constr of
+  let (expectedTableStructure, (addTable, addInAlters)) = (case constrAutoKeyName constr of
         Nothing -> (TableInfo columns uniques (mkRefs refs), f [] columns uniques refs)
         Just keyName -> let keyColumn = Column keyName False DbAutoKey Nothing 
                         in if simple
-          then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef' Nothing UniquePrimary [keyName]]) (mkRefs refs)
+          then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef' Nothing (UniquePrimary True) [keyName]]) (mkRefs refs)
                , f [escape keyName ++ " " ++ primaryKeyTypeName] columns uniques refs)
           else let columns' = keyColumn:columns
                    refs' = refs ++ [Reference schema name [(keyName, mainTableId)] (Just Cascade) Nothing]
                    uniques' = uniques ++ [UniqueDef' Nothing UniqueConstraint [keyName]]
-               in (TableInfo columns' uniques' (mkRefs refs'), f [] columns' uniques' refs')
-      uniques = map (\(UniqueDef uName uType cols) -> UniqueDef' (Just uName) uType (map colName $ foldr mkColumns [] cols)) $ constrUniques constr
-      f autoKey cols uniqs refs' = (addTable', addInAlters') where
-        (addInCreate, addInAlters') = addUniquesReferences uniqs refs'
-        items = autoKey ++ map showColumn cols ++ addInCreate
-        addTable' = "CREATE TABLE " ++ tableName escape e constr ++ " (" ++ intercalate ", " items ++ ")"
-      mkRefs = map (\r -> (Nothing, r))
+               in (TableInfo columns' uniques' (mkRefs refs'), f [] columns' uniques' refs')) where
+        (columns, refs) = foldr mkColumns [] &&& concatMap mkReferences $ constrParams constr
+        uniques = map (\(UniqueDef uName uType cols) -> UniqueDef' (Just uName) uType (map colName $ foldr mkColumns [] cols)) $ constrUniques constr
+        f autoKey cols uniqs refs' = (addTable', addInAlters') where
+          (addInCreate, addInAlters') = addUniquesReferences uniqs refs'
+          items = autoKey ++ map showColumn cols ++ addInCreate
+          addTable' = "CREATE TABLE " ++ tableName escape e constr ++ " (" ++ intercalate ", " items ++ ")"
+        mkRefs = map (\r -> (Nothing, r))
 
       (migErrs, constrExisted, mig) = case tableStructure of
         Nothing -> let
@@ -338,7 +338,10 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
           in ([], False, [AddTable addTable, rest])
         Just oldTableStructure -> let
           alters = getAlters migPack oldTableStructure expectedTableStructure
-          in ([], True, [AlterTable schema cName addTable oldTableStructure expectedTableStructure alters])
+          alterTable = if null alters
+            then []
+            else [AlterTable schema cName addTable oldTableStructure expectedTableStructure alters]
+          in ([], True, alterTable)
       -- this can happen when an ephemeral field was added. Consider doing something else except throwing an error
       allErrs = if constrExisted == triggerExisted || (constrExisted && null dels)
         then migErrs
