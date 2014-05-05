@@ -25,6 +25,7 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql (mainTableName, tableName)
 
+import Control.Applicative (Applicative)
 import Control.Arrow ((***), (&&&))
 import Control.Monad (liftM, when)
 import Control.Monad.Trans.Class (lift)
@@ -178,14 +179,14 @@ migrateRecursively migS migE migL = go . dbType where
     when (v == Nothing) $
       lift mig >>= modify . Map.insert name >> cont
 
-migrateSchema :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> String -> m SingleMigration
+migrateSchema :: SchemaAnalyzer m => MigrationPack m -> String -> m SingleMigration
 migrateSchema MigrationPack{..} schema = do
   x <- schemaExists schema
   return $ if x
     then Right []
     else showAlterDb $ CreateSchema schema False
 
-migrateEntity :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> m SingleMigration
+migrateEntity :: SchemaAnalyzer m => MigrationPack m -> EntityDef -> m SingleMigration
 migrateEntity m@MigrationPack{..} e = do
   let name = entityName e
       constrs = constructors e
@@ -222,7 +223,7 @@ migrateEntity m@MigrationPack{..} e = do
                in mergeMigrations $ Right updateDiscriminators: map snd res
           else Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show mainStructure']
 
-migrateList :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> DbType -> m SingleMigration
+migrateList :: SchemaAnalyzer m => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valuesName = mainName ++ delim : "values"
       (valueCols, valueRefs) = (($ []) . mkColumns) &&& mkReferences $ ("value", t)
@@ -303,7 +304,7 @@ dropUnique (UniqueDef' name typ _) = (case typ of
   UniquePrimary _ -> DropConstraint name') where
   name' = fromMaybe (error $ "dropUnique: constraint which should be dropped does not have a name") name
   
-defaultMigConstr :: (Monad m, SchemaAnalyzer m) => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
+defaultMigConstr :: SchemaAnalyzer m => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
 defaultMigConstr migPack@MigrationPack{..} e constr = do
   let simple = isSimple $ constructors e
       name = entityName e
@@ -373,7 +374,7 @@ readReferenceAction c = case c of
   "SET DEFAULT" -> Just SetDefault
   _ -> Nothing
 
-class Monad m => SchemaAnalyzer m where
+class (Applicative m, Monad m) => SchemaAnalyzer m where
   schemaExists :: String -- ^ Schema name
                -> m Bool
   getCurrentSchema :: m (Maybe String)
