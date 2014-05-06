@@ -376,6 +376,7 @@ readReferenceAction c = case c of
 class Monad m => SchemaAnalyzer m where
   schemaExists :: String -- ^ Schema name
                -> m Bool
+  getCurrentSchema :: m (Maybe String)
   listTables :: Maybe String -- ^ Schema name
              -> m [String]
   listTableTriggers :: Maybe String -- ^ Schema name

@@ -94,6 +94,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist MySQL m) where
   schemaExists schema = queryRaw' "SELECT 1 FROM information_schema.schemata WHERE schema_name=?" [toPrimitivePersistValue proxy schema] (fmap isJust)
+  getCurrentSchema = queryRaw' "SELECT database()" [] (fmap (>>= fst . fromPurePersistValues proxy))
   listTables schema = queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,database())" [toPrimitivePersistValue proxy schema] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTableTriggers schema name = queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,database()) AND event_object_table=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   analyzeTable = analyzeTable'
@@ -270,9 +271,8 @@ toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> Migration (DbPersist MySQL m)
 migrate' v = do
-  x <- lift $ queryRaw' "SELECT database()" [] id
-  let schema = fst $ fromPurePersistValues proxy $ fromJust x
-      migPack = migrationPack schema
+  schema <- lift getCurrentSchema
+  let migPack = migrationPack $ fromJust schema
   migrateRecursively (migrateSchema migPack) (migrateEntity migPack) (migrateList migPack) v
 
 migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> GM.MigrationPack (DbPersist MySQL m)
