@@ -60,3 +60,12 @@ liftIO $ putStrLn $ "Megatron from DB: " ++ show megatronFromDB
 parts <- select $ (MachineField ==. megatron &&. lower PartNameField `notLike` "%tiny%") `orderBy` [Asc PartNameField]
 liftIO $ putStrLn $ "Big parts for the Megatron: " ++ show parts
 ```
+
+### User experience
+
+> I was impressed with groundhog's approach from the very beginning. Now I've been using groundhog for the past 8 or 9 months and am very
+pleased.  Groundhog's approach for mapping data types to database tables is powerful and composable while at the same time being quite
+easy to use.  Its migration facilities allow me to iterate very quickly when building applications.  Boris's support has been
+fantastic whenever I have encountered issues. Groundhog is definitely my first choice when I need a Haskell "ORM".
+
+Doug Beardsley, Soostone Inc.
