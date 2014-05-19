@@ -62,9 +62,9 @@ get RenderConfig{..} queryFunc (k :: Key v BackendSpecific) = do
         Nothing -> return Nothing
 
 select :: forall m db r v c opts . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, HasSelectOptions opts db r)
-       => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> opts -> m [v]
-select conf@RenderConfig{..} queryFunc noLimit options = doSelectQuery where
-  SelectOptions cond limit offset ords = getSelectOptions options
+       => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> opts -> m [v]
+select conf@RenderConfig{..} queryFunc preColumns noLimit options = doSelectQuery where
+  SelectOptions cond limit offset ords dist _ = getSelectOptions options
 
   e = entityDef (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
@@ -76,7 +76,8 @@ select conf@RenderConfig{..} queryFunc noLimit options = doSelectQuery where
           (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues proxy (l, o))
   cond' = renderCond conf cond
   fields = RenderS (renderFields esc (constrParams constr)) id
-  RenderS query binds = "SELECT " <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
+  distinctClause = if dist then "DISTINCT " else mempty
+  RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
   whereClause = maybe "" (" WHERE " <>) cond'
   doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
   cNum = entityConstrNum (undefined :: proxy v) (undefined :: c a)
@@ -118,9 +119,9 @@ getBy conf@RenderConfig{..} queryFunc (k :: Key v (Unique u)) = do
     Nothing -> return Nothing
 
 project :: forall m db r v c p opts a'. (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p a', ProjectionDb p db, ProjectionRestriction p r, HasSelectOptions opts db r)
-        => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Utf8 -> p -> opts -> m [a']
-project conf@RenderConfig{..} queryFunc noLimit p options = doSelectQuery where
-  SelectOptions cond limit offset ords = getSelectOptions options
+        => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> p -> opts -> m [a']
+project conf@RenderConfig{..} queryFunc preColumns noLimit p options = doSelectQuery where
+  SelectOptions cond limit offset ords dist _ = getSelectOptions options
   e = entityDef (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
   orders = renderOrders conf ords
@@ -132,7 +133,8 @@ project conf@RenderConfig{..} queryFunc noLimit p options = doSelectQuery where
   cond' = renderCond conf cond
   chains = projectionExprs p []
   fields = commasJoin $ concatMap (renderExprExtended conf 0) chains
-  RenderS query binds = "SELECT " <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
+  distinctClause = if dist then "DISTINCT " else mempty
+  RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
   whereClause = maybe "" (" WHERE " <>) cond'
   doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . projectionResult p
   constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)

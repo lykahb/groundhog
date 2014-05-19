@@ -45,6 +45,7 @@ import Data.Int (Int64)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (groupBy, intercalate, intersect, isInfixOf, partition, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust)
+import Data.Monoid
 import Data.Pool
 
 newtype MySQL = MySQL MySQL.Connection
@@ -73,7 +74,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   insertByAll v = H.insertByAll renderConfig queryRaw' True v
   replace k v = H.replace renderConfig queryRaw' executeRaw' insertIntoConstructorTable k v
   replaceBy k v = H.replaceBy renderConfig executeRaw' k v
-  select options = H.select renderConfig queryRaw' noLimit options
+  select options = H.select renderConfig queryRaw' preColumns noLimit options
   selectAll = H.selectAll renderConfig queryRaw'
   get k = H.get renderConfig queryRaw' k
   getBy k = H.getBy renderConfig queryRaw' k
@@ -83,7 +84,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   deleteAll v = H.deleteAll renderConfig executeRaw' v
   count cond = H.count renderConfig queryRaw' cond
   countAll fakeV = H.countAll renderConfig queryRaw' fakeV
-  project p options = H.project renderConfig queryRaw' noLimit p options
+  project p options = H.project renderConfig queryRaw' preColumns noLimit p options
   migrate fakeV = migrate' fakeV
 
   executeRaw _ query ps = executeRaw' (fromString query) ps
@@ -657,3 +658,6 @@ noLimit = "LIMIT 18446744073709551615"
 
 withSchema :: Maybe String -> String -> String
 withSchema sch name = maybe "" (\x -> escape x ++ ".") sch ++ escape name
+
+preColumns :: HasSelectOptions opts db r => opts -> RenderS db r
+preColumns _ = mempty

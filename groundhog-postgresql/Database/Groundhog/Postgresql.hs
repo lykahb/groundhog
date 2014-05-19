@@ -9,6 +9,7 @@ module Database.Groundhog.Postgresql
     , module Database.Groundhog.Generic.Sql.Functions
     , explicitType
     , castType
+    , distinctOn
     ) where
 
 import Database.Groundhog
@@ -75,7 +76,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   insertByAll v = H.insertByAll renderConfig queryRaw' True v
   replace k v = H.replace renderConfig queryRaw' executeRaw' (insertIntoConstructorTable False) k v
   replaceBy k v = H.replaceBy renderConfig executeRaw' k v
-  select options = H.select renderConfig queryRaw' "" options
+  select options = H.select renderConfig queryRaw' preColumns "" options
   selectAll = H.selectAll renderConfig queryRaw'
   get k = H.get renderConfig queryRaw' k
   getBy k = H.getBy renderConfig queryRaw' k
@@ -85,7 +86,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   deleteAll v = H.deleteAll renderConfig executeRaw' v
   count cond = H.count renderConfig queryRaw' cond
   countAll fakeV = H.countAll renderConfig queryRaw' fakeV
-  project p options = H.project renderConfig queryRaw' "" p options
+  project p options = H.project renderConfig queryRaw' preColumns "" p options
   migrate fakeV = migrate' fakeV
 
   executeRaw _ query ps = executeRaw' (fromString query) ps
@@ -765,3 +766,17 @@ explicitType a = castType a t where
 -- | Casts expression to a type. @castType value \"INT\"@ results in @value::INT@.
 castType :: Expression Postgresql r a => a -> String -> Expr Postgresql r a
 castType a t = mkExpr $ Snippet $ \conf _ -> ["(" <> renderExpr conf (toExpr a) <> ")::" <> fromString t] where
+
+-- | Distinct only on certain fields or expressions. For example, @select $ CondEmpty `distinctOn` (lower EmailField, IpField)@.
+distinctOn :: (db ~ Postgresql, HasSelectOptions a db r, HasDistinct a ~ HFalse, Projection' p db r p') => a -> p -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a) HTrue
+distinctOn opts p = opts' {dbSpecificOptions = ("DISTINCT_ON", clause): dbSpecificOptions opts'} where
+  opts' = getSelectOptions opts
+  clause = Snippet $ \conf _ -> [commasJoin $ concatMap (renderExprExtended conf 0) $ projectionExprs p []]
+
+preColumns :: HasSelectOptions opts Postgresql r => opts -> RenderS Postgresql r
+preColumns opts = clause where
+  clause = apply "DISTINCT_ON" (\t -> "DISTINCT ON (" <> t <> ")")
+  apply k f = case lookup k opts' of
+    Nothing -> mempty
+    Just (Snippet snippet) -> f $ head $ snippet renderConfig 0
+  opts' = dbSpecificOptions $ getSelectOptions opts

@@ -3,6 +3,7 @@
 
 module GroundhogTest (
       testSelect
+    , testSelectDistinct
     , testCond
     , testArith
     , testProjectionSql
@@ -54,6 +55,7 @@ module GroundhogTest (
     , testSchemaAnalysisPostgresql
     , testGeometry
     , testArrays
+    , testSelectDistinctOn
 #endif
 #if WITH_MYSQL
     , testSchemaAnalysisMySQL
@@ -323,6 +325,16 @@ testSelect = do
   [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField] `limitTo` 1)
   [val1] @=?? (select $ CondEmpty `orderBy` [Asc SingleField, Desc SingleField] `limitTo` 1)
   ([] :: [Single (Int, String)]) @=?? (select $ Not CondEmpty)
+
+testSelectDistinct :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testSelectDistinct = do
+  let val1 = Single (5 :: Int, "abc")
+      val2 = Single (6 :: Int, "def")
+  migr val1
+  insert val1
+  insert val1
+  insert val2
+  [val1, val2] @=?? (select $ distinct $ CondEmpty `orderBy` [Asc $ SingleField ~> Tuple2_0Selector])
 
 testArith :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => m ()
 testArith = do
@@ -905,6 +917,16 @@ testSchemaAnalysisPostgresql = do
   funcSql <- analyzeFunction Nothing "myFunction"
   let funcSql' = maybe (error "No function found") id funcSql
   liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
+
+testSelectDistinctOn :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
+testSelectDistinctOn = do
+  let val1 = Single (5 :: Int, "abc")
+      val2 = Single (6 :: Int, "123")
+  migr val1
+  insert val1
+  insert $ Single (5 :: Int, "def")
+  insert val2
+  [val1, val2] @=?? (select $ CondEmpty `distinctOn` (SingleField ~> Tuple2_0Selector) `orderBy` [Asc $ SingleField ~> Tuple2_0Selector, Asc $ SingleField ~> Tuple2_1Selector])
 #endif
 
 #if WITH_MYSQL

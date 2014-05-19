@@ -36,6 +36,7 @@ import Data.List (groupBy, intercalate, isInfixOf, partition, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
 import Data.Maybe (fromMaybe)
+import Data.Monoid
 import Data.Pool
 import qualified Data.Text as T
 
@@ -65,7 +66,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   insertByAll v = H.insertByAll renderConfig queryRawCached' True v
   replace k v = H.replace renderConfig queryRawCached' executeRawCached' insertIntoConstructorTable k v
   replaceBy k v = H.replaceBy renderConfig executeRawCached' k v
-  select options = H.select renderConfig queryRawCached' "LIMIT -1"  options
+  select options = H.select renderConfig queryRawCached' preColumns "LIMIT -1"  options
   selectAll = H.selectAll renderConfig queryRawCached'
   get k = H.get renderConfig queryRawCached' k
   getBy k = H.getBy renderConfig queryRawCached' k
@@ -75,7 +76,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   deleteAll v = H.deleteAll renderConfig executeRawCached' v
   count cond = H.count renderConfig queryRawCached' cond
   countAll fakeV = H.countAll renderConfig queryRawCached' fakeV
-  project p options = H.project renderConfig queryRawCached' "LIMIT -1" p options
+  project p options = H.project renderConfig queryRawCached' preColumns "LIMIT -1" p options
   migrate fakeV = migrate' fakeV
 
   executeRaw False query ps = executeRaw' (fromString query) ps
@@ -623,3 +624,6 @@ showAlterTable _ (DropIndex uName) = Just (False, defaultPriority, concat
   , escape uName
   ])
 showAlterTable _ _ = Nothing
+
+preColumns :: HasSelectOptions opts db r => opts -> RenderS db r
+preColumns _ = mempty

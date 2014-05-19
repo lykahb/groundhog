@@ -82,6 +82,7 @@ mkTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testNumber", testNumber)
   , ("testPersistSettings", testPersistSettings)
   , ("testEmbedded", testEmbedded)
+  , ("testSelectDistinct", testSelectDistinct)
   , ("testInsert", testInsert)
   , ("testMaybe", testMaybe)
   , ("testCount", testCount)
@@ -138,6 +139,7 @@ postgresqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   , ("testFloating", testFloating)
   , ("testListTriggersOnDelete", testListTriggersOnDelete)
   , ("testListTriggersOnUpdate", testListTriggersOnUpdate)
+  , ("testSelectDistinctOn", testSelectDistinctOn)
   ]
 #endif
 

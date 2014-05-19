@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-} -- Required for Projection'
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
 module Database.Groundhog.Core
@@ -12,6 +13,7 @@ module Database.Groundhog.Core
   , PrimitivePersistField(..)
   , Embedded(..)
   , Projection(..)
+  , Projection'
   , RestrictionHolder
   , Unique
   , KeyForBackend(..)
@@ -44,6 +46,7 @@ module Database.Groundhog.Core
   , limitTo
   , offsetBy
   , orderBy
+  , distinct
   -- * Type description
   , DbTypePrimitive(..)
   , DbType(..)
@@ -147,11 +150,11 @@ data Cond db r =
 
 data ExprRelation = Eq | Ne | Gt | Lt | Ge | Le deriving Show
 
-data Update db r = forall f a . (Assignable f a, ProjectionDb f db, ProjectionRestriction f r) => Update f (UntypedExpr db r)
+data Update db r = forall f a . (Assignable f a, Projection' f db r a) => Update f (UntypedExpr db r)
 
 -- | Defines sort order of a result-set
-data Order db r = forall a f . (Projection f a, ProjectionDb f db, ProjectionRestriction f r) => Asc  f
-                | forall a f . (Projection f a, ProjectionDb f db, ProjectionRestriction f r) => Desc f
+data Order db r = forall a f . (Projection' f db r a) => Asc  f
+                | forall a f . (Projection' f db r a) => Desc f
 
 -- | It is used to map field to column names. It can be either a column name for a regular field of non-embedded type or a list of this field and the outer fields in reverse order. Eg, fieldChain $ SomeField ~> Tuple2_0Selector may result in [(\"val0\", DbString), (\"some\", DbEmbedded False [dbType \"\", dbType True])].
 type FieldChain = ((String, DbType), [(String, EmbeddedDef)])
@@ -164,6 +167,9 @@ class PersistField a => Projection p a | p -> a where
   projectionExprs :: (ProjectionDb p db, ProjectionRestriction p r) => p -> [UntypedExpr db r] -> [UntypedExpr db r]
   -- | It is like 'fromPersistValues'. However, we cannot use it for projections in all cases. For the 'PersistEntity' instances 'fromPersistValues' expects entity id instead of the entity values.
   projectionResult :: PersistBackend m => p -> [PersistValue] -> m (a, [PersistValue])
+
+class (Projection p a, ProjectionDb p db, ProjectionRestriction p r) => Projection' p db r a
+instance (Projection p a, ProjectionDb p db, ProjectionRestriction p r) => Projection' p db r a
 
 -- | This subset of Projection instances is for things that behave like fields. Namely, they can occur in condition expressions (for example, Field and SubField) and on the left side of update statements. For example \"lower(field)\" is a valid Projection, but not Field like because it cannot be on the left side. Datatypes that index PostgreSQL arrays \"arr[5]\" or access composites \"(comp).subfield\" are valid instances of Assignable.
 class Projection f a => Assignable f a | f -> a
@@ -194,11 +200,15 @@ data AutoKeyField v (c :: (* -> *) -> *) where
 
 data RestrictionHolder v (c :: (* -> *) -> *)
 
-data SelectOptions db r hasLimit hasOffset hasOrder = SelectOptions {
-    condOptions   :: Cond db r
-  , limitOptions  :: Maybe Int
-  , offsetOptions :: Maybe Int
-  , orderOptions  :: [Order db r]
+data SelectOptions db r hasLimit hasOffset hasOrder hasDistinct = SelectOptions {
+    condOptions     :: Cond db r
+  , limitOptions    :: Maybe Int
+  , offsetOptions   :: Maybe Int
+  , orderOptions    :: [Order db r]
+    -- ^ False - no DISTINCT, True - DISTINCT
+  , distinctOptions :: Bool
+    -- ^ The name of the option and part of the SQL which will be put later
+  , dbSpecificOptions  :: [(String, QueryRaw db r)]
   }
 
 -- | This class helps to check that limit, offset, or order clauses are added to condition only once.
@@ -206,31 +216,35 @@ class HasSelectOptions a db r | a -> db r where
   type HasLimit a
   type HasOffset a
   type HasOrder a
-  getSelectOptions :: a -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a)
+  type HasDistinct a
+  getSelectOptions :: a -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a) (HasDistinct a)
 
 instance HasSelectOptions (Cond db r) db r where
   type HasLimit (Cond db r) = HFalse
   type HasOffset (Cond db r) = HFalse
   type HasOrder (Cond db r) = HFalse
-  getSelectOptions a = SelectOptions a Nothing Nothing []
+  type HasDistinct (Cond db r) = HFalse
+  getSelectOptions a = SelectOptions a Nothing Nothing [] False []
 
-instance HasSelectOptions (SelectOptions db r hasLimit hasOffset hasOrder) db r where
-  type HasLimit (SelectOptions db r hasLimit hasOffset hasOrder) = hasLimit
-  type HasOffset (SelectOptions db r hasLimit hasOffset hasOrder) = hasOffset
-  type HasOrder (SelectOptions db r hasLimit hasOffset hasOrder) = hasOrder
+instance HasSelectOptions (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) db r where
+  type HasLimit (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasLimit
+  type HasOffset (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasOffset
+  type HasOrder (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasOrder
+  type HasDistinct (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasDistinct
   getSelectOptions = id
 
-limitTo :: (HasSelectOptions a db r, HasLimit a ~ HFalse) => a -> Int -> SelectOptions db r HTrue (HasOffset a) (HasOrder a)
-limitTo opts lim = case getSelectOptions opts of
-  SelectOptions c _ off ord -> SelectOptions c (Just lim) off ord
+limitTo :: (HasSelectOptions a db r, HasLimit a ~ HFalse) => a -> Int -> SelectOptions db r HTrue (HasOffset a) (HasOrder a) (HasDistinct a)
+limitTo opts lim = (getSelectOptions opts) {limitOptions = Just lim}
 
-offsetBy :: (HasSelectOptions a db r, HasOffset a ~ HFalse) => a -> Int -> SelectOptions db r (HasLimit a) HTrue (HasOrder a)
-offsetBy opts off = case getSelectOptions opts of
-  SelectOptions c lim _ ord -> SelectOptions c lim (Just off) ord
+offsetBy :: (HasSelectOptions a db r, HasOffset a ~ HFalse) => a -> Int -> SelectOptions db r (HasLimit a) HTrue (HasOrder a) (HasDistinct a)
+offsetBy opts off = (getSelectOptions opts) {offsetOptions = Just off}
 
-orderBy :: (HasSelectOptions a db r, HasOrder a ~ HFalse) => a -> [Order db r] -> SelectOptions db r (HasLimit a) (HasOffset a) HTrue
-orderBy opts ord = case getSelectOptions opts of
-  SelectOptions c lim off _ -> SelectOptions c lim off ord
+orderBy :: (HasSelectOptions a db r, HasOrder a ~ HFalse) => a -> [Order db r] -> SelectOptions db r (HasLimit a) (HasOffset a) HTrue (HasDistinct a)
+orderBy opts ord = (getSelectOptions opts) {orderOptions = ord}
+
+-- | Select DISTINCT rows. @select $ distinct CondEmpty@
+distinct :: (HasSelectOptions a db r, HasDistinct a ~ HFalse) => a -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a) HTrue
+distinct opts = (getSelectOptions opts) {distinctOptions = True}
 
 newtype DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
   deriving (Monad, MonadIO, Functor, Applicative, MonadTrans, MonadReader conn)
@@ -301,7 +315,7 @@ class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | Count total number of records with all constructors. The entity parameter is used only for type inference
   countAll      :: PersistEntity v => v -> m Int
   -- | Fetch projection of some fields. Example: @project (SecondField, ThirdField) $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`offsetBy\` 100@
-  project       :: (PersistEntity v, EntityConstr v c, Projection p a, ProjectionDb p (PhantomDb m), ProjectionRestriction p (RestrictionHolder v c), HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
+  project       :: (PersistEntity v, EntityConstr v c, Projection' p (PhantomDb m) (RestrictionHolder v c) a, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
                 => p
                 -> opts
                 -> m [a]
