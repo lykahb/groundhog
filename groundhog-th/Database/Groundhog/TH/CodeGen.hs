@@ -536,14 +536,15 @@ mkPersistEntityInstance def = do
 
   entityFieldChain' <- let
     thFieldNames = thConstructors def >>= thConstrFields
-    clauses = map (\f -> mkChain f >>= \(fArg, body) -> clause [asP fArg $ conP (mkName $ thExprName f) []] (normalB body) []) thFieldNames
-    mkChain f = do
+    clauses = map mkClause thFieldNames
+    mkClause f = do
         fArg <- newName "f"
         let nvar = [| (undefined :: Field v c a -> a) $(varE fArg) |]
             typ = mkType f nvar
-        let body = [| (($(lift $ thDbFieldName f), $typ), []) |]
-        return (fArg, body)
-    in funD 'entityFieldChain clauses
+            body = [| (($(lift $ thDbFieldName f), $typ), []) |]
+        clause [asP fArg $ conP (mkName $ thExprName f) []] (normalB body) []
+    clauses' = if null clauses then [clause [wildP] (normalB [| undefined |]) []] else clauses
+    in funD 'entityFieldChain clauses'
 
   let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
   let decs = [key', autoKey', defaultKey', isSumType', fields', entityDef', toEntityPersistValues', fromEntityPersistValues', getUniques', entityFieldChain']

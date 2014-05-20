@@ -391,11 +391,13 @@ insert_' v = do
 -- TODO: In Sqlite we can insert null to the id column. If so, id will be generated automatically. Check performance change from this.
 insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
 insertIntoConstructorTable withId tName c vals = RenderS query vals' where
-  query = "INSERT INTO " <> tName <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")"
+  query = "INSERT INTO " <> tName <> columnsValues
   fields = case constrAutoKeyName c of
     Just idName | withId -> (idName, dbType (0 :: Int64)):constrParams c
     _                    -> constrParams c
-  fieldNames   = renderFields escapeS fields
+  columnsValues = case foldr (flatten escapeS) [] fields of
+    [] -> " DEFAULT VALUES"
+    xs -> "(" <> commasJoin xs <> ") VALUES(" <> placeholders <> ")"
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => [a] -> DbPersist Sqlite m Int64

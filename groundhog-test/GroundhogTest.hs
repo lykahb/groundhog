@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, CPP #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, EmptyDataDecls, CPP #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 
 module GroundhogTest (
@@ -42,6 +42,7 @@ module GroundhogTest (
     , testAutoKeyField
     , testTime
     , testPrimitiveData
+    , testNoColumns
     , testMigrateOrphanConstructors
     , testSchemas
     , testFloating
@@ -117,6 +118,7 @@ data InCurrentSchema = InCurrentSchema { inCurrentSchema :: Maybe (Key InAnother
 data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific) }
 data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
 data ShowRead = ShowRead String Int deriving (Eq, Show, Read)
+data NoColumns = NoColumns deriving (Eq, Show)
 
 
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
@@ -198,6 +200,7 @@ mkPersist defaultCodegenConfig [groundhog|
   representation: enum
 - primitive: ShowRead
   representation: showread # by default
+- entity: NoColumns
 |]
 
 data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
@@ -763,14 +766,21 @@ testTime = do
   let val = Single (utcTime, dayTime, day, zonedTime)
   migr val
   k <- insert val
-  val' <- get k
-  Just val @=? val'
+  Just val @=?? get k
 
 testPrimitiveData :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testPrimitiveData = do
   let val = Single (Enum2, ShowRead "abc" 42)
   migr val
   Just val @=?? (insert val >>= get)
+
+testNoColumns :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testNoColumns = do
+  let val = NoColumns
+  migr val
+  k1 <- insert val
+  k2 <- insert val
+  [k1, k2] @=?? (project (AutoKeyField :: AutoKeyField NoColumns c) $ CondEmpty `orderBy` [Asc AutoKeyField])
 
 testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testSchemas = do

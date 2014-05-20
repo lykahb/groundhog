@@ -209,13 +209,15 @@ insert_' v = do
 
 insertIntoConstructorTable :: Bool -> Bool -> Utf8 -> ConstructorDef -> [PersistValue] -> RenderS db r
 insertIntoConstructorTable withRet withId tName c vals = RenderS query vals' where
-  query = "INSERT INTO " <> tName <> "(" <> fieldNames <> ")VALUES(" <> placeholders <> ")" <> returning
+  query = "INSERT INTO " <> tName <> columnsValues <> returning
   (fields, returning) = case constrAutoKeyName c of
     Just idName -> (fields', returning') where
       fields' = if withId then (idName, dbType (0 :: Int64)):constrParams c else constrParams c
-      returning' = if withRet then "RETURNING(" <> escapeS (fromString idName) <> ")" else mempty
+      returning' = if withRet then " RETURNING(" <> escapeS (fromString idName) <> ")" else mempty
     _           -> (constrParams c, mempty)
-  fieldNames   = renderFields escapeS fields
+  columnsValues = case foldr (flatten escapeS) [] fields of
+    [] -> " DEFAULT VALUES"
+    xs -> "(" <> commasJoin xs <> ") VALUES(" <> placeholders <> ")"
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
 insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => [a] -> DbPersist Postgresql m Int64
