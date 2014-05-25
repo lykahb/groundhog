@@ -1,5 +1,5 @@
 name:            groundhog-sqlite
-version:         0.5.0
+version:         0.5.1
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>

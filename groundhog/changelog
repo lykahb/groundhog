@@ -1,3 +1,8 @@
+0.5.1
+* DISTINCT select option
+* Support entities with no fields
+* Add getCurrentSchema function into SchemaAnalyzer
+
 0.5.0
 * Reimplemented projections with constraint kinds
 * Moved QueryRaw constraint into class SqlDb simplifying SQL function signatures

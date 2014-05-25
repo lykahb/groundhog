@@ -1,3 +1,7 @@
+0.5.1
+* DISTINCT ON select option
+* Add getCurrentSchema function into SchemaAnalyzer
+
 0.5.0
 * Simplified Geometry and Array function type signatures
 * Compatibility with GHC 7.8

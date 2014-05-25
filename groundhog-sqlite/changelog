@@ -1,3 +1,6 @@
+0.5.1
+* Add getCurrentSchema function into SchemaAnalyzer
+
 0.5.0
 * Compatibility with GHC 7.8
 

@@ -1,3 +1,7 @@
+0.5.1
+* Export firstChar for creating user naming styles
+* Support entities with no fields
+
 0.5.0
 * Compatibility with GHC 7.8
 
