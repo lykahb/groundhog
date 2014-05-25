@@ -18,6 +18,7 @@ module Database.Groundhog.TH
   , conciseNamingStyle
   , lowerCaseSuffixNamingStyle
   , toUnderscore
+  , firstChar
   ) where
 
 import Database.Groundhog.Core (delim, UniqueType(..))
@@ -106,16 +107,16 @@ suffixNamingStyle = NamingStyle {
     mkDbEntityName = \dName -> dName
   , mkEntityKeyName = \dName -> dName ++ "Key"
   , mkPhantomName = \_ cName _ -> cName ++ "Constructor"
-  , mkUniqueKeyPhantomName = \_ _ uName -> firstLetter toUpper uName
-  , mkUniqueKeyConstrName = \_ _ uName -> firstLetter toUpper uName ++ "Key"
-  , mkUniqueKeyDbName = \_ _ uName -> "Key" ++ [delim] ++ firstLetter toUpper uName
+  , mkUniqueKeyPhantomName = \_ _ uName -> firstChar toUpper uName
+  , mkUniqueKeyConstrName = \_ _ uName -> firstChar toUpper uName ++ "Key"
+  , mkUniqueKeyDbName = \_ _ uName -> "Key" ++ [delim] ++ firstChar toUpper uName
   , mkDbConstrName = \_ cName _ -> cName
   , mkDbConstrAutoKeyName = \_ _ _ -> "id"
   , mkDbFieldName = \_ _ _ fName _ -> fName
-  , mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName ++ "Field"
-  , mkExprSelectorName = \_ _ fName _ -> firstLetter toUpper fName ++ "Selector"
-  , mkNormalFieldName = \_ cName _ fNum -> firstLetter toLower cName ++ show fNum
-  , mkNormalDbFieldName = \_ cName _ fNum -> firstLetter toLower cName ++ show fNum
+  , mkExprFieldName = \_ _ _ fName _ -> firstChar toUpper fName ++ "Field"
+  , mkExprSelectorName = \_ _ fName _ -> firstChar toUpper fName ++ "Selector"
+  , mkNormalFieldName = \_ cName _ fNum -> firstChar toLower cName ++ show fNum
+  , mkNormalDbFieldName = \_ cName _ fNum -> firstChar toLower cName ++ show fNum
   , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum ++ "Field"
   , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum ++ "Selector"
 }
@@ -136,8 +137,8 @@ suffixNamingStyle = NamingStyle {
 -- > ...
 persistentNamingStyle :: NamingStyle
 persistentNamingStyle = suffixNamingStyle {
-    mkExprFieldName = \_ cName _ fName _ -> cName ++ firstLetter toUpper fName
-  , mkExprSelectorName = \_ cName fName _ -> cName ++ firstLetter toUpper fName
+    mkExprFieldName = \_ cName _ fName _ -> cName ++ firstChar toUpper fName
+  , mkExprSelectorName = \_ cName fName _ -> cName ++ firstChar toUpper fName
   , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
   , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum
 }
@@ -158,8 +159,8 @@ persistentNamingStyle = suffixNamingStyle {
 -- > ...
 conciseNamingStyle :: NamingStyle
 conciseNamingStyle = suffixNamingStyle {
-    mkExprFieldName = \_ _ _ fName _ -> firstLetter toUpper fName
-  , mkExprSelectorName = \_ _ fName _ -> firstLetter toUpper fName
+    mkExprFieldName = \_ _ _ fName _ -> firstChar toUpper fName
+  , mkExprSelectorName = \_ _ fName _ -> firstChar toUpper fName
   , mkNormalExprFieldName = \_ cName _ fNum -> cName ++ show fNum
   , mkNormalExprSelectorName = \_ cName fNum -> cName ++ show fNum
 }
@@ -403,8 +404,8 @@ mkTHPrimitiveDef (NamingStyle{..}) (DataD _ dName _ _ _) =
   dName' = nameBase dName
 mkTHPrimitiveDef _ _ = error "Only datatypes can be processed"
 
-firstLetter :: (Char -> Char) -> String -> String
-firstLetter f s = f (head s):tail s
+firstChar :: (Char -> Char) -> String -> String
+firstChar f s = f (head s):tail s
 
 -- | Transforms string from camelCase to lower_case_underscore naming convention.
 -- ColumnName -> column_name, parseURL -> parse_url, FieldIEEE754Floating -> field_ieee754_floating
