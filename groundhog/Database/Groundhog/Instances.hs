@@ -236,7 +236,7 @@ instance NeverNull Bool
 instance NeverNull Day
 instance NeverNull TimeOfDay
 instance NeverNull UTCTime
-instance NeverNull (Key v u)
+instance PrimitivePersistField (Key v u) => NeverNull (Key v u)
 instance NeverNull (KeyForBackend db v)
 
 readHelper :: Read a => PersistValue -> String -> a
@@ -449,10 +449,10 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d, Persis
   dbType a = DbEmbedded (EmbeddedDef False [("val0", dbType ((undefined :: (a, b, c, d, e) -> a) a)), ("val1", dbType ((undefined :: (a, b, c, d, e) -> b) a)), ("val2", dbType ((undefined :: (a, b, c, d, e) -> c) a)), ("val3", dbType ((undefined :: (a, b, c, d, e) -> d) a)), ("val4", dbType ((undefined :: (a, b, c, d, e) -> e) a))]) Nothing
 
 instance (DbDescriptor db, PersistEntity v) => PersistField (KeyForBackend db v) where
-  persistName a = "KeyForBackend" ++ delim : persistName ((undefined :: KeyForBackend db v -> v) a)
+  persistName a = "KeyForBackend" ++ delim : entityName (entityDef ((undefined :: KeyForBackend db v -> v) a))
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType a = dbType ((undefined :: KeyForBackend db v -> v) a)
+  dbType a = dbType ((undefined :: KeyForBackend db v -> DefaultKey v) a)
 
 instance (EntityConstr v c, PersistField a) => Projection (Field v c a) a where
   type ProjectionDb (Field v c a) db = ()
@@ -484,7 +484,8 @@ instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) a wh
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
-instance EntityConstr v c => Projection (c (ConstructorMarker v)) v where
+-- TODO: how do we project entities which don't have keys and are not PersistField instances?
+instance (PersistField v, EntityConstr v c) => Projection (c (ConstructorMarker v)) v where
   type ProjectionDb (c (ConstructorMarker v)) db = ()
   type ProjectionRestriction (c (ConstructorMarker v)) r = r ~ RestrictionHolder v c
   projectionExprs c = ((map ExprField chains)++) where

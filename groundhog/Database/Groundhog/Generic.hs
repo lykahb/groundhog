@@ -15,6 +15,7 @@ module Database.Groundhog.Generic
   , silentMigrationLogger
   , defaultMigrationLogger
   , failMessage
+  , failMessageNamed
   -- * Helpers for running Groundhog actions
   , HasConn
   , runDb
@@ -142,7 +143,10 @@ mergeMigrations ms =
        else Left  (concat errors)
 
 failMessage :: PersistField a => a -> [PersistValue] -> String
-failMessage a xs = "Invalid list for " ++ persistName a ++ ": " ++ show xs
+failMessage a = failMessageNamed (persistName a)
+
+failMessageNamed :: String -> [PersistValue] -> String
+failMessageNamed name xs = "Invalid list for " ++ name ++ ": " ++ show xs
 
 finally :: MonadBaseControl IO m
         => m a -- ^ computation to run first

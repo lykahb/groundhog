@@ -302,9 +302,9 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
     uniqKeyType <- [t| Key $(return entity) (Unique $(conT $ mkName $ thUniqueKeyPhantomName unique)) |]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let conName = mkName $ thUniqueKeyConstrName unique
-    isUniquePrim <- if (length $ thUniqueKeyFields unique) == 1
-      then isPrim $ thFieldType $ head $ thUniqueKeyFields unique
-      else return False
+    isUniquePrim <- case thUniqueKeyFields unique of
+      [uniq] -> isPrim $ thFieldType uniq
+      _      -> return False
     if isUniquePrim
       then do
         proxy <- newName "p"
@@ -322,11 +322,11 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
 mkKeyEqShowInstances :: THEntityDef -> Q [Dec]
 mkKeyEqShowInstances def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
-  let forKeys f = maybe [] (\k -> [f (thAutoKeyConstrName k) 1]) (thAutoKey def)
-               ++ map (\k -> f (thUniqueKeyConstrName k) (length $ thUniqueKeyFields k)) (thUniqueKeys def)
+  let keysInfo = maybe [] (\k -> [(thAutoKeyConstrName k, 1)]) (thAutoKey def)
+               ++ map (\k -> (thUniqueKeyConstrName k, length $ thUniqueKeyFields k)) (thUniqueKeys def)
 
   showsPrec' <- let
-    mkClause cName fieldsNum = do
+    mkClause (cName, fieldsNum) = do
       p <- newName "p"
       fields <- replicateM fieldsNum (newName "x")
       let pat = conP (mkName cName) $ map varP fields
@@ -334,22 +334,24 @@ mkKeyEqShowInstances def = do
           showArgs = foldr1 (\a b -> [| $a . showString " " . $b |]) $ map (\a -> [| showsPrec 11 $(varE a) |]) fields
           body = [| showParen ($(varE p) >= (11 :: Int)) ($showC . $showArgs) |]
       clause [varP p, pat] (normalB body) []
-    in funD 'showsPrec $ forKeys mkClause
+    in funD 'showsPrec $ map mkClause keysInfo
     
   eq' <- let
-    mkClause cName fieldsNum = do
+    mkClause (cName, fieldsNum) = do
       let fields = replicateM fieldsNum (newName "x")
       (fields1, fields2) <- liftM2 (,) fields fields
       let mkPat = conP (mkName cName) . map varP
           body = foldr1 (\e1 e2 -> [| $e1 && $e2 |]) $ zipWith (\n1 n2 -> [| $(varE n1) == $(varE n2) |]) fields1 fields2
       clause [mkPat fields1, mkPat fields2] (normalB body) []
-    clauses = forKeys mkClause
+    clauses = map mkClause keysInfo
     noMatch = if length clauses > 1 then [clause [wildP, wildP] (normalB [| False |]) []] else []
     in funD '(==) $ clauses ++ noMatch
 
   let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
   typ <- [t| Key $(return entity) $(newName "a" >>= varT) |]
-  return $ [InstanceD context (AppT (ConT ''Eq) typ) [eq'], InstanceD context (AppT (ConT ''Show) typ) [showsPrec']]
+  return $ if null keysInfo
+    then []
+    else [InstanceD context (AppT (ConT ''Eq) typ) [eq'], InstanceD context (AppT (ConT ''Show) typ) [showsPrec']]
 
 mkEmbeddedInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedInstance def = do
@@ -425,16 +427,16 @@ mkPersistEntityInstance def = do
 
   autoKey' <- do
     autoType <- case thAutoKey def of
-      Nothing -> conT ''()
+      Nothing -> [t| () |]
       Just _ -> [t| Key $(return entity) BackendSpecific |]
     return $ mkTySynInstD ''AutoKey [entity] autoType
     
   defaultKey' <- do
-    let keyType = case thAutoKey def of
-         Just k | thAutoKeyIsDef k -> [t| BackendSpecific |]
-         _ -> let unique = head $ filter thUniqueKeyIsDef $ thUniqueKeys def
-              in  [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName unique) |]
-    typ <- [t| Key $(return entity) $keyType |]
+    typ <- case thAutoKey def of
+      Just k | thAutoKeyIsDef k -> [t| Key $(return entity) BackendSpecific |]
+      _ -> case filter thUniqueKeyIsDef $ thUniqueKeys def of
+        [unique] -> [t| Key $(return entity) (Unique $(conT $ mkName $ thUniqueKeyPhantomName unique)) |]
+        _ -> [t| () |]
     return $ mkTySynInstD ''DefaultKey [entity] typ
 
   isSumType' <- do
@@ -504,7 +506,7 @@ mkPersistEntityInstance def = do
 
   fromEntityPersistValues' <- do
       xs <- newName "xs"
-      let failureBody = normalB [| (\a -> fail (failMessage a $(varE xs)) >> return (a, [])) undefined |]
+      let failureBody = normalB [| (\a -> fail (failMessageNamed (entityName $ entityDef a) $(varE xs)) >> return (a, [])) undefined |]
       failureName <- newName "failure"
       let failure = match wildP (normalB $ varE failureName) []
       matches <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
@@ -566,69 +568,72 @@ mkToPurePersistValues proxy vars = do
       letE stmts result
 
 mkEntityPersistFieldInstance :: THEntityDef -> Q [Dec]
-mkEntityPersistFieldInstance def = do
-  let types = map extractType $ thTypeParams def
-  let entity = foldl AppT (ConT (thDataName def)) types
+mkEntityPersistFieldInstance def = case getDefaultKey def of
+  Just defaultKey -> do
+    let types = map extractType $ thTypeParams def
+    let entity = foldl AppT (ConT (thDataName def)) types
   
-  persistName' <- do
-    v <- newName "v"
-    let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
+    persistName' <- do
+      v <- newName "v"
+      let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
     
-    let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
-    let fullEntityName = case null types of
-         True  -> [| $(stringE $ thDbEntityName def) |]
-         False -> [| $(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames) |]
-    let body = normalB $ fullEntityName
-    let pat = if null types then wildP else varP v
-    funD 'persistName $ [ clause [pat] body [] ]
+      let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
+      let fullEntityName = case null types of
+           True  -> [| $(stringE $ thDbEntityName def) |]
+           False -> [| $(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames) |]
+      let body = normalB $ fullEntityName
+      let pat = if null types then wildP else varP v
+      funD 'persistName $ [ clause [pat] body [] ]
   
-  isOne <- isDefaultKeyOneColumn def
-  let uniqInfo = either auto uniq $ getDefaultKey def where
-      auto _ = Nothing
-      uniq u = let name = mkName $ thUniqueKeyPhantomName u in Just $ (conT name, conE name)
+    isOne <- isDefaultKeyOneColumn def
+    let uniqInfo = either auto uniq defaultKey where
+        auto _ = Nothing
+        uniq u = let name = mkName $ thUniqueKeyPhantomName u in Just $ (conT name, conE name)
 
-  toPersistValues' <- do
-    let body = normalB $ case uniqInfo of
-         _ | isOne -> [| singleToPersistValue |]
-         Just u    -> [| toPersistValuesUnique $(snd u) |]
-         _         -> error "mkEntityPersistFieldInstance: key has no unique type"
-    funD 'toPersistValues $ [ clause [] body [] ]
+    toPersistValues' <- do
+      let body = normalB $ case uniqInfo of
+           _ | isOne -> [| singleToPersistValue |]
+           Just u    -> [| toPersistValuesUnique $(snd u) |]
+           _         -> error "mkEntityPersistFieldInstance: key has no unique type"
+      funD 'toPersistValues $ [ clause [] body [] ]
 
-  fromPersistValues' <- do
-    let body = normalB $ case uniqInfo of
-         _ | isOne -> [| singleFromPersistValue |]
-         Just u    -> [| fromPersistValuesUnique $(snd u) |]
-         _         -> error "mkEntityPersistFieldInstance: key has no unique type"
-    funD 'fromPersistValues $ [ clause [] body []]
+    fromPersistValues' <- do
+      let body = normalB $ case uniqInfo of
+           _ | isOne -> [| singleFromPersistValue |]
+           Just u    -> [| fromPersistValuesUnique $(snd u) |]
+           _         -> error "mkEntityPersistFieldInstance: key has no unique type"
+      funD 'fromPersistValues $ [ clause [] body []]
 
-  dbType' <- funD 'dbType $ [clause [] (normalB [| dbType . (undefined :: a -> DefaultKey a) |]) []]
+    dbType' <- funD 'dbType $ [clause [] (normalB [| dbType . (undefined :: a -> DefaultKey a) |]) []]
 
-  let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-  let decs = [persistName', toPersistValues', fromPersistValues', dbType']
-  return $ [InstanceD context (AppT (ConT ''PersistField) entity) decs]
+    let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
+    let decs = [persistName', toPersistValues', fromPersistValues', dbType']
+    return $ [InstanceD context (AppT (ConT ''PersistField) entity) decs]
+  Nothing -> return []
 
 mkEntitySinglePersistFieldInstance :: THEntityDef -> Q [Dec]
-mkEntitySinglePersistFieldInstance def = isDefaultKeyOneColumn def >>= \isOne ->
-  if isOne
-    then do
-      toSinglePersistValue' <- funD 'toSinglePersistValue $ [ clause [] (normalB to) [] ]
-      fromSinglePersistValue' <- funD 'fromSinglePersistValue $ [ clause [] (normalB from) []]
-      let decs = [toSinglePersistValue', fromSinglePersistValue']
-      return [InstanceD context (AppT (ConT ''SinglePersistField) entity) decs]
-    else return [] where
-    (to, from) = case getDefaultKey def of
-      Left  _ -> ([| toSinglePersistValueAutoKey |], [| fromSinglePersistValueAutoKey |])
-      Right k -> ([| toSinglePersistValueUnique $u |], [| fromSinglePersistValueUnique $u |]) where
-        u = conE $ mkName $ thUniqueKeyPhantomName k
-    types = map extractType $ thTypeParams def
-    entity = foldl AppT (ConT (thDataName def)) types
-    context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
+mkEntitySinglePersistFieldInstance def = isDefaultKeyOneColumn def >>= \isOne -> case getDefaultKey def of
+  Just defaultKey | isOne -> do
+    let types = map extractType $ thTypeParams def
+        entity = foldl AppT (ConT (thDataName def)) types
+        context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
+
+        (to, from) = case defaultKey of
+          Left  _ -> ([| toSinglePersistValueAutoKey |], [| fromSinglePersistValueAutoKey |])
+          Right k -> ([| toSinglePersistValueUnique $u |], [| fromSinglePersistValueUnique $u |]) where
+            u = conE $ mkName $ thUniqueKeyPhantomName k
+
+    toSinglePersistValue' <- funD 'toSinglePersistValue $ [ clause [] (normalB to) [] ]
+    fromSinglePersistValue' <- funD 'fromSinglePersistValue $ [ clause [] (normalB from) []]
+    let decs = [toSinglePersistValue', fromSinglePersistValue']
+    return [InstanceD context (AppT (ConT ''SinglePersistField) entity) decs]
+  _ -> return []
 
 mkEntityNeverNullInstance :: THEntityDef -> Q [Dec]
 mkEntityNeverNullInstance def = do
   let types = map extractType $ thTypeParams def
-  let entity = foldl AppT (ConT (thDataName def)) types
-  let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
+      entity = foldl AppT (ConT (thDataName def)) types
+      context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
   isOne <- isDefaultKeyOneColumn def
   return $ if isOne
     then [InstanceD context (AppT (ConT ''NeverNull) entity) []]
@@ -687,15 +692,18 @@ mkMigrateFunction name defs = do
   return [sig, func]
 
 isDefaultKeyOneColumn :: THEntityDef -> Q Bool
-isDefaultKeyOneColumn def = either (const $ return True) checkUnique $ getDefaultKey def where
-  checkUnique unique = if (length $ thUniqueKeyFields unique) == 1
-    then isPrim $ thFieldType $ head $ thUniqueKeyFields unique
-    else return False
+isDefaultKeyOneColumn def = case getDefaultKey def of
+  Just (Left _) -> return True
+  Just (Right unique) | (length $ thUniqueKeyFields unique) == 1 ->
+    isPrim $ thFieldType $ head $ thUniqueKeyFields unique
+  _ -> return False
 
-getDefaultKey :: THEntityDef -> Either THAutoKeyDef THUniqueKeyDef
+getDefaultKey :: THEntityDef -> Maybe (Either THAutoKeyDef THUniqueKeyDef)
 getDefaultKey def = case thAutoKey def of
-  Just k | thAutoKeyIsDef k -> Left k
-  _ -> Right $ head $ filter thUniqueKeyIsDef $ thUniqueKeys def
+  Just k | thAutoKeyIsDef k -> Just $ Left k
+  _ -> case filter thUniqueKeyIsDef $ thUniqueKeys def of
+    [] -> Nothing
+    (u:_) -> Just $ Right u
 
 paramsContext :: [TyVarBndr] -> [THFieldDef] -> Cxt
 paramsContext types fields = classPred ''PersistField params ++ classPred ''SinglePersistField maybys ++ classPred ''NeverNull maybys where

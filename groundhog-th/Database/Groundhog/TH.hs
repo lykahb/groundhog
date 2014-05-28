@@ -328,14 +328,11 @@ validateEntity def = do
     then when (primaryConstraints > 0) $
            fail $ "Custom primary keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
     else when (primaryConstraints + maybe 0 (const 1) (thAutoKey def) > 1) $
-           fail $ "A datatype may have either an auto key or one custom primary key constraint : " ++ show (thDataName def)
-  -- check that if unique keys = [] there is auto key
-  when (null (thUniqueKeys def) && isNothing (thAutoKey def)) $
-    fail $ "A datatype must have either an auto key or unique keys: " ++ show (thDataName def)
+           fail $ "A datatype cannot have more than one primary key constraint: " ++ show (thDataName def)
   -- check that only one of the keys is default
-  let defaults = maybe False thAutoKeyIsDef (thAutoKey def) : map thUniqueKeyIsDef (thUniqueKeys def)
-  when (length (filter id defaults) /= 1) $
-    fail $ "A datatype must have exactly one default key: " ++ show (thDataName def)
+  let keyDefaults = maybe id ((:) . thAutoKeyIsDef) (thAutoKey def) $ map thUniqueKeyIsDef (thUniqueKeys def)
+  when (not (null keyDefaults) && length (filter id keyDefaults) /= 1) $
+    fail $ "A datatype with keys must have one default key: " ++ show (thDataName def)
   return def
   
 validateField :: THFieldDef -> Either String ()

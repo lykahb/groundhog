@@ -43,6 +43,7 @@ module GroundhogTest (
     , testTime
     , testPrimitiveData
     , testNoColumns
+    , testNoKeys
     , testMigrateOrphanConstructors
     , testSchemas
     , testFloating
@@ -119,6 +120,7 @@ data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrent
 data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
 data ShowRead = ShowRead String Int deriving (Eq, Show, Read)
 data NoColumns = NoColumns deriving (Eq, Show)
+data NoKeys = NoKeys Int Int deriving (Eq, Show)
 
 
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
@@ -201,6 +203,8 @@ mkPersist defaultCodegenConfig [groundhog|
 - primitive: ShowRead
   representation: showread # by default
 - entity: NoColumns
+- entity: NoKeys
+  autoKey: null
 |]
 
 data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
@@ -781,6 +785,17 @@ testNoColumns = do
   k1 <- insert val
   k2 <- insert val
   [k1, k2] @=?? (project (AutoKeyField :: AutoKeyField NoColumns c) $ CondEmpty `orderBy` [Asc AutoKeyField])
+
+testNoKeys :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testNoKeys = do
+  let val = NoKeys 1 2
+  m <- fmap Map.elems $ createMigration $ migrate val
+  let queries = concat $ map (either (const "") (concat . map (\(_, _, q) -> q))) m
+  if " KEY " `isInfixOf` queries
+    then fail $ "Unexpected migration result: " ++ show m
+    else return ()
+  migr val
+  [val] @=?? (insert val >> select CondEmpty)
 
 testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testSchemas = do

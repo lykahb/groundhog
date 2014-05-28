@@ -162,18 +162,19 @@ migrateRecursively :: (Monad m, PersistEntity v) =>
   -> (DbType    -> m SingleMigration) -- ^ migrate list
   -> v                                -- ^ initial entity
   -> StateT NamedMigrations m ()
-migrateRecursively migS migE migL = go . dbType where
+migrateRecursively migS migE migL = migEntity . entityDef where
   go l@(DbList lName t) = f ("list " ++ lName) (migL l) (go t)
   go (DbEmbedded (EmbeddedDef _ ts) ref) = mapM_ (go . snd) ts >> migRef ref
   go (DbTypePrimitive _ _ _ ref) = migRef ref
   allSubtypes = map snd . concatMap constrParams . constructors
   migRef ref = case ref of
-    Just (Left (e, _), _, _) -> do
-      case entitySchema e of
-        Just name -> f ("schema " ++ name) (migS name) (return ())
-        Nothing -> return ()
-      f ("entity " ++ mainTableName id e) (migE e) (mapM_ go (allSubtypes e))
+    Just (Left (e, _), _, _) -> migEntity e
     _ -> return ()
+  migEntity e = do
+    case entitySchema e of
+      Just name -> f ("schema " ++ name) (migS name) (return ())
+      Nothing -> return ()
+    f ("entity " ++ mainTableName id e) (migE e) (mapM_ go (allSubtypes e))
   f name mig cont = do
     v <- gets (Map.lookup name)
     when (v == Nothing) $
