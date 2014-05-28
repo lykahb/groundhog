@@ -484,8 +484,7 @@ instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) a wh
   projectionExprs f = (ExprField (fieldChain f):)
   projectionResult _ = fromPersistValues
 
--- TODO: how do we project entities which don't have keys and are not PersistField instances?
-instance (PersistField v, EntityConstr v c) => Projection (c (ConstructorMarker v)) v where
+instance EntityConstr v c => Projection (c (ConstructorMarker v)) v where
   type ProjectionDb (c (ConstructorMarker v)) db = ()
   type ProjectionRestriction (c (ConstructorMarker v)) r = r ~ RestrictionHolder v c
   projectionExprs c = ((map ExprField chains)++) where

@@ -160,7 +160,7 @@ data Order db r = forall a f . (Projection' f db r a) => Asc  f
 type FieldChain = ((String, DbType), [(String, EmbeddedDef)])
 
 -- | Any data that can be fetched from a database
-class PersistField a => Projection p a | p -> a where
+class Projection p a | p -> a where
   type ProjectionDb p db :: Constraint
   type ProjectionRestriction p r :: Constraint
   -- | It returns multiple expressions that can be transformed into values which can be selected. Difflist is used for concatenation efficiency.
