@@ -8,7 +8,7 @@ install:
 
 before_script:
   - psql --username=postgres --file=init_postgresql.sql
-  - mysql --username=root < init_mysql.sql
+  - mysql --user=root < init_mysql.sql
 
 script:
   - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
