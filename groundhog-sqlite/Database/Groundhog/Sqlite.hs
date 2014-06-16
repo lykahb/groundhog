@@ -290,7 +290,7 @@ showSqlType t = case t of
   DbDayTimeZoned -> "TIMESTAMP WITH TIME ZONE"
   DbBlob -> "BLOB"
   DbAutoKey -> "INTEGER"
-  DbOther (OtherTypeDef f) -> f showSqlType
+  DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
 
 readSqlType :: String -> DbTypePrimitive
 readSqlType "VARCHAR" = DbString
@@ -302,7 +302,7 @@ readSqlType "TIME" = DbTime
 readSqlType "TIMESTAMP" = DbDayTime
 readSqlType "TIMESTAMP WITH TIME ZONE" = DbDayTimeZoned
 readSqlType "BLOB" = DbBlob
-readSqlType typ = DbOther $ OtherTypeDef $ const typ
+readSqlType typ = DbOther $ OtherTypeDef [Left typ]
 
 data Affinity = TEXT | NUMERIC | INTEGER | REAL | NONE deriving (Eq, Show)
 

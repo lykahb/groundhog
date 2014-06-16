@@ -441,14 +441,14 @@ data DbType =
 -- Reference to a table that is not mapped = (Right (schema, tableName, columns), onDelete, onUpdate)
 type ParentTableReference = (Either (EntityDef, Maybe String) (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 
--- | Stores name for a database type
-newtype OtherTypeDef = OtherTypeDef ((DbTypePrimitive -> String) -> String)
+-- | Stores a database type. It needs to be formatted by backend. For example, @[Right DbInt64, Left "[]"]@ should become integer[] in PostgreSQL
+newtype OtherTypeDef = OtherTypeDef ([Either String DbTypePrimitive])
 
 instance Eq OtherTypeDef where
-  OtherTypeDef f1 == OtherTypeDef f2 = f1 show == f2 show
+  t1 == t2 = show t1 == show t2
 
 instance Show OtherTypeDef where
-  showsPrec p (OtherTypeDef f) = showParen (p > 10) $ showString "OtherTypeDef " . showsPrec 11 (f show)
+  showsPrec p (OtherTypeDef t) = showParen (p > 10) $ showString "OtherTypeDef " . showsPrec 11 (concatMap (either id show) t)
 
 -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True).
 -- Value False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.

@@ -583,7 +583,7 @@ readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, dat
   _ | array_ndims > 0 -> dbOther $ arr ++ concat (replicate array_ndims "[]") where
     arr = fromMaybe (error "readSqlType: array with elem type Nothing") array_elem
   a -> dbOther a) where
-    dbOther = DbOther . OtherTypeDef . const
+    dbOther t = DbOther $ OtherTypeDef [Left t]
     wrap x = "(" ++ x ++ ")"
     mkDate t name = maybe t (dbOther . (name++) . wrap . show) datetime_precision'
     defDateTimePrec = 6
@@ -601,7 +601,7 @@ showSqlType t = case t of
   DbDayTime -> "TIMESTAMP"
   DbDayTimeZoned -> "TIMESTAMP WITH TIME ZONE"
   DbBlob -> "BYTEA"
-  DbOther (OtherTypeDef f) -> f showSqlType
+  DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
   DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool

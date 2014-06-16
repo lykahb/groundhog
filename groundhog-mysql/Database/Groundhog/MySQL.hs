@@ -502,7 +502,7 @@ readSqlType typ colTyp (_, numeric_precision, numeric_scale) = (case typ of
   "time" -> DbTime
   _ | typ `elem` ["datetime", "timestamp"] -> DbDayTime
   _ | typ `elem` ["date", "newdate", "year"] -> DbDay
-  _ -> DbOther $ OtherTypeDef $ const colTyp
+  _ -> DbOther $ OtherTypeDef [Left colTyp]
   ) where
     numAttrs = (numeric_precision, numeric_scale)
 
@@ -518,7 +518,7 @@ showSqlType t = case t of
   DbDayTime -> "DATETIME"
   DbDayTimeZoned -> "VARCHAR(50) CHARACTER SET utf8"
   DbBlob -> "BLOB"
-  DbOther (OtherTypeDef f) -> f showSqlType
+  DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
   DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
@@ -537,7 +537,7 @@ compareRefs currentSchema (_, Reference sch1 tbl1 pairs1 onDel1 onUpd1) (_, Refe
 compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
 compareTypes type1 type2 = f type1 == f type2 where
   f = map toUpper . showSqlType . hack
-  hack DbDayTimeZoned = DbOther $ OtherTypeDef $ const "VARCHAR(50)"
+  hack DbDayTimeZoned = DbOther $ OtherTypeDef [Left "VARCHAR(50)"]
   hack t = t
 
 compareDefaults :: String -> String -> Bool
