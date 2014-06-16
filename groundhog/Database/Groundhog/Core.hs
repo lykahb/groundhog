@@ -359,10 +359,8 @@ data EntityDef = EntityDef {
 
 -- | Describes an entity constructor
 data ConstructorDef = ConstructorDef {
-  -- | Number of the constructor in the ADT
-    constrNum     :: Int
   -- | Constructor name
-  , constrName    :: String
+    constrName    :: String
   -- | Autokey name if any
   , constrAutoKeyName :: Maybe String
   -- | Parameter names with their named type

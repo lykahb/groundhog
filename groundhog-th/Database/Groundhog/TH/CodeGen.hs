@@ -468,8 +468,8 @@ mkPersistEntityInstance def = do
               else [| undefined :: $(return $ thFieldType f) |]
             typ = mkType f nvar
         [| (fname, $typ) |]
-    let constrs = listE $ zipWith mkConstructorDef [0 :: Int ..] $ thConstructors def
-        mkConstructorDef cNum c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef cNum name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
+    let constrs = listE $ map mkConstructorDef $ thConstructors def
+        mkConstructorDef c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
           fields = zipWith (\i f -> (thFieldName f, mkField c i f)) [0..] params
           mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef uName uType $(listE $ map getField uFields) |]
           getField fName = case lookup fName fields of
