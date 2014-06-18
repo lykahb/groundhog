@@ -174,7 +174,7 @@ migrationPack = GM.MigrationPack
   showAlterDb
   NoAction
 
-addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
+addUniquesReferences :: [UniqueDef' String String] -> [Reference] -> ([String], [AlterTable])
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
   (constraints, indexes) = partition ((/= UniqueIndex) . uniqueDefType) uniques
 
@@ -225,7 +225,7 @@ analyzeTable' _ tName = do
             uType = if sql == Just [PersistNull]
               then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary False else UniqueConstraint
               else UniqueIndex
-        return $ UniqueDef' (Just name) uType columnNames
+        return $ UniqueDef (Just name) uType columnNames
       foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       (foreigns :: [(Maybe String, Reference)]) <- do
           let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
@@ -246,7 +246,7 @@ analyzeTable' _ tName = do
             _ -> True
           uniques' = uniques ++ 
             if all (notPrimary . uniqueDefType) uniques && not (null primaryKeyColumnNames)
-              then  [UniqueDef' Nothing (UniquePrimary True) primaryKeyColumnNames]
+              then  [UniqueDef Nothing (UniquePrimary True) primaryKeyColumnNames]
               else []
       return $ Just $ TableInfo columns uniques' foreigns
 
@@ -332,8 +332,8 @@ sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape 
   (our, foreign) = f *** f $ unzip referencedColumns
   f = intercalate ", " . map escape
 
-sqlUnique :: UniqueDef' -> String
-sqlUnique (UniqueDef' name typ cols) = concat [
+sqlUnique :: UniqueDef' String String -> String
+sqlUnique (UniqueDef name typ cols) = concat [
     maybe "" (\x -> "CONSTRAINT " ++ escape x ++ " ") name
   , constraintType
   , intercalate "," $ map escape cols
@@ -547,9 +547,9 @@ delim' = fromChar delim
 toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistEntity v) => v -> DbPersist Sqlite m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
-compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-compareUniqs (UniqueDef' _ (UniquePrimary _) cols1) (UniqueDef' _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
-compareUniqs (UniqueDef' _ type1 cols1) (UniqueDef' _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
+compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
+compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
+compareUniqs (UniqueDef _ type1 cols1) (UniqueDef _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs (_, Reference _ tbl1 pairs1 onDel1 onUpd1) (_, Reference _ tbl2 pairs2 onDel2 onUpd2) =
@@ -612,7 +612,7 @@ showAlterTable table (AlterColumn col [UpdateValue s]) = Just (False, defaultPri
   , escape (colName col)
   , " IS NULL"
   ])
-showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = Just (False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef uName UniqueIndex cols)) = Just (False, defaultPriority, concat
   [ "CREATE UNIQUE INDEX "
   , maybe (error $ "showAlterTable: index for table " ++ table ++ " does not have a name") escape uName
   , " ON "

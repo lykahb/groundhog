@@ -52,7 +52,7 @@ data Reference = Reference {
 
 data TableInfo = TableInfo {
     tableColumns :: [Column]
-  , tableUniques :: [UniqueDef']
+  , tableUniques :: [UniqueDef' String String]
     -- | constraint name and reference
   , tableReferences :: [(Maybe String, Reference)]
 } deriving Show
@@ -60,7 +60,7 @@ data TableInfo = TableInfo {
 data AlterColumn = Type DbTypePrimitive | IsNull | NotNull
                  | Default String | NoDefault | UpdateValue String deriving Show
 
-data AlterTable = AddUnique UniqueDef'
+data AlterTable = AddUnique (UniqueDef' String String)
                 | DropConstraint String
                 | DropIndex String
                 | AddReference Reference
@@ -86,16 +86,10 @@ data AlterDB = AddTable String
              | CreateSchema String Bool
   deriving Show
 
-data UniqueDef' = UniqueDef' {
-    uniqueDefName :: Maybe String
-  , uniqueDefType :: UniqueType
-  , uniqueDefColumns :: [String]
-} deriving (Show, Eq, Ord)
-
 data MigrationPack m = MigrationPack {
     compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
   , compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-  , compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
+  , compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
   , compareDefaults :: String -> String -> Bool
   , migTriggerOnDelete :: Maybe String -> String -> [(String, String)] -> m (Bool, [AlterDB])
   , migTriggerOnUpdate :: Maybe String -> String -> [(String, String)] -> m [(Bool, [AlterDB])]
@@ -105,7 +99,7 @@ data MigrationPack m = MigrationPack {
   , mainTableId :: String
   , defaultPriority :: Int
   -- | Sql pieces for the create table statement that add constraints and alterations for running after the table is created
-  , addUniquesReferences :: [UniqueDef'] -> [Reference] -> ([String], [AlterTable])
+  , addUniquesReferences :: [UniqueDef' String String] -> [Reference] -> ([String], [AlterTable])
   , showColumn :: Column -> String
   , showAlterDb :: AlterDB -> SingleMigration
   , defaultReferenceActionType :: ReferenceActionType
@@ -134,7 +128,7 @@ mkReferences = concat . traverseDbType f where
       cDef = case constructors e of
         [cDef'] -> cDef'
         _       -> error "mkReferences: datatype with unique key cannot have more than one constructor"
-      UniqueDef _ _ uFields = findOne "unique" id uniqueName uName $ constrUniques cDef
+      UniqueDef _ _ uFields = findOne "unique" id uniqueDefName (Just uName) $ constrUniques cDef
       fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) uFields
       parentColumns = foldr mkColumns [] fields
     Right (sch, table, parentColumns) -> Reference sch table (zipWith' (,) cols parentColumns) onDel onUpd
@@ -192,7 +186,7 @@ migrateEntity m@MigrationPack{..} e = do
   let name = entityName e
       constrs = constructors e
       mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ primaryKeyTypeName ++ ", discr INTEGER NOT NULL)"
-      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef' Nothing (UniquePrimary True) ["id"]] []
+      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
 
   if isSimple constrs
     then do
@@ -229,7 +223,7 @@ migrateList m@MigrationPack{..} (DbList mainName t) = do
   let valuesName = mainName ++ delim : "values"
       (valueCols, valueRefs) = (($ []) . mkColumns) &&& mkReferences $ ("value", t)
       refs' = Reference Nothing mainName [("id", "id")] (Just Cascade) Nothing : valueRefs
-      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef' Nothing (UniquePrimary True) ["id"]] []
+      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
       mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ primaryKeyTypeName ++ ")"
       (addInCreate, addInAlters) = addUniquesReferences [] refs'
       expectedValuesStructure = TableInfo valueColumns [] (map (\x -> (Nothing, x)) refs')
@@ -263,7 +257,7 @@ getAlters m@MigrationPack{..} (TableInfo oldColumns oldUniques oldRefs) (TableIn
     (oldOnlyColumns, newOnlyColumns, commonColumns) = matchElements ((==) `on` colName) oldColumns newColumns
     (oldOnlyUniques, newOnlyUniques, commonUniques) = matchElements compareUniqs oldUniques newUniques
     (oldOnlyRefs, newOnlyRefs, _) = matchElements compareRefs oldRefs newRefs
-    primaryColumns = concatMap uniqueDefColumns $ filter ((== UniquePrimary True) . uniqueDefType) oldUniques
+    primaryColumns = concatMap uniqueDefFields $ filter ((== UniquePrimary True) . uniqueDefType) oldUniques
 
     colAlters = mapMaybe (\(a, b) -> mkAlterColumn b $ migrateColumn m a b) (filter ((`notElem` primaryColumns) . colName . fst) commonColumns)
     mkAlterColumn col alters = if null alters then Nothing else Just $ AlterColumn col alters
@@ -293,13 +287,13 @@ migrateColumn MigrationPack{..} (Column _ isNull1 type1 def1) (Column _ isNull2 
     _ -> [maybe NoDefault Default def2]
 
 -- from database, from datatype
-migrateUniq :: UniqueDef' -> UniqueDef' -> [AlterTable]
-migrateUniq u1@(UniqueDef' _ _ cols1) u2@(UniqueDef' _ _ cols2) = if haveSameElems (==) cols1 cols2
+migrateUniq :: UniqueDef' String String -> UniqueDef' String String -> [AlterTable]
+migrateUniq u1@(UniqueDef _ _ cols1) u2@(UniqueDef _ _ cols2) = if haveSameElems (==) cols1 cols2
   then []
   else [dropUnique u1, AddUnique u2]
 
-dropUnique :: UniqueDef' -> AlterTable
-dropUnique (UniqueDef' name typ _) = (case typ of
+dropUnique :: UniqueDef' String String -> AlterTable
+dropUnique (UniqueDef name typ _) = (case typ of
   UniqueConstraint -> DropConstraint name'
   UniqueIndex -> DropIndex name'
   UniquePrimary _ -> DropConstraint name') where
@@ -320,14 +314,14 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
         Nothing -> (TableInfo columns uniques (mkRefs refs), f [] columns uniques refs)
         Just keyName -> let keyColumn = Column keyName False DbAutoKey Nothing 
                         in if simple
-          then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef' Nothing (UniquePrimary True) [keyName]]) (mkRefs refs)
+          then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef Nothing (UniquePrimary True) [keyName]]) (mkRefs refs)
                , f [escape keyName ++ " " ++ primaryKeyTypeName] columns uniques refs)
           else let columns' = keyColumn:columns
                    refs' = refs ++ [Reference schema name [(keyName, mainTableId)] (Just Cascade) Nothing]
-                   uniques' = uniques ++ [UniqueDef' Nothing UniqueConstraint [keyName]]
+                   uniques' = uniques ++ [UniqueDef Nothing UniqueConstraint [keyName]]
                in (TableInfo columns' uniques' (mkRefs refs'), f [] columns' uniques' refs')) where
         (columns, refs) = foldr mkColumns [] &&& concatMap mkReferences $ constrParams constr
-        uniques = map (\(UniqueDef uName uType cols) -> UniqueDef' (Just uName) uType (map colName $ foldr mkColumns [] cols)) $ constrUniques constr
+        uniques = map (\u -> u {uniqueDefFields = map colName $ foldr mkColumns [] $ uniqueDefFields u}) $ constrUniques constr
         f autoKey cols uniqs refs' = (addTable', addInAlters') where
           (addInCreate, addInAlters') = addUniquesReferences uniqs refs'
           items = autoKey ++ map showColumn cols ++ addInCreate

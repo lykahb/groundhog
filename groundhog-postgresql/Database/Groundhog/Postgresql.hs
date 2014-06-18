@@ -391,7 +391,7 @@ analyzeTable' schema name = do
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace WHERE sch.nspname = coalesce(?, current_schema()) AND tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-      let mkUniqs typ = map (\us -> UniqueDef' (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
+      let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
                                 [c] -> colType c `elem` [DbInt32, DbInt64] && maybe False ("nextval" `isPrefixOf`) (colDefault c)
                                 _ -> False
@@ -458,7 +458,7 @@ showAlterTable table (DropColumn name) = [(True, defaultPriority, concat
   , escape name
   ])]
 showAlterTable table (AlterColumn col alts) = map (showAlterColumn table $ colName col) alts
-showAlterTable table (AddUnique (UniqueDef' uName UniqueConstraint cols)) = [(False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef uName UniqueConstraint cols)) = [(False, defaultPriority, concat
   [ "ALTER TABLE "
   , table
   , " ADD"
@@ -467,7 +467,7 @@ showAlterTable table (AddUnique (UniqueDef' uName UniqueConstraint cols)) = [(Fa
   , intercalate "," $ map escape cols
   , ")"
   ])]
-showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = [(False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef uName UniqueIndex cols)) = [(False, defaultPriority, concat
   [ "CREATE UNIQUE INDEX "
   , maybe (error $ "showAlterTable: index for table " ++ table ++ " does not have a name") escape uName
   , " ON "
@@ -476,7 +476,7 @@ showAlterTable table (AddUnique (UniqueDef' uName UniqueIndex cols)) = [(False, 
   , intercalate "," $ map escape cols
   , ")"
   ])]
-showAlterTable table (AddUnique (UniqueDef' uName (UniquePrimary _) cols)) = [(False, defaultPriority, concat
+showAlterTable table (AddUnique (UniqueDef uName (UniquePrimary _) cols)) = [(False, defaultPriority, concat
   [ "ALTER TABLE "
   , table
   , " ADD"
@@ -604,9 +604,9 @@ showSqlType t = case t of
   DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
   DbAutoKey -> showSqlType DbInt64
 
-compareUniqs :: UniqueDef' -> UniqueDef' -> Bool
-compareUniqs (UniqueDef' _ (UniquePrimary _) cols1) (UniqueDef' _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
-compareUniqs (UniqueDef' name1 type1 cols1) (UniqueDef' name2 type2 cols2) = fromMaybe True (liftM2 (==) name1 name2) && type1 == type2 && haveSameElems (==) cols1 cols2
+compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
+compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
+compareUniqs (UniqueDef name1 type1 cols1) (UniqueDef name2 type2 cols2) = fromMaybe True (liftM2 (==) name1 name2) && type1 == type2 && haveSameElems (==) cols1 cols2
 
 compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs currentSchema (_, Reference sch1 tbl1 pairs1 onDel1 onUpd1) (_, Reference sch2 tbl2 pairs2 onDel2 onUpd2) =

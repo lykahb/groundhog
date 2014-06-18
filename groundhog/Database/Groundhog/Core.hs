@@ -48,16 +48,23 @@ module Database.Groundhog.Core
   , orderBy
   , distinct
   -- * Type description
-  , DbTypePrimitive(..)
+  -- $types
+  , DbTypePrimitive'(..)
+  , DbTypePrimitive
   , DbType(..)
-  , EntityDef(..)
-  , EmbeddedDef(..)
-  , OtherTypeDef(..)
-  , ConstructorDef(..)
+  , EntityDef'(..)
+  , EntityDef
+  , EmbeddedDef'(..)
+  , EmbeddedDef
+  , OtherTypeDef'(..)
+  , OtherTypeDef
+  , ConstructorDef'(..)
+  , ConstructorDef
   , Constructor(..)
   , EntityConstr(..)
   , IsUniqueKey(..)
-  , UniqueDef(..)
+  , UniqueDef'(..)
+  , UniqueDef
   , UniqueType(..)
   , ReferenceActionType(..)
   , ParentTableReference
@@ -345,29 +352,36 @@ type NamedMigrations = Map String SingleMigration
 -- | Either error messages or migration queries with safety flag and execution order
 type SingleMigration = Either [String] [(Bool, Int, String)]
 
+-- $types
+-- These types describe the mapping between database schema and datatype. They hold table names, columns, constraints, etc. Some types below are parameterized by string type str and dbType. This is done to make them promotable to kind level.
+
 -- | Describes an ADT.
-data EntityDef = EntityDef {
+data EntityDef' str dbType = EntityDef {
   -- | Entity name. @entityName (entityDef v) == persistName v@
-    entityName   :: String
+    entityName   :: str
   -- | Database schema for the entity table and tables of its constructors
-  , entitySchema :: Maybe String
+  , entitySchema :: Maybe str
   -- | Named types of the instantiated polymorphic type parameters
-  , typeParams   :: [DbType]
+  , typeParams   :: [dbType]
   -- | List of entity constructors definitions
-  , constructors :: [ConstructorDef]
+  , constructors :: [ConstructorDef' str dbType]
 } deriving (Show, Eq)
 
+type EntityDef = EntityDef' String DbType
+
 -- | Describes an entity constructor
-data ConstructorDef = ConstructorDef {
+data ConstructorDef' str dbType = ConstructorDef {
   -- | Constructor name
-    constrName    :: String
+    constrName    :: str
   -- | Autokey name if any
-  , constrAutoKeyName :: Maybe String
+  , constrAutoKeyName :: Maybe str
   -- | Parameter names with their named type
-  , constrParams  :: [(String, DbType)]
+  , constrParams  :: [(str, dbType)]
   -- | Uniqueness constraints on the constructor fiels
-  , constrUniques :: [UniqueDef]
+  , constrUniques :: [UniqueDef' str (str, dbType)]
 } deriving (Show, Eq)
+
+type ConstructorDef = ConstructorDef' String DbType
 
 -- | Phantom constructors are made instances of this class. This class should be used only by Template Haskell codegen
 class Constructor c where
@@ -389,12 +403,14 @@ class PurePersistField uKey => IsUniqueKey uKey where
   -- | Ordinal number of the unique constraint in the list returned by 'constrUniques'
   uniqueNum :: uKey -> Int
 
--- | Unique name and list of the field names that form a unique combination
-data UniqueDef = UniqueDef {
-    uniqueName :: String
-  , uniqueType :: UniqueType
-  , uniqueFields :: [(String, DbType)]
+-- | Unique name and list of the fields that form a unique combination. The fields are parametrized to reuse this datatype both with field and DbType and with column name
+data UniqueDef' str field = UniqueDef {
+    uniqueDefName :: Maybe str
+  , uniqueDefType :: UniqueType
+  , uniqueDefFields :: [field]
 } deriving (Show, Eq)
+
+type UniqueDef = UniqueDef' String (String, DbType)
 
 -- | Defines how to treat the unique set of fields for a datatype
 data UniqueType = UniqueConstraint
@@ -412,7 +428,7 @@ data ReferenceActionType = NoAction
 -- | A DB data type. Naming attempts to reflect the underlying Haskell
 -- datatypes, eg DbString instead of DbVarchar. Different databases may
 -- have different representations for these types.
-data DbTypePrimitive =
+data DbTypePrimitive' str =
       DbString
     | DbInt32
     | DbInt64
@@ -423,9 +439,12 @@ data DbTypePrimitive =
     | DbDayTime
     | DbDayTimeZoned
     | DbBlob         -- ^ ByteString
-    | DbOther OtherTypeDef
+    | DbOther (OtherTypeDef' str)
     | DbAutoKey
   deriving (Eq, Show)
+
+type DbTypePrimitive = DbTypePrimitive' String
+
 data DbType = 
     -- | type, nullable, default value, reference
       DbTypePrimitive DbTypePrimitive Bool (Maybe String) (Maybe ParentTableReference)
@@ -440,17 +459,21 @@ data DbType =
 type ParentTableReference = (Either (EntityDef, Maybe String) (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 
 -- | Stores a database type. It needs to be formatted by backend. For example, @[Right DbInt64, Left "[]"]@ should become integer[] in PostgreSQL
-newtype OtherTypeDef = OtherTypeDef ([Either String DbTypePrimitive])
+newtype OtherTypeDef' str = OtherTypeDef ([Either str (DbTypePrimitive' str)])
 
-instance Eq OtherTypeDef where
+type OtherTypeDef = OtherTypeDef' String
+
+instance str ~ String => Eq (OtherTypeDef' str) where
   t1 == t2 = show t1 == show t2
 
-instance Show OtherTypeDef where
+instance str ~ String => Show (OtherTypeDef' str) where
   showsPrec p (OtherTypeDef t) = showParen (p > 10) $ showString "OtherTypeDef " . showsPrec 11 (concatMap (either id show) t)
 
 -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True).
 -- Value False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
-data EmbeddedDef = EmbeddedDef Bool [(String, DbType)] deriving (Eq, Show)
+data EmbeddedDef' str dbType = EmbeddedDef Bool [(str, dbType)] deriving (Eq, Show)
+
+type EmbeddedDef = EmbeddedDef' String DbType
 
 -- | Datatype for incremental building SQL queries
 newtype Utf8 = Utf8 Builder

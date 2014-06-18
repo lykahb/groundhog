@@ -250,7 +250,7 @@ insertByAll RenderConfig{..} queryFunc manyNulls v = do
 
       query = "SELECT " <> maybe "1" id (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
       conds = catMaybes $ zipWith (\u (_, uVals) -> checkNulls uVals $ intercalateS " AND " $ mkUniqueCond (f u) uVals) uniqueDefs uniques where
-        f = foldr (flatten esc) [] . uniqueFields
+        f = foldr (flatten esc) [] . uniqueDefFields
       -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
       checkNulls uVals x = if manyNulls && any (== PersistNull) (uVals []) then Nothing else Just x
       RenderS cond vals = intercalateS " OR " conds

@@ -471,7 +471,7 @@ mkPersistEntityInstance def = do
     let constrs = listE $ map mkConstructorDef $ thConstructors def
         mkConstructorDef c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
           fields = zipWith (\i f -> (thFieldName f, mkField c i f)) [0..] params
-          mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef uName uType $(listE $ map getField uFields) |]
+          mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef (Just uName) uType $(listE $ map getField uFields) |]
           getField fName = case lookup fName fields of
             Just f -> f
             Nothing -> error $ "Field name " ++ show fName ++ " declared in unique not found"

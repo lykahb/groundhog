@@ -843,13 +843,13 @@ testSchemaAnalysis = do
   uniqueInfo <- analyzeTable Nothing $ persistName (undefined :: UniqueKeySample)
   let match (TableInfo cols1 uniqs1 refs1) (TableInfo cols2 uniqs2 refs2) =
            haveSameElems ((==) `on` \x -> x {colDefault = Nothing}) cols1 cols2
-        && haveSameElems ((==) `on` \x -> x {uniqueDefName = Nothing}) uniqs1 uniqs2
+        && haveSameElems ((==) `on` \x -> x {uniqueDefName = Just ""}) uniqs1 uniqs2
         && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` referencedTableName) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2 ) refs1 refs2
       expectedSingleInfo = TableInfo [Column "id" False DbInt64 Nothing, Column "single#uniqueKey2" False DbInt64 Nothing, Column "single#uniqueKey3" True DbInt64 Nothing]
-        [UniqueDef' Nothing (UniquePrimary True) ["id"]]
+        [UniqueDef Nothing (UniquePrimary True) ["id"]]
         [(Nothing, Reference Nothing "UniqueKeySample" [("single#uniqueKey2","uniqueKey2"), ("single#uniqueKey3","uniqueKey3")] Nothing Nothing)]
       expectedUniqueInfo = TableInfo [Column "uniqueKey1" False DbInt64 Nothing, Column "uniqueKey2" False DbInt64 Nothing, Column "uniqueKey3" True DbInt64 Nothing]
-        [UniqueDef' Nothing UniqueConstraint ["uniqueKey1"], UniqueDef' Nothing UniqueConstraint ["uniqueKey2","uniqueKey3"], UniqueDef' Nothing (UniquePrimary False) ["uniqueKey1", "uniqueKey2"]]
+        [UniqueDef Nothing UniqueConstraint ["uniqueKey1"], UniqueDef Nothing UniqueConstraint ["uniqueKey2","uniqueKey3"], UniqueDef Nothing (UniquePrimary False) ["uniqueKey1", "uniqueKey2"]]
         []
 
   case singleInfo of
