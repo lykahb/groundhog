@@ -111,6 +111,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
     case x of
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues proxy src)
+  getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
 
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
                    => String -- ^ connection string
@@ -278,8 +279,7 @@ toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> Migration (DbPersist Postgresql m)
 migrate' v = do
-  schema <- lift getCurrentSchema
-  let migPack = migrationPack $ fromJust schema
+  migPack <- lift $ getMigrationPack
   migrateRecursively (migrateSchema migPack) (migrateEntity migPack) (migrateList migPack) v
 
 migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> GM.MigrationPack (DbPersist Postgresql m)

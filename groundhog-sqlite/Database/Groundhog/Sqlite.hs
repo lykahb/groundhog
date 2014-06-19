@@ -99,6 +99,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues proxy src)
   analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
+  getMigrationPack = return migrationPack
 
 withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
                => String -- ^ connection string

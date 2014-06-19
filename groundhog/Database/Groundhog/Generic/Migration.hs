@@ -387,3 +387,4 @@ class (Applicative m, Monad m) => SchemaAnalyzer m where
   analyzeFunction :: Maybe String -- ^ Schema name
                   -> String -- ^ Function name
                   -> m (Maybe String)
+  getMigrationPack :: m (MigrationPack m)
