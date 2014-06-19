@@ -170,17 +170,17 @@ onException :: MonadBaseControl IO m
         -> m a
 onException io what = control $ \runInIO -> E.onException (runInIO io) (runInIO what)
 
-data PSFieldDef = PSFieldDef {
-    psFieldName :: String -- bar
-  , psDbFieldName :: Maybe String -- SQLbar
-  , psDbTypeName :: Maybe String -- inet, NUMERIC(5,2), VARCHAR(50)
-  , psExprName :: Maybe String -- BarField
-  , psEmbeddedDef :: Maybe [PSFieldDef]
-  , psDefaultValue :: Maybe String
-  , psReferenceParent :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
+data PSFieldDef str = PSFieldDef {
+    psFieldName :: str -- bar
+  , psDbFieldName :: Maybe str -- SQLbar
+  , psDbTypeName :: Maybe str -- inet, NUMERIC(5,2), VARCHAR(50)
+  , psExprName :: Maybe str -- BarField
+  , psEmbeddedDef :: Maybe [PSFieldDef str]
+  , psDefaultValue :: Maybe str
+  , psReferenceParent :: Maybe (Maybe (Maybe str, str, [str]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 } deriving Show
 
-applyDbTypeSettings :: PSFieldDef -> DbType -> DbType
+applyDbTypeSettings :: PSFieldDef String -> DbType -> DbType
 applyDbTypeSettings (PSFieldDef _ _ dbTypeName _ Nothing def psRef) typ = case typ of
   DbTypePrimitive t nullable def' ref -> DbTypePrimitive (maybe t (\typeName -> DbOther $ OtherTypeDef [Left typeName]) dbTypeName) nullable (def <|> def') (applyReferencesSettings psRef ref)
   DbEmbedded emb ref -> DbEmbedded emb (applyReferencesSettings psRef ref)

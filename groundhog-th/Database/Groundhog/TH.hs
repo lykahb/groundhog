@@ -255,7 +255,7 @@ applyConstructorSettings PSConstructorDef{..} def@(THConstructorDef{..}) =
   f = foldr $ replaceOne "field" psFieldName thFieldName applyFieldSettings
   convertUnique (PSUniqueDef uName uType uFields) = THUniqueDef uName (fromMaybe UniqueConstraint uType) uFields
   
-applyFieldSettings :: PSFieldDef -> THFieldDef -> THFieldDef
+applyFieldSettings :: PSFieldDef String -> THFieldDef -> THFieldDef
 applyFieldSettings PSFieldDef{..} def@(THFieldDef{..}) =
   def { thDbFieldName = fromMaybe thDbFieldName psDbFieldName
       , thExprName = fromMaybe thExprName psExprName

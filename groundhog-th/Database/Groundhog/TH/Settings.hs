@@ -82,7 +82,7 @@ data THFieldDef = THFieldDef {
   , thDbTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
   , thExprName :: String -- BarField
   , thFieldType :: Type
-  , thEmbeddedDef :: Maybe [PSFieldDef]
+  , thEmbeddedDef :: Maybe [PSFieldDef String]
   , thDefaultValue :: Maybe String
   , thReferenceParent :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 } deriving Show
@@ -116,7 +116,7 @@ data PSEntityDef = PSEntityDef {
 data PSEmbeddedDef = PSEmbeddedDef {
     psEmbeddedName :: String
   , psDbEmbeddedName :: Maybe String -- ^ It is used only to set polymorphic part of name of its container
-  , psEmbeddedFields :: Maybe [PSFieldDef]
+  , psEmbeddedFields :: Maybe [PSFieldDef String]
 } deriving Show
 
 data PSPrimitiveDef = PSPrimitiveDef {
@@ -130,7 +130,7 @@ data PSConstructorDef = PSConstructorDef {
   , psPhantomConstrName :: Maybe String -- U2Constructor
   , psDbConstrName :: Maybe String -- SQLU2
   , psDbAutoKeyName :: Maybe (Maybe String) -- u2_id
-  , psConstrFields  :: Maybe [PSFieldDef]
+  , psConstrFields  :: Maybe [PSFieldDef String]
   , psConstrUniques :: Maybe [PSUniqueDef]
 } deriving Show
 
@@ -145,7 +145,7 @@ data PSUniqueKeyDef = PSUniqueKeyDef {
   , psUniqueKeyPhantomName :: Maybe String
   , psUniqueKeyConstrName :: Maybe String
   , psUniqueKeyDbName :: Maybe String
-  , psUniqueKeyFields :: Maybe [PSFieldDef]
+  , psUniqueKeyFields :: Maybe [PSFieldDef String]
   , psUniqueKeyMakeEmbedded :: Maybe Bool
   , psUniqueKeyIsDef :: Maybe Bool
 } deriving Show
@@ -190,7 +190,7 @@ instance Lift ReferenceActionType where
   lift SetNull = [| SetNull |]
   lift SetDefault = [| SetDefault |]
 
-instance Lift PSFieldDef where
+instance Lift (PSFieldDef String) where
   lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) |]
 
 instance Lift PSUniqueKeyDef where
@@ -266,7 +266,7 @@ instance FromJSON ReferenceActionType where
       Just a -> return a
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
-instance FromJSON PSFieldDef where
+instance FromJSON (PSFieldDef String) where
   parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> mkRefSettings where
     mkRefSettings = do
       ref <- v .:? "reference"
