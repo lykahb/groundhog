@@ -88,16 +88,19 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   getList k = getList' k
 
 instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist Sqlite m) where
-  schemaExists = error "schemaExists: is not supported by Sqlite"
+  schemaExists = fail "schemaExists: is not supported by Sqlite"
   getCurrentSchema = return Nothing
-  listTables _ = queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-  listTableTriggers _ name = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTables Nothing = queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
+  listTableTriggers Nothing name = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTableTriggers sch _ = fail $ "listTableTriggers: schemas are not supported by Sqlite: " ++ show sch
   analyzeTable = analyzeTable'
-  analyzeTrigger _ name = do
+  analyzeTrigger Nothing name = do
     x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue proxy name] id
     case x of
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues proxy src)
+  analyzeTrigger sch _ = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
   analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
   getMigrationPack = return migrationPack
 
@@ -209,7 +212,7 @@ migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
         else [DropTrigger Nothing trigName Nothing name, addTrigger])
 
 analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist Sqlite m (Maybe TableInfo)
-analyzeTable' _ tName = do
+analyzeTable' Nothing tName = do
   let fromName = escapeS . fromString
   tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   case tableInfo of
@@ -252,6 +255,7 @@ analyzeTable' _ tName = do
               then  [UniqueDef Nothing (UniquePrimary True) primaryKeyColumnNames]
               else []
       return $ Just $ TableInfo columns uniques' foreigns
+analyzeTable sch _ = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
 
 analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe [String])
 analyzePrimaryKey tName = do
