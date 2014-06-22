@@ -171,8 +171,10 @@ migrationPack = GM.MigrationPack
   mainTableId
   defaultPriority
   addUniquesReferences
+  showSqlType
   showColumn
   showAlterDb
+  NoAction
   NoAction
 
 addUniquesReferences :: [UniqueDef' String String] -> [Reference] -> ([String], [AlterTable])

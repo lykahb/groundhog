@@ -292,8 +292,10 @@ migrationPack currentSchema = GM.MigrationPack
   mainTableId
   defaultPriority
   (\uniques refs -> ([], map AddUnique uniques ++ map AddReference refs))
+  showSqlType
   showColumn
   (showAlterDb currentSchema)
+  Restrict
   Restrict
 
 showColumn :: Column -> String

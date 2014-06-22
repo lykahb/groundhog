@@ -95,14 +95,16 @@ data MigrationPack m = MigrationPack {
   , migTriggerOnUpdate :: Maybe String -> String -> [(String, String)] -> m [(Bool, [AlterDB])]
   , migConstr :: MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
   , escape :: String -> String
-  , primaryKeyTypeName :: String
+  , autoincrementedKeyTypeName :: String
   , mainTableId :: String
   , defaultPriority :: Int
   -- | Sql pieces for the create table statement that add constraints and alterations for running after the table is created
   , addUniquesReferences :: [UniqueDef' String String] -> [Reference] -> ([String], [AlterTable])
+  , showSqlType :: DbTypePrimitive -> String
   , showColumn :: Column -> String
   , showAlterDb :: AlterDB -> SingleMigration
-  , defaultReferenceActionType :: ReferenceActionType
+  , defaultReferenceOnDelete :: ReferenceActionType
+  , defaultReferenceOnUpdate :: ReferenceActionType
 }
 
 mkColumns :: (String, DbType) -> ([Column] -> [Column])
@@ -185,7 +187,7 @@ migrateEntity :: SchemaAnalyzer m => MigrationPack m -> EntityDef -> m SingleMig
 migrateEntity m@MigrationPack{..} e = do
   let name = entityName e
       constrs = constructors e
-      mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ primaryKeyTypeName ++ ", discr INTEGER NOT NULL)"
+      mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ autoincrementedKeyTypeName ++ ", discr INTEGER NOT NULL)"
       expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
 
   if isSimple constrs
@@ -224,7 +226,7 @@ migrateList m@MigrationPack{..} (DbList mainName t) = do
       (valueCols, valueRefs) = (($ []) . mkColumns) &&& mkReferences $ ("value", t)
       refs' = Reference Nothing mainName [("id", "id")] (Just Cascade) Nothing : valueRefs
       expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
-      mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ primaryKeyTypeName ++ ")"
+      mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ autoincrementedKeyTypeName ++ ")"
       (addInCreate, addInAlters) = addUniquesReferences [] refs'
       expectedValuesStructure = TableInfo valueColumns [] (map (\x -> (Nothing, x)) refs')
       valueColumns = Column "id" False DbAutoKey Nothing : Column "ord" False DbInt32 Nothing : valueCols
@@ -315,7 +317,7 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
         Just keyName -> let keyColumn = Column keyName False DbAutoKey Nothing 
                         in if simple
           then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef Nothing (UniquePrimary True) [keyName]]) (mkRefs refs)
-               , f [escape keyName ++ " " ++ primaryKeyTypeName] columns uniques refs)
+               , f [escape keyName ++ " " ++ autoincrementedKeyTypeName] columns uniques refs)
           else let columns' = keyColumn:columns
                    refs' = refs ++ [Reference schema name [(keyName, mainTableId)] (Just Cascade) Nothing]
                    uniques' = uniques ++ [UniqueDef Nothing UniqueConstraint [keyName]]
