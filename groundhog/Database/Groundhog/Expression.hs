@@ -41,18 +41,23 @@ instance PurePersistField a => Expression db r a where
 instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
   toExpr (Expr e) = e
 
-instance (EntityConstr v c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
-  toExpr = ExprField . fieldChain
+fieldHelper :: (FieldLike f a, DbDescriptor db, ProjectionDb f db) => f -> UntypedExpr db r
+fieldHelper f = result where
+  result = ExprField $ fieldChain db f
+  db = (undefined :: UntypedExpr db r -> proxy db) result
 
-instance (EntityConstr v c, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (SubField v c a) where
-  toExpr = ExprField . fieldChain
+instance (EntityConstr v c, DbDescriptor db, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
+  toExpr = fieldHelper
 
-instance (EntityConstr v c, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
-  toExpr = ExprField . fieldChain
+instance (EntityConstr v c, DbDescriptor db, PersistField a, db' ~ db, RestrictionHolder v c ~ r') => Expression db' r' (SubField db v c a) where
+  toExpr = fieldHelper
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v c ~ r')
+instance (EntityConstr v c, DbDescriptor db, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
+  toExpr = fieldHelper
+
+instance (PersistEntity v, DbDescriptor db, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v c ~ r')
       => Expression db r' (u (UniqueMarker v)) where
-  toExpr = ExprField . fieldChain
+  toExpr = fieldHelper
 
 instance (db' ~ db, r' ~ r) => Expression db' r' (Cond db r) where
   toExpr = ExprCond
@@ -67,8 +72,8 @@ instance (Normalize bk a (ak, r), Normalize ak b (bk, r)) => Unifiable a b
 class Normalize counterpart t r | t -> r
 instance NormalizeValue a (isPlain, r) => Normalize HFalse (Field v c a) (HFalse, r)
 instance r ~ (HFalse, a)               => Normalize HTrue  (Field v c a) r
-instance NormalizeValue a (isPlain, r) => Normalize HFalse (SubField v c a) (HFalse, r)
-instance r ~ (HFalse, a)               => Normalize HTrue  (SubField v c a) r
+instance NormalizeValue a (isPlain, r) => Normalize HFalse (SubField db v c a) (HFalse, r)
+instance r ~ (HFalse, a)               => Normalize HTrue  (SubField db v c a) r
 instance NormalizeValue a (isPlain, r) => Normalize HFalse (Expr db r' a) (HFalse, r)
 instance r ~ (HFalse, a)               => Normalize HTrue  (Expr db r' a) r
 instance NormalizeValue (Key v (Unique u)) (isPlain, r) => Normalize HFalse (u (UniqueMarker v)) (HFalse, r)

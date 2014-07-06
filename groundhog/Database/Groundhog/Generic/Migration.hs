@@ -10,7 +10,6 @@ module Database.Groundhog.Generic.Migration
   , AlterDB(..)
   , MigrationPack(..)
   , SchemaAnalyzer(..)
-  , mkColumns
   , migrateRecursively
   , migrateSchema
   , migrateEntity
@@ -107,16 +106,16 @@ data MigrationPack m = MigrationPack {
   , defaultReferenceOnUpdate :: ReferenceActionType
 }
 
-mkColumns :: (String, DbType) -> ([Column] -> [Column])
-mkColumns = go "" where
+mkColumns :: DbTypePrimitive -> (String, DbType) -> ([Column] -> [Column])
+mkColumns autoKeyType field = go "" field where
   go prefix (fname, typ) acc = (case typ of
     DbEmbedded (EmbeddedDef flag ts) _ -> foldr (go prefix') acc ts where prefix' = if flag then "" else prefix ++ fname ++ [delim]
-    DbList _ _ -> Column fullName False DbAutoKey Nothing : acc
+    DbList _ _ -> Column fullName False autoKeyType Nothing : acc
     DbTypePrimitive t nullable def _ -> Column fullName nullable t def : acc) where
       fullName = prefix ++ fname
 
-mkReferences :: (String, DbType) -> [Reference]
-mkReferences = concat . traverseDbType f where
+mkReferences :: DbTypePrimitive -> (String, DbType) -> [Reference]
+mkReferences autoKeyType field = concat $ traverseDbType f field where
   f (DbEmbedded _ ref) cols = maybe [] (return . mkReference cols) ref
   f (DbList lName _) cols = [mkReference cols (Right (Nothing, lName, ["id"]), Nothing, Nothing)]
   f (DbTypePrimitive _ _ _ ref) cols = maybe [] (return . mkReference cols) ref
@@ -132,14 +131,14 @@ mkReferences = concat . traverseDbType f where
         _       -> error "mkReferences: datatype with unique key cannot have more than one constructor"
       UniqueDef _ _ uFields = findOne "unique" id uniqueDefName (Just uName) $ constrUniques cDef
       fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) uFields
-      parentColumns = foldr mkColumns [] fields
+      parentColumns = foldr (mkColumns autoKeyType) [] fields
     Right (sch, table, parentColumns) -> Reference sch table (zipWith' (,) cols parentColumns) onDel onUpd
   zipWith' _ [] [] = []
   zipWith' g (x:xs) (y:ys) = g x y: zipWith' g xs ys
   zipWith' _ _ _ = error "mkReferences: the lists have different length"
 
 traverseDbType :: (DbType -> [String] -> a) -> (String, DbType) -> [a]
-traverseDbType f (columnName, dbtype) = snd $ go "" (columnName, dbtype) where
+traverseDbType f field = snd $ go "" field where
   go prefix (fname, typ) = (case typ of
     t@(DbEmbedded (EmbeddedDef flag ts) _) -> (cols, f t cols : xs) where
       prefix' = if flag then "" else prefix ++ fname ++ [delim]
@@ -152,13 +151,15 @@ traverseDbType f (columnName, dbtype) = snd $ go "" (columnName, dbtype) where
 -- | Create migration for a given entity and all entities it depends on.
 -- The stateful Map is used to avoid duplicate migrations when an entity type
 -- occurs several times in a datatype
-migrateRecursively :: (Monad m, PersistEntity v) => 
+migrateRecursively :: (PersistBackend m, PersistEntity v) => 
      (String    -> m SingleMigration)    -- ^ migrate schema
   -> (EntityDef -> m SingleMigration) -- ^ migrate entity
   -> (DbType    -> m SingleMigration) -- ^ migrate list
   -> v                                -- ^ initial entity
   -> StateT NamedMigrations m ()
-migrateRecursively migS migE migL = migEntity . entityDef where
+migrateRecursively migS migE migL v = result where
+  result = migEntity $ entityDef proxy v
+  proxy = (undefined :: t m a -> proxy (PhantomDb m)) result
   go l@(DbList lName t) = f ("list " ++ lName) (migL l) (go t)
   go (DbEmbedded (EmbeddedDef _ ts) ref) = mapM_ (go . snd) ts >> migRef ref
   go (DbTypePrimitive _ _ _ ref) = migRef ref
@@ -172,8 +173,8 @@ migrateRecursively migS migE migL = migEntity . entityDef where
       Nothing -> return ()
     f ("entity " ++ mainTableName id e) (migE e) (mapM_ go (allSubtypes e))
   f name mig cont = do
-    v <- gets (Map.lookup name)
-    when (v == Nothing) $
+    a <- gets (Map.lookup name)
+    when (a == Nothing) $
       lift mig >>= modify . Map.insert name >> cont
 
 migrateSchema :: SchemaAnalyzer m => MigrationPack m -> String -> m SingleMigration
@@ -183,12 +184,13 @@ migrateSchema MigrationPack{..} schema = do
     then Right []
     else showAlterDb $ CreateSchema schema False
 
-migrateEntity :: SchemaAnalyzer m => MigrationPack m -> EntityDef -> m SingleMigration
+migrateEntity :: (SchemaAnalyzer m, PersistBackend m) => MigrationPack m -> EntityDef -> m SingleMigration
 migrateEntity m@MigrationPack{..} e = do
+  autoKeyType <- fmap getAutoKeyType phantomDb
   let name = entityName e
       constrs = constructors e
       mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ autoincrementedKeyTypeName ++ ", discr INTEGER NOT NULL)"
-      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
+      expectedMainStructure = TableInfo [Column "id" False autoKeyType Nothing, Column "discr" False DbInt32 Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
 
   if isSimple constrs
     then do
@@ -220,16 +222,17 @@ migrateEntity m@MigrationPack{..} e = do
                in mergeMigrations $ Right updateDiscriminators: map snd res
           else Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show mainStructure']
 
-migrateList :: SchemaAnalyzer m => MigrationPack m -> DbType -> m SingleMigration
+migrateList :: (SchemaAnalyzer m, PersistBackend m) => MigrationPack m -> DbType -> m SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
+  autoKeyType <- fmap getAutoKeyType phantomDb
   let valuesName = mainName ++ delim : "values"
-      (valueCols, valueRefs) = (($ []) . mkColumns) &&& mkReferences $ ("value", t)
+      (valueCols, valueRefs) = (($ []) . mkColumns autoKeyType) &&& mkReferences autoKeyType $ ("value", t)
       refs' = Reference Nothing mainName [("id", "id")] (Just Cascade) Nothing : valueRefs
-      expectedMainStructure = TableInfo [Column "id" False DbAutoKey Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
+      expectedMainStructure = TableInfo [Column "id" False autoKeyType Nothing] [UniqueDef Nothing (UniquePrimary True) ["id"]] []
       mainQuery = "CREATE TABLE " ++ escape mainName ++ " (id " ++ autoincrementedKeyTypeName ++ ")"
       (addInCreate, addInAlters) = addUniquesReferences [] refs'
       expectedValuesStructure = TableInfo valueColumns [] (map (\x -> (Nothing, x)) refs')
-      valueColumns = Column "id" False DbAutoKey Nothing : Column "ord" False DbInt32 Nothing : valueCols
+      valueColumns = Column "id" False autoKeyType Nothing : Column "ord" False DbInt32 Nothing : valueCols
       valuesQuery = "CREATE TABLE " ++ escape valuesName ++ " (" ++ intercalate ", " (map showColumn valueColumns ++ addInCreate) ++ ")"
   -- TODO: handle case when outer entity has a schema
   mainStructure <- analyzeTable Nothing mainName
@@ -301,12 +304,13 @@ dropUnique (UniqueDef name typ _) = (case typ of
   UniquePrimary _ -> DropConstraint name') where
   name' = fromMaybe (error $ "dropUnique: constraint which should be dropped does not have a name") name
   
-defaultMigConstr :: SchemaAnalyzer m => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
-defaultMigConstr migPack@MigrationPack{..} e constr = do
+defaultMigConstr :: (SchemaAnalyzer m, PersistBackend m) => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
+defaultMigConstr m@MigrationPack{..} e constr = do
   let simple = isSimple $ constructors e
       name = entityName e
       schema = entitySchema e
       cName = if simple then name else name ++ [delim] ++ constrName constr
+  autoKeyType <- fmap getAutoKeyType phantomDb
   tableStructure <- analyzeTable schema cName
   let dels = concatMap (mkDeletes escape) $ constrParams constr
   (triggerExisted, delTrigger) <- migTriggerOnDelete schema cName dels
@@ -314,7 +318,7 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
   
   let (expectedTableStructure, (addTable, addInAlters)) = (case constrAutoKeyName constr of
         Nothing -> (TableInfo columns uniques (mkRefs refs), f [] columns uniques refs)
-        Just keyName -> let keyColumn = Column keyName False DbAutoKey Nothing 
+        Just keyName -> let keyColumn = Column keyName False autoKeyType Nothing 
                         in if simple
           then (TableInfo (keyColumn:columns) (uniques ++ [UniqueDef Nothing (UniquePrimary True) [keyName]]) (mkRefs refs)
                , f [escape keyName ++ " " ++ autoincrementedKeyTypeName] columns uniques refs)
@@ -322,8 +326,8 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
                    refs' = refs ++ [Reference schema name [(keyName, mainTableId)] (Just Cascade) Nothing]
                    uniques' = uniques ++ [UniqueDef Nothing UniqueConstraint [keyName]]
                in (TableInfo columns' uniques' (mkRefs refs'), f [] columns' uniques' refs')) where
-        (columns, refs) = foldr mkColumns [] &&& concatMap mkReferences $ constrParams constr
-        uniques = map (\u -> u {uniqueDefFields = map colName $ foldr mkColumns [] $ uniqueDefFields u}) $ constrUniques constr
+        (columns, refs) = foldr (mkColumns autoKeyType) [] &&& concatMap (mkReferences autoKeyType) $ constrParams constr
+        uniques = map (\u -> u {uniqueDefFields = map colName $ foldr (mkColumns autoKeyType) [] $ uniqueDefFields u}) $ constrUniques constr
         f autoKey cols uniqs refs' = (addTable', addInAlters') where
           (addInCreate, addInAlters') = addUniquesReferences uniqs refs'
           items = autoKey ++ map showColumn cols ++ addInCreate
@@ -335,7 +339,7 @@ defaultMigConstr migPack@MigrationPack{..} e constr = do
           rest = AlterTable schema cName addTable expectedTableStructure expectedTableStructure addInAlters
           in ([], False, [AddTable addTable, rest])
         Just oldTableStructure -> let
-          alters = getAlters migPack oldTableStructure expectedTableStructure
+          alters = getAlters m oldTableStructure expectedTableStructure
           alterTable = if null alters
             then []
             else [AlterTable schema cName addTable oldTableStructure expectedTableStructure alters]

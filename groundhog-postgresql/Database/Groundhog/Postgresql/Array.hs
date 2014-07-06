@@ -49,9 +49,9 @@ instance (ArrayElem a, PersistField a) => PersistField (Array a) where
   persistName a = "Array" ++ delim : persistName ((undefined :: Array a -> a) a)
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType a = DbTypePrimitive typ False Nothing Nothing where
+  dbType p a = DbTypePrimitive typ False Nothing Nothing where
     typ = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"]
-    elemType = case dbType ((undefined :: Array a -> a) a) of
+    elemType = case dbType p ((undefined :: Array a -> a) a) of
       DbTypePrimitive t _ _ _ -> t
       t -> error $ "dbType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
 

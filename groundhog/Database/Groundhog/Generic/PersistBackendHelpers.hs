@@ -34,8 +34,8 @@ import Data.Monoid
 get :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
     => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Key v BackendSpecific -> m (Maybe v)
 get RenderConfig{..} queryFunc (k :: Key v BackendSpecific) = do
-  let e = entityDef (undefined :: v)
-  let proxy = undefined :: proxy (PhantomDb m)
+  let e = entityDef proxy (undefined :: v)
+      proxy = undefined :: proxy (PhantomDb m)
   if isSimple (constructors e)
     then do
       let constr = head $ constructors e
@@ -66,7 +66,7 @@ select :: forall m db r v c opts . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionH
 select conf@RenderConfig{..} queryFunc preColumns noLimit options = doSelectQuery where
   SelectOptions cond limit offset ords dist _ = getSelectOptions options
 
-  e = entityDef (undefined :: v)
+  e = entityDef proxy (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
   orders = renderOrders conf ords
   lim = case (limit, offset) of
@@ -96,7 +96,7 @@ selectAll RenderConfig{..} queryFunc = start where
         let fields = fromJust (constrId esc constr) <> fromChar ',' <> renderFields esc (constrParams constr)
         let query = "SELECT " <> fields <> " FROM " <> tableName esc e constr
         queryFunc query [] $ mapAllRows $ mkEntity proxy cNum
-  e = entityDef (undefined :: v)
+  e = entityDef proxy (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
 
 getBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
@@ -106,9 +106,10 @@ getBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (
       -> m (Maybe v)
 getBy conf@RenderConfig{..} queryFunc (k :: Key v (Unique u)) = do
   uniques <- toPersistValues k
-  let e = entityDef (undefined :: v)
+  let e = entityDef proxy (undefined :: v)
+      proxy = undefined :: proxy (PhantomDb m)
       u = (undefined :: Key v (Unique u) -> u (UniqueMarker v)) k
-      uFields = renderChain conf (fieldChain u) []
+      uFields = renderChain conf (fieldChain proxy u) []
       RenderS cond vals = intercalateS " AND " $ mkUniqueCond uFields uniques
       constr = head $ constructors e
       fields = renderFields esc (constrParams constr)
@@ -122,7 +123,7 @@ project :: forall m db r v c p opts a'. (SqlDb db, db ~ PhantomDb m, r ~ Restric
         => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> p -> opts -> m [a']
 project conf@RenderConfig{..} queryFunc preColumns noLimit p options = doSelectQuery where
   SelectOptions cond limit offset ords dist _ = getSelectOptions options
-  e = entityDef (undefined :: v)
+  e = entityDef proxy (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
   orders = renderOrders conf ords
   lim = case (limit, offset) of
@@ -142,7 +143,7 @@ project conf@RenderConfig{..} queryFunc preColumns noLimit p options = doSelectQ
 count :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
       => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> Cond db r -> m Int
 count conf@RenderConfig{..} queryFunc cond = do
-  let e = entityDef (undefined :: v)
+  let e = entityDef proxy (undefined :: v)
       proxy = undefined :: proxy (PhantomDb m)
       cond' = renderCond conf cond
       constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
@@ -159,7 +160,7 @@ replace :: forall m db r v . (PersistBackend m, PersistEntity v, PrimitivePersis
         -> Key v BackendSpecific -> v -> m ()
 replace RenderConfig{..} queryFunc execFunc insertIntoConstructorTable k v = do
   vals <- toEntityPersistValues' v
-  let e = entityDef v
+  let e = entityDef proxy v
       proxy = undefined :: proxy (PhantomDb m)
       constructorNum = fromPrimitivePersistValue proxy (head vals)
       constr = constructors e !! constructorNum
@@ -201,8 +202,9 @@ replaceBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key
 replaceBy conf@RenderConfig{..} execFunc u v = do
   uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
   vals <- toEntityPersistValues' v
-  let e = entityDef (undefined :: v)
-      uFields = renderChain conf (fieldChain u) []
+  let e = entityDef proxy (undefined :: v)
+      proxy = undefined :: proxy (PhantomDb m)
+      uFields = renderChain conf (fieldChain proxy u) []
       RenderS cond condVals = intercalateS " AND " $ mkUniqueCond uFields uniques
       constr = head $ constructors e
       RenderS upds updsVals = commasJoin $ zipWith f fields $ tail vals where
@@ -214,7 +216,8 @@ replaceBy conf@RenderConfig{..} execFunc u v = do
 update :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => RenderConfig -> (Utf8 -> [PersistValue] -> m ()) -> [Update db r] -> Cond db r -> m ()
 update conf@RenderConfig{..} execFunc upds cond = do
-  let e = entityDef (undefined :: v)
+  let e = entityDef proxy (undefined :: v)
+      proxy = undefined :: proxy (PhantomDb m)
   case renderUpdates conf upds of
     Just upds' -> do
       let cond' = renderCond conf cond
@@ -227,7 +230,8 @@ update conf@RenderConfig{..} execFunc upds cond = do
 delete :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
        => RenderConfig -> (Utf8 -> [PersistValue] -> m ()) -> Cond db r -> m ()
 delete conf@RenderConfig{..} execFunc cond = execFunc query (maybe [] (($ []) . getValues) cond') where
-  e = entityDef (undefined :: v)
+  e = entityDef proxy (undefined :: v)
+  proxy = undefined :: proxy (PhantomDb m)
   constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
   cond' = renderCond conf cond
   whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
@@ -242,7 +246,7 @@ insertByAll :: forall m v . (PersistBackend m, PersistEntity v)
             -> Bool -- ^ allow multiple duplication of uniques with nulls
             -> v -> m (Either (AutoKey v) (AutoKey v))
 insertByAll RenderConfig{..} queryFunc manyNulls v = do
-  let e = entityDef v
+  let e = entityDef proxy v
       proxy = undefined :: proxy (PhantomDb m)
       (constructorNum, uniques) = getUniques proxy v
       constr = constructors e !! constructorNum
@@ -265,7 +269,7 @@ insertByAll RenderConfig{..} queryFunc manyNulls v = do
 deleteBy :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
             => RenderConfig -> (Utf8 -> [PersistValue] -> m ()) -> Key v BackendSpecific -> m ()
 deleteBy RenderConfig{..} execFunc k = execFunc query [toPrimitivePersistValue proxy k] where
-  e = entityDef ((undefined :: Key v u -> v) k)
+  e = entityDef proxy ((undefined :: Key v u -> v) k)
   proxy = undefined :: proxy (PhantomDb m)
   constr = head $ constructors e
   idName = if isSimple (constructors e)
@@ -276,15 +280,15 @@ deleteBy RenderConfig{..} execFunc k = execFunc query [toPrimitivePersistValue p
 
 deleteAll :: forall m v . (PersistBackend m, PersistEntity v)
           => RenderConfig -> (Utf8 -> [PersistValue] -> m ()) -> v -> m ()
-deleteAll RenderConfig{..} execFunc (_ :: v) = do
-  let e = entityDef (undefined :: v)
-      query = "DELETE FROM " <> mainTableName esc e
-  execFunc query []
+deleteAll RenderConfig{..} execFunc (_ :: v) = execFunc query [] where
+  e = entityDef proxy (undefined :: v)
+  proxy = undefined :: proxy (PhantomDb m)
+  query = "DELETE FROM " <> mainTableName esc e
 
 countAll :: forall m v . (PersistBackend m, PersistEntity v)
          => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> v -> m Int
 countAll RenderConfig{..} queryFunc (_ :: v) = do
-  let e = entityDef (undefined :: v)
+  let e = entityDef proxy (undefined :: v)
       proxy = undefined :: proxy (PhantomDb m)
       query = "SELECT COUNT(*) FROM " <> mainTableName esc e
   x <- queryFunc query [] id
@@ -300,9 +304,9 @@ insertBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key 
          -> u (UniqueMarker v) -> v -> m (Either (AutoKey v) (AutoKey v))
 insertBy conf@RenderConfig{..} queryFunc manyNulls u v = do
   uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
-  let e = entityDef v
+  let e = entityDef proxy v
       proxy = undefined :: proxy (PhantomDb m)
-      uFields = renderChain conf (fieldChain u) []
+      uFields = renderChain conf (fieldChain proxy u) []
       RenderS cond vals = intercalateS " AND " $ mkUniqueCond uFields uniques
       -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
       checkNulls uVals = manyNulls && any (== PersistNull) (uVals [])

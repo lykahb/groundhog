@@ -167,7 +167,7 @@ insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) =>
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
-  let e = entityDef v
+  let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   liftM fst $ if isSimple (constructors e)
@@ -193,7 +193,7 @@ insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) =
 insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
-  let e = entityDef v
+  let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   if isSimple (constructors e)
@@ -213,7 +213,7 @@ insertIntoConstructorTable withRet withId tName c vals = RenderS query vals' whe
   query = "INSERT INTO " <> tName <> columnsValues <> returning
   (fields, returning) = case constrAutoKeyName c of
     Just idName -> (fields', returning') where
-      fields' = if withId then (idName, dbType (0 :: Int64)):constrParams c else constrParams c
+      fields' = if withId then (idName, dbType proxy (0 :: Int64)):constrParams c else constrParams c
       returning' = if withRet then " RETURNING(" <> escapeS (fromString idName) <> ")" else mempty
     _           -> (constrParams c, mempty)
   columnsValues = case foldr (flatten escapeS) [] fields of
@@ -226,7 +226,7 @@ insertList' (l :: [a]) = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   k <- queryRaw' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES RETURNING(id)") [] getKey
   let valuesName = mainName <> delim' <> "values"
-  let fields = [("ord", dbType (0 :: Int)), ("value", dbType (undefined :: a))]
+  let fields = [("ord", dbType proxy (0 :: Int)), ("value", dbType proxy (undefined :: a))]
   let query = "INSERT INTO " <> escapeS valuesName <> "(id," <> renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields <> ")"
   let go :: Int -> [a] -> DbPersist Postgresql m ()
       go n (x:xs) = do
@@ -241,7 +241,7 @@ getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, Persist
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   let valuesName = mainName <> delim' <> "values"
-  let value = ("value", dbType (undefined :: a))
+  let value = ("value", dbType proxy (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
   queryRaw' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
 
@@ -604,7 +604,6 @@ showSqlType t = case t of
   DbDayTimeZoned -> "TIMESTAMP WITH TIME ZONE"
   DbBlob -> "BYTEA"
   DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
-  DbAutoKey -> showSqlType DbInt64
 
 compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
@@ -763,7 +762,7 @@ withSchema sch name = maybe "" (\x -> escape x ++ ".") sch ++ escape name
 -- Also a value entered as an external string (geometry, arrays and other complex types have this representation) may need an explicit type. 
 explicitType :: (Expression Postgresql r a, PersistField a) => a -> Expr Postgresql r a
 explicitType a = castType a t where
-  t = case dbType a of
+  t = case dbType proxy a of
     DbTypePrimitive t' _ _ _ -> showSqlType t'
     _ -> error "explicitType: type is not primitive"
 

@@ -255,7 +255,7 @@ analyzeTable' Nothing tName = do
               then  [UniqueDef Nothing (UniquePrimary True) primaryKeyColumnNames]
               else []
       return $ Just $ TableInfo columns uniques' foreigns
-analyzeTable sch _ = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
+analyzeTable' sch _ = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
 
 analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe [String])
 analyzePrimaryKey tName = do
@@ -296,7 +296,6 @@ showSqlType t = case t of
   DbDayTime -> "TIMESTAMP"
   DbDayTimeZoned -> "TIMESTAMP WITH TIME ZONE"
   DbBlob -> "BLOB"
-  DbAutoKey -> "INTEGER"
   DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
 
 readSqlType :: String -> DbTypePrimitive
@@ -355,7 +354,7 @@ insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) =>
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
-  let e = entityDef v
+  let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   liftM fst $ if isSimple (constructors e)
@@ -379,7 +378,7 @@ insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) =
 insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
-  let e = entityDef v
+  let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue proxy (head vals)
 
   if isSimple (constructors e)
@@ -400,7 +399,7 @@ insertIntoConstructorTable :: Bool -> Utf8 -> ConstructorDef -> [PersistValue] -
 insertIntoConstructorTable withId tName c vals = RenderS query vals' where
   query = "INSERT INTO " <> tName <> columnsValues
   fields = case constrAutoKeyName c of
-    Just idName | withId -> (idName, dbType (0 :: Int64)):constrParams c
+    Just idName | withId -> (idName, dbType proxy (0 :: Int64)):constrParams c
     _                    -> constrParams c
   columnsValues = case foldr (flatten escapeS) [] fields of
     [] -> " DEFAULT VALUES"
@@ -413,7 +412,7 @@ insertList' l = do
   executeRawCached' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES") []
   k <- getLastInsertRowId
   let valuesName = mainName <> delim' <> "values"
-  let fields = [("ord", dbType (0 :: Int)), ("value", dbType (undefined :: a))]
+  let fields = [("ord", dbType proxy (0 :: Int)), ("value", dbType proxy (undefined :: a))]
   let query = "INSERT INTO " <> escapeS valuesName <> "(id," <> renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields <> ")"
   let go :: Int -> [a] -> DbPersist Sqlite m ()
       go n (x:xs) = do
@@ -427,9 +426,9 @@ insertList' l = do
 getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
-  let valuesName = mainName <> delim' <> "values"
-  let value = ("value", dbType (undefined :: a))
-  let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
+      valuesName = mainName <> delim' <> "values"
+      value = ("value", dbType proxy (undefined :: a))
+      query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
   queryRawCached' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
     
 getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m PersistValue
@@ -498,29 +497,6 @@ queryRawCached' query vals f = do
       case x of
         S.Done -> return Nothing
         S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
-
-typeToSqlite :: DbType -> Maybe S.ColumnType
-typeToSqlite (DbTypePrimitive t nullable _ _) = case t of
-  _ | nullable -> Nothing
-  DbOther _ -> Nothing
-  DbString -> Just S.TextColumn
-  DbInt32 -> Just S.IntegerColumn
-  DbInt64 -> Just S.IntegerColumn
-  DbReal -> Just S.FloatColumn
-  DbBool -> Just S.IntegerColumn
-  DbDay -> Just S.TextColumn
-  DbTime -> Just S.TextColumn
-  DbDayTime -> Just S.TextColumn
-  DbDayTimeZoned -> Just S.TextColumn
-  DbBlob -> Just S.BlobColumn
-  DbAutoKey -> Just S.IntegerColumn
-typeToSqlite (DbList _ _) = Just S.IntegerColumn
-typeToSqlite t@(DbEmbedded _ _) = error $ "typeToSqlite: DbType does not have corresponding database type: " ++ show t
-
-getDbTypes :: DbType -> [DbType] -> [DbType]
-getDbTypes typ acc = case typ of
-  DbEmbedded (EmbeddedDef _ ts) _ -> foldr (getDbTypes . snd) acc ts
-  t               -> t:acc
 
 pFromSql :: S.SQLData -> PersistValue
 pFromSql (S.SQLInteger i) = PersistInt64 i

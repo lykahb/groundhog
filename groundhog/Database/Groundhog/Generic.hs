@@ -51,6 +51,7 @@ module Database.Groundhog.Generic
   , haveSameElems
   , mapAllRows
   , phantomDb
+  , getAutoKeyType
   , isSimple
   , deleteByKey
   ) where
@@ -293,6 +294,11 @@ mapAllRows f pop = go where
 
 phantomDb :: PersistBackend m => m (proxy (PhantomDb m))
 phantomDb = return $ error "phantomDb"
+
+getAutoKeyType :: DbDescriptor db => proxy db -> DbTypePrimitive
+getAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoKeyType db) proxy) of
+  DbTypePrimitive t _ _ _ -> t
+  t -> error $ "autoKeyType: unexpected key type " ++ show t
 
 isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True

@@ -81,6 +81,7 @@ mkEmbeddedPersistFieldInstance def = do
 
   dbType' <- do
     v <- newName "v"
+    proxy <- newName "p"
     let mkField fNum f = do
         a <- newName "a"
         let fname = thDbFieldName f
@@ -88,10 +89,10 @@ mkEmbeddedPersistFieldInstance def = do
               then let pat = conP (thEmbeddedConstructorName def) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thEmbeddedFields def) - fNum - 1) wildP
                    in caseE (varE v) $ [match pat (normalB $ varE a) []]
               else [| undefined :: $(return $ thFieldType f) |]
-            typ = mkType f nvar
+            typ = mkType f proxy nvar
         [| (fname, $typ) |]
     let pat = if null $ thEmbeddedTypeParams def then wildP else varP v
-    funD 'dbType $ [ clause [pat] (normalB [| DbEmbedded (EmbeddedDef False $(listE $ zipWith mkField [0..] $ thEmbeddedFields def)) Nothing |]) [] ]
+    funD 'dbType $ [ clause [varP proxy, pat] (normalB [| DbEmbedded (EmbeddedDef False $(listE $ zipWith mkField [0..] $ thEmbeddedFields def)) Nothing |]) [] ]
 
   let context = paramsContext (thEmbeddedTypeParams def) (thEmbeddedFields def)
   let decs = [persistName', toPersistValues', fromPersistValues', dbType']
@@ -197,10 +198,11 @@ mkAutoKeyPersistFieldInstance def = case thAutoKey def of
     toPersistValues' <- funD 'toPersistValues [clause [] (normalB [| primToPersistValue |]) []]
     fromPersistValues' <- funD 'fromPersistValues [clause [] (normalB [| primFromPersistValue |]) []]
     dbType' <- do
+      proxy <- newName "p"
       a <- newName "a"
-      let e = [| entityDef ((undefined :: Key v a -> v) $(varE a)) |]
-          body = [| DbTypePrimitive DbAutoKey False Nothing (Just (Left ($e, Nothing), Nothing, Nothing)) |]
-      funD 'dbType [clause [varP a] (normalB body) []]
+      let e = [| entityDef $(varE proxy) ((undefined :: Key v a -> v) $(varE a)) |]
+          body = [| DbTypePrimitive (getAutoKeyType $(varE proxy)) False Nothing (Just (Left ($e, Nothing), Nothing, Nothing)) |]
+      funD 'dbType [clause [varP proxy, varP a] (normalB body) []]
     
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [persistName', toPersistValues', fromPersistValues', dbType']
@@ -282,15 +284,16 @@ mkUniqueKeysPersistFieldInstances def = do
 
     dbType' <- do
       a <- newName "a"
+      proxy <- newName "p"
       let mkField f = do
           let fname = thDbFieldName f
               nvar = [| undefined :: $(return $ thFieldType f) |]
-              typ = mkType f nvar
+              typ = mkType f proxy nvar
           [| (fname, $typ) |]
       let embedded = [| EmbeddedDef False $(listE $ map mkField $ thUniqueKeyFields unique) |]
-          e = [| entityDef ((undefined :: Key v a -> v) $(varE a)) |]
+          e = [| entityDef $(varE proxy) ((undefined :: Key v a -> v) $(varE a)) |]
           body = [| DbEmbedded $embedded (Just (Left ($e, Just $(lift $ thUniqueKeyName unique)), Nothing, Nothing)) |]
-      funD 'dbType [clause [varP a] (normalB body) []]
+      funD 'dbType [clause [varP proxy, varP a] (normalB body) []]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [persistName', toPersistValues', fromPersistValues', dbType']
     return $ InstanceD context (AppT (ConT ''PersistField) uniqKeyType) decs
@@ -455,20 +458,21 @@ mkPersistEntityInstance def = do
     
   entityDef' <- do
     v <- newName "v"
+    proxy <- newName "p"
     let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
-    let types = map extractType $ thTypeParams def
-    let typeParams' = listE $ map (\t -> [| dbType ($(mkLambda t) $(varE v)) |]) types
-    let mkField c fNum f = do
-        a <- newName "a"
-        let fname = thDbFieldName f
-            nvar = if hasFreeVars (thFieldType f)
-              then let pat = conP (thConstrName c) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrFields c) - fNum - 1) wildP
-                       wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
-                   in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
-              else [| undefined :: $(return $ thFieldType f) |]
-            typ = mkType f nvar
-        [| (fname, $typ) |]
-    let constrs = listE $ map mkConstructorDef $ thConstructors def
+        types = map extractType $ thTypeParams def
+        typeParams' = listE $ map (\t -> [| dbType $(varE proxy) ($(mkLambda t) $(varE v)) |]) types
+        mkField c fNum f = do
+          a <- newName "a"
+          let fname = thDbFieldName f
+              nvar = if hasFreeVars (thFieldType f)
+                then let pat = conP (thConstrName c) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrFields c) - fNum - 1) wildP
+                         wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [| undefined |]) []] else []
+                     in caseE (varE v) $ [match pat (normalB $ varE a) []] ++ wildClause
+                else [| undefined :: $(return $ thFieldType f) |]
+              typ = mkType f proxy nvar
+          [| (fname, $typ) |]
+        constrs = listE $ map mkConstructorDef $ thConstructors def
         mkConstructorDef c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
           fields = zipWith (\i f -> (thFieldName f, mkField c i f)) [0..] params
           mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef (Just uName) uType $(listE $ map getField uFields) |]
@@ -476,14 +480,14 @@ mkPersistEntityInstance def = do
             Just f -> f
             Nothing -> error $ "Field name " ++ show fName ++ " declared in unique not found"
     
-    let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
-    let fullEntityName = case null types of
+        paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
+        fullEntityName = case null types of
          True  -> [| $(stringE $ thDbEntityName def) |]
          False -> [| $(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames) |]
 
-    let body = normalB [| EntityDef $fullEntityName $(lift $ thEntitySchema def) $typeParams' $constrs |]
-    let pat = if null $ thTypeParams def then wildP else varP v
-    funD 'entityDef $ [ clause [pat] body [] ]
+        body = normalB [| EntityDef $fullEntityName $(lift $ thEntitySchema def) $typeParams' $constrs |]
+        pat = if null $ thTypeParams def then wildP else varP v
+    funD 'entityDef $ [ clause [varP proxy, pat] body [] ]
 
   toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0 :: Int ..] $ thConstructors def) $ \(cNum, c) -> do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, thFieldType f)) $ thConstrFields c
@@ -506,7 +510,7 @@ mkPersistEntityInstance def = do
 
   fromEntityPersistValues' <- do
       xs <- newName "xs"
-      let failureBody = normalB [| (\a -> fail (failMessageNamed (entityName $ entityDef a) $(varE xs)) >> return (a, [])) undefined |]
+      let failureBody = normalB [| (\a -> phantomDb >>= \proxy -> fail (failMessageNamed (entityName $ entityDef proxy a) $(varE xs)) >> return (a, [])) undefined |]
       failureName <- newName "failure"
       let failure = match wildP (normalB $ varE failureName) []
       matches <- forM (zip [0..] (thConstructors def)) $ \(cNum, c) -> do
@@ -541,10 +545,11 @@ mkPersistEntityInstance def = do
     clauses = map mkClause thFieldNames
     mkClause f = do
         fArg <- newName "f"
+        proxy <- newName "p"
         let nvar = [| (undefined :: Field v c a -> a) $(varE fArg) |]
-            typ = mkType f nvar
+            typ = mkType f proxy nvar
             body = [| (($(lift $ thDbFieldName f), $typ), []) |]
-        clause [asP fArg $ conP (mkName $ thExprName f) []] (normalB body) []
+        clause [varP proxy, asP fArg $ conP (mkName $ thExprName f) []] (normalB body) []
     clauses' = if null clauses then [clause [wildP] (normalB [| undefined |]) []] else clauses
     in funD 'entityFieldChain clauses'
 
@@ -604,7 +609,10 @@ mkEntityPersistFieldInstance def = case getDefaultKey def of
            _         -> error "mkEntityPersistFieldInstance: key has no unique type"
       funD 'fromPersistValues $ [ clause [] body []]
 
-    dbType' <- funD 'dbType $ [clause [] (normalB [| dbType . (undefined :: a -> DefaultKey a) |]) []]
+    dbType' <- do
+      proxy <- newName "p"
+      let body = [| dbType $(varE proxy) . (undefined :: a -> DefaultKey a) |]
+      funD 'dbType $ [clause [varP proxy] (normalB body) []]
 
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [persistName', toPersistValues', fromPersistValues', dbType']
@@ -651,7 +659,7 @@ mkPrimitivePersistFieldInstance def = do
     let typ = if thPrimitiveStringEnumRepresentation def
           then [| DbTypePrimitive DbString False Nothing Nothing |]
           else [| DbTypePrimitive DbInt32  False Nothing Nothing |]
-    funD 'dbType $ [ clause [wildP] (normalB typ) [] ]
+    funD 'dbType $ [ clause [wildP, wildP] (normalB typ) [] ]
   let decs = [persistName', toPersistValues', fromPersistValues', dbType']
   return [ InstanceD [] (AppT (ConT ''PersistField) prim) decs
          , InstanceD [] (AppT (ConT ''NeverNull) prim) []
@@ -783,10 +791,10 @@ spanM p = go  where
         return (x:ys, zs)
       else return ([], x:xs)
 
-mkType :: THFieldDef -> ExpQ -> ExpQ
-mkType THFieldDef{..} nvar = t2 where
+mkType :: THFieldDef -> Name -> ExpQ -> ExpQ
+mkType THFieldDef{..} proxy nvar = t2 where
   psField = PSFieldDef thFieldName (Just thDbFieldName) thDbTypeName (Just thExprName) thEmbeddedDef thDefaultValue thReferenceParent
-  t1 = [| dbType $nvar |]
+  t1 = [| dbType $(varE proxy) $nvar |]
   -- if there are any type settings, apply them in runtime
   t2 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent) of
     (Nothing, Nothing, Nothing, Nothing) -> t1
