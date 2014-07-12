@@ -10,6 +10,8 @@ module Database.Groundhog.Postgresql
     , explicitType
     , castType
     , distinctOn
+    -- other
+    , showSqlType
     ) where
 
 import Database.Groundhog

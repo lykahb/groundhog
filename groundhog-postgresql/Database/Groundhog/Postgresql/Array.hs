@@ -45,32 +45,32 @@ import Prelude hiding (all, any)
 -- | Represents PostgreSQL arrays
 newtype Array a = Array [a] deriving (Eq, Show)
 
-instance (ArrayElem a, PersistField a) => PersistField (Array a) where
+instance (ArrayElem a, PrimitivePersistField a) => PersistField (Array a) where
   persistName a = "Array" ++ delim : persistName ((undefined :: Array a -> a) a)
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType p a = DbTypePrimitive typ False Nothing Nothing where
-    typ = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"]
-    elemType = case dbType p ((undefined :: Array a -> a) a) of
-      DbTypePrimitive t _ _ _ -> t
-      t -> error $ "dbType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
+  dbType p a = DbTypePrimitive (arrayType p a) False Nothing Nothing
+
+arrayType :: (DbDescriptor db, ArrayElem a, PrimitivePersistField a) => proxy db -> Array a -> DbTypePrimitive
+arrayType p a = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"] where
+  elemType = case dbType p ((undefined :: Array a -> a) a) of
+    DbTypePrimitive t _ _ _ -> t
+    t -> error $ "arrayType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
 
 class ArrayElem a where
-  -- this function is added to avoid GHC bug 7126 which appears when PrimitivePersistField is added as class constraint
-  toElem :: DbDescriptor db => proxy db -> a -> PersistValue
   parseElem :: DbDescriptor db => proxy db -> Parser a
 
 instance ArrayElem a => ArrayElem (Array a) where
-  toElem p (Array xs) = PersistCustom ("ARRAY[" <> query <> fromChar ']') (vals []) where
-    RenderS query vals = commasJoin $ map (renderPersistValue . toElem p) xs
   parseElem = parseArr
 
 instance PrimitivePersistField a => ArrayElem a where
-  toElem = toPrimitivePersistValue
-  parseElem p = parseString >>= (return . fromPrimitivePersistValue p . PersistByteString)
+  parseElem p = fmap (fromPrimitivePersistValue p . PersistByteString) parseString
 
-instance (ArrayElem a, PersistField a) => PrimitivePersistField (Array a) where
-  toPrimitivePersistValue = toElem
+instance (ArrayElem a, PrimitivePersistField a) => PrimitivePersistField (Array a) where
+  toPrimitivePersistValue p (Array xs) = PersistCustom arr (vals []) where
+    arr = "ARRAY[" <> query <> "]::" <> fromString typ
+    RenderS query vals = commasJoin $ map (renderPersistValue . toPrimitivePersistValue p) xs
+    typ = showSqlType $ arrayType p $ Array xs
   fromPrimitivePersistValue p a = parseHelper parser a where
     dimensions = char '[' *> takeWhile1 (/= '=') *> char '='
     parser = optional dimensions *> parseArr p
