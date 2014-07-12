@@ -460,15 +460,9 @@ data DbType =
 type ParentTableReference = (Either (EntityDef, Maybe String) (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 
 -- | Stores a database type. It needs to be formatted by backend. For example, @[Right DbInt64, Left "[]"]@ should become integer[] in PostgreSQL
-newtype OtherTypeDef' str = OtherTypeDef ([Either str (DbTypePrimitive' str)])
+newtype OtherTypeDef' str = OtherTypeDef ([Either str (DbTypePrimitive' str)]) deriving (Eq, Show)
 
 type OtherTypeDef = OtherTypeDef' String
-
-instance str ~ String => Eq (OtherTypeDef' str) where
-  t1 == t2 = show t1 == show t2
-
-instance str ~ String => Show (OtherTypeDef' str) where
-  showsPrec p (OtherTypeDef t) = showParen (p > 10) $ showString "OtherTypeDef " . showsPrec 11 (concatMap (either id show) t)
 
 -- | The first argument is a flag which defines if the field names should be concatenated with the outer field name (False) or used as is which provides full control over table column names (True).
 -- Value False should be the default value so that a datatype can be embedded without name conflict concern. The second argument list of field names and field types.
