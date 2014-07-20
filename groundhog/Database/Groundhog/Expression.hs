@@ -144,7 +144,7 @@ a ||. b = Or a b
   , Unifiable a b)
   => a -> b -> Cond db r
 
-infix 4 ==., <., <=., >., >=.
+infix 4 ==., /=., <., <=., >., >=.
 a ==. b = Compare Eq (toExpr a) (toExpr b)
 a /=. b = Compare Ne (toExpr a) (toExpr b)
 a <.  b = Compare Lt (toExpr a) (toExpr b)
