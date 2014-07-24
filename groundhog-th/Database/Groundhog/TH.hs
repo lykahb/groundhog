@@ -19,6 +19,8 @@ module Database.Groundhog.TH
   , lowerCaseSuffixNamingStyle
   , toUnderscore
   , firstChar
+  -- * Utility functions
+  , mkTHEntityDef
   ) where
 
 import Database.Groundhog.Core (delim, UniqueType(..))

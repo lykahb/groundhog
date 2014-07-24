@@ -486,8 +486,8 @@ mkPersistEntityInstance def = do
          False -> [| $(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames) |]
 
         body = normalB [| EntityDef $fullEntityName $(lift $ thEntitySchema def) $typeParams' $constrs |]
-        pat = if null $ thTypeParams def then wildP else varP v
-    funD 'entityDef $ [ clause [varP proxy, pat] body [] ]
+        entityPat = if null $ thTypeParams def then wildP else varP v
+    funD 'entityDef $ [ clause [varP proxy, entityPat] body [] ]
 
   toEntityPersistValues' <- liftM (FunD 'toEntityPersistValues) $ forM (zip [0 :: Int ..] $ thConstructors def) $ \(cNum, c) -> do
     vars <- mapM (\f -> newName "x" >>= \fname -> return (fname, thFieldType f)) $ thConstrFields c
