@@ -11,6 +11,9 @@ module Database.Groundhog.TH
   -- * Settings for code generation
   , CodegenConfig(..)
   , defaultCodegenConfig
+  , defaultMkEntityDecs
+  , defaultMkEmbeddedDecs
+  , defaultMkPrimitiveDecs
   -- $namingStylesDoc
   , NamingStyle(..)
   , suffixNamingStyle
@@ -30,25 +33,29 @@ import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (StrictType, VarStrictType, Lift(..))
 import Language.Haskell.TH.Quote
-import Control.Applicative ((<$>))
+import Control.Applicative
 import Control.Monad (forM, forM_, when, unless, liftM2)
 import Data.Char (isUpper, isLower, isSpace, isDigit, toUpper, toLower)
 import Data.List (nub, (\\))
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import Data.String
 import Data.Text.Encoding (encodeUtf8)
-import Data.Yaml as Y(decodeHelper, ParseException(..))
+import Data.Yaml as Y (decodeHelper, ParseException(..))
 import qualified Text.Libyaml as Y
 
 data CodegenConfig = CodegenConfig {
-    -- | Naming style that is applied for all definitions
+  -- | Naming style that is applied for all definitions
     namingStyle :: NamingStyle
-    -- | Codegenerator will create a function with this name that will run 'migrate' for each non-polymorphic entity in definition
+  -- | Codegenerator will create a function with this name that will run 'migrate' for each non-polymorphic entity in definition
   , migrationFunction :: Maybe String
+  -- | Functions that produce Haskell code for the entities. In most cases when overriding, the default functions that produce mappings are not replaced but kept along with custom code. Example: @['defaultMkEntityDecs', mkMyDecs]@.
+  , mkEntityDecs :: [THEntityDef -> Q [Dec]]
+  , mkEmbeddedDecs :: [THEmbeddedDef -> Q [Dec]]
+  , mkPrimitiveDecs :: [THPrimitiveDef -> Q [Dec]]
 }
 
 defaultCodegenConfig :: CodegenConfig
-defaultCodegenConfig = CodegenConfig suffixNamingStyle Nothing
+defaultCodegenConfig = CodegenConfig suffixNamingStyle Nothing [defaultMkEntityDecs] [defaultMkEmbeddedDecs] [defaultMkPrimitiveDecs]
 
 -- $namingStylesDoc
 -- When describing a datatype you can omit the most of the declarations. 
@@ -205,7 +212,7 @@ mkPersist CodegenConfig{..} (PersistDefinitions defs) = do
   primitives <- catMaybes <$> forM defs (\d -> case d of
     PSPrimitiveDef'     e -> Just .                                 applyPrimitiveSettings e               . mkTHPrimitiveDef namingStyle     <$> getDecl (psPrimitiveName e)
     _ -> return Nothing)
-  decs <- fmap (concat . concat) $ sequence [mapM mkEntityDecs entities, mapM mkEmbeddedDecs embeddeds, mapM mkPrimitiveDecs primitives]
+  decs <- fmap concat $ sequence $ (mkEntityDecs <*> entities) ++ ( mkEmbeddedDecs <*> embeddeds) ++ (mkPrimitiveDecs <*> primitives)
   migrateFunc <- maybe (return []) (\name -> mkMigrateFunction name entities) migrationFunction
   return $ migrateFunc ++ decs
 
@@ -578,45 +585,45 @@ parseDefinitions s = do
     Right (Left err) -> fail err
     Right (Right result') -> lift (result' :: PersistDefinitions)
 
-mkEntityDecs :: THEntityDef -> Q [Dec]
-mkEntityDecs def = do
+defaultMkEntityDecs :: THEntityDef -> Q [Dec]
+defaultMkEntityDecs def = do
   --runIO (print def)
-  decs <- fmap concat $ sequence
-    [ mkEntityPhantomConstructors def
-    , mkEntityPhantomConstructorInstances def
-    , mkAutoKeyPersistFieldInstance def
-    , mkAutoKeyPrimitivePersistFieldInstance def
-    , mkEntityUniqueKeysPhantoms def
-    , mkUniqueKeysIsUniqueInstances def
-    , mkUniqueKeysEmbeddedInstances def
-    , mkUniqueKeysPersistFieldInstances def
-    , mkUniqueKeysPrimitiveOrPurePersistFieldInstances def
-    , mkKeyEqShowInstances def
-    , mkEntityPersistFieldInstance def
-    , mkEntitySinglePersistFieldInstance def
-    , mkPersistEntityInstance def
-    , mkEntityNeverNullInstance def
+  decs <- fmap concat $ sequence $ map ($ def)
+    [ mkEntityPhantomConstructors
+    , mkEntityPhantomConstructorInstances
+    , mkAutoKeyPersistFieldInstance
+    , mkAutoKeyPrimitivePersistFieldInstance
+    , mkEntityUniqueKeysPhantoms
+    , mkUniqueKeysIsUniqueInstances
+    , mkUniqueKeysEmbeddedInstances
+    , mkUniqueKeysPersistFieldInstances
+    , mkUniqueKeysPrimitiveOrPurePersistFieldInstances
+    , mkKeyEqShowInstances
+    , mkEntityPersistFieldInstance
+    , mkEntitySinglePersistFieldInstance
+    , mkPersistEntityInstance
+    , mkEntityNeverNullInstance
     ]
   --runIO $ putStrLn $ pprint decs
   return decs
 
-mkEmbeddedDecs :: THEmbeddedDef -> Q [Dec]
-mkEmbeddedDecs def = do
+defaultMkEmbeddedDecs :: THEmbeddedDef -> Q [Dec]
+defaultMkEmbeddedDecs def = do
   --runIO (print def)
-  decs <- fmap concat $ sequence
-    [ mkEmbeddedPersistFieldInstance def
-    , mkEmbeddedPurePersistFieldInstance def
-    , mkEmbeddedInstance def
+  decs <- fmap concat $ sequence $ map ($ def)
+    [ mkEmbeddedPersistFieldInstance
+    , mkEmbeddedPurePersistFieldInstance
+    , mkEmbeddedInstance
     ]
 --  runIO $ putStrLn $ pprint decs
   return decs
 
-mkPrimitiveDecs :: THPrimitiveDef -> Q [Dec]
-mkPrimitiveDecs def = do
+defaultMkPrimitiveDecs :: THPrimitiveDef -> Q [Dec]
+defaultMkPrimitiveDecs def = do
   --runIO (print def)
-  decs <- fmap concat $ sequence
-    [ mkPrimitivePersistFieldInstance def
-    , mkPrimitivePrimitivePersistFieldInstance def
+  decs <- fmap concat $ sequence $ map ($ def)
+    [ mkPrimitivePersistFieldInstance
+    , mkPrimitivePrimitivePersistFieldInstance
     ]
 --  runIO $ putStrLn $ pprint decs
   return decs
