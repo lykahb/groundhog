@@ -228,14 +228,14 @@ class HasSelectOptions a db r | a -> db r where
   type HasDistinct a
   getSelectOptions :: a -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a) (HasDistinct a)
 
-instance HasSelectOptions (Cond db r) db r where
+instance db' ~ db => HasSelectOptions (Cond db r) db' r where
   type HasLimit (Cond db r) = HFalse
   type HasOffset (Cond db r) = HFalse
   type HasOrder (Cond db r) = HFalse
   type HasDistinct (Cond db r) = HFalse
   getSelectOptions a = SelectOptions a Nothing Nothing [] False []
 
-instance HasSelectOptions (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) db r where
+instance db' ~ db => HasSelectOptions (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) db' r where
   type HasLimit (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasLimit
   type HasOffset (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasOffset
   type HasOrder (SelectOptions db r hasLimit hasOffset hasOrder hasDistinct) = hasOrder
