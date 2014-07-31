@@ -9,7 +9,7 @@ import Database.Groundhog.TH (groundhog)
 
 import Control.Monad.Logger (NoLoggingT, runNoLoggingT)
 import Control.Monad.Trans.Control (MonadBaseControl)
-import Data.Conduit (ResourceT, runResourceT)
+import Control.Monad.Trans.Resource (ResourceT, runResourceT)
 import qualified Database.Persist as P
 import Database.Persist (PersistEntityBackend)
 import qualified Database.Persist.Sqlite as P
@@ -44,6 +44,7 @@ myConfig = defaultConfig {
            }
 
 gPerson = GPerson "John Doe" 23 180
+gCond :: G.DbDescriptor db => G.Cond db (G.RestrictionHolder GPerson GPersonConstructor)
 gCond = NameField G.==. ("abc" :: String) G.&&. AgeField G.==. (40 :: Int) G.&&. HeightField G.==. (160 :: Int)
 
 pPerson = PPerson "John Doe" 23 180
