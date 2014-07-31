@@ -394,7 +394,21 @@ analyzeTable' schema name = do
       
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-      uniqIndexes <- queryRaw' "SELECT ic.relname, a.attname FROM pg_catalog.pg_attribute a INNER JOIN pg_catalog.pg_class ic ON ic.oid = a.attrelid INNER JOIN pg_catalog.pg_index i ON i.indexrelid = ic.oid INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace WHERE sch.nspname = coalesce(?, current_schema()) AND tc.relname = ? AND a.attnum > 0 AND NOT a.attisdropped AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint) AND NOT i.indisprimary AND i.indisunique ORDER BY ic.relname, a.attnum" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+      let indexQuery = "SELECT ic.relname,\
+\    CASE WHEN i.indkey[att_ind] > 0 then a.attname else pg_get_indexdef(i.indexrelid, att_ind + 1, true) end\
+\  FROM pg_catalog.pg_index i\
+\  INNER JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid\
+\  INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid\
+\  CROSS JOIN generate_subscripts(i.indkey, 1) as att_ind\
+\  LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid=tc.oid AND a.attnum=i.indkey[att_ind] AND NOT a.attisdropped\
+\  INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace\
+\  WHERE sch.nspname = coalesce(?, current_schema())\
+\    AND tc.relname = ?\
+\    AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint)\
+\    AND NOT i.indisprimary\
+\    AND i.indisunique\
+\  ORDER BY ic.relname, att_ind"
+      uniqIndexes <- queryRaw' indexQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
                                 [c] -> colType c `elem` [DbInt32, DbInt64] && maybe False ("nextval" `isPrefixOf`) (colDefault c)
