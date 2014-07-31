@@ -45,7 +45,7 @@ import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Instances ()
 
 import Control.Applicative
-import Data.Attoparsec.Char8
+import Data.Attoparsec.ByteString.Char8
 
 data Point = Point Double Double deriving (Eq, Show)
 -- | It is not fully implemented in PostgreSQL yet. It is kept just to match all geometric types.
