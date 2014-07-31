@@ -432,10 +432,11 @@ analyzeTableReferences schema tName = do
 \  INNER JOIN pg_class cl_parent ON cl_parent.oid = c.confrelid\
 \  INNER JOIN pg_namespace sch_parent ON sch_parent.oid = cl_parent.relnamespace\
 \  INNER JOIN pg_attribute a_child ON a_child.attnum = c.conkey AND a_child.attrelid = c.conrelid\
-\  INNER JOIN pg_class cl_child ON cl_child.oid = c.conrelid AND cl_child.relname = ?\
-\  INNER JOIN pg_namespace sch_child ON sch_child.oid = cl_child.relnamespace AND sch_child.nspname = coalesce(?, current_schema())\
+\  INNER JOIN pg_class cl_child ON cl_child.oid = c.conrelid\
+\  INNER JOIN pg_namespace sch_child ON sch_child.oid = cl_child.relnamespace\
+\  WHERE sch_child.nspname = coalesce(?, current_schema()) AND cl_child.relname = ?\
 \  ORDER BY c.conname"
-  x <- queryRaw' sql [toPrimitivePersistValue proxy tName, toPrimitivePersistValue proxy schema] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+  x <- queryRaw' sql [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy tName] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   -- (refName, ((parentTableSchema, parentTable, onDelete, onUpdate), (childColumn, parentColumn)))
   let mkReference xs = (Just refName, Reference parentSchema parentTable pairs (mkAction onDelete) (mkAction onUpdate)) where
         pairs = map (snd . snd) xs
