@@ -423,7 +423,7 @@ mkPersistEntityInstance def = do
     uniques <- forM (thUniqueKeys def) $ \unique -> do
       uniqType <- [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName unique) |]
       let cDef = head $ thConstructors def
-          uniqFieldNames = lefts $ thUniqueFields $ findOne "unique" thUniqueKeyName thUniqueName unique $ thConstrUniques cDef
+          uniqFieldNames = lefts $ thUniqueFields $ findOne "unique" thUniqueName (thUniqueKeyName unique) $ thConstrUniques cDef
           uniqFields = concat $ flip map uniqFieldNames $ \name -> (filter ((== name) . thFieldName) $ thConstrFields cDef)
           uniqFields' = map (\f -> (NotStrict, thFieldType f)) uniqFields
       return $ ForallC [] [EqualP (VarT uParam) uniqType] $ NormalC (mkName $ thUniqueKeyConstrName unique) uniqFields'
@@ -477,7 +477,7 @@ mkPersistEntityInstance def = do
         mkConstructorDef c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
           fields = zipWith (\i f -> (thFieldName f, mkField c i f)) [0..] params
           mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef (Just uName) uType $(listE $ map getField uFields) |]
-          getField (Left fName) = [| Left $(snd $ findOne "field" id fst fName fields) |]
+          getField (Left fName) = [| Left $(snd $ findOne "field" fst fName fields) |]
           getField (Right expr) = [| Right expr |]
     
         paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
@@ -536,7 +536,7 @@ mkPersistEntityInstance def = do
           mkUnique (THUniqueDef uName _ fnames) = if all isLeft fnames
             then let
               -- find corresponding field from vars
-              uFields = map (\f -> findOne "field" id (thFieldName . snd) f $ catMaybes vars) $ lefts fnames
+              uFields = map (\f -> findOne "field" (thFieldName . snd) f $ catMaybes vars) $ lefts fnames
               result = mkToPurePersistValues proxy $ map (second thFieldType) uFields
               in Just [| (uName, $result) |]
             else Nothing

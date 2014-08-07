@@ -132,8 +132,8 @@ mkReferences autoKeyType field = concat $ traverseDbType f field where
       cDef = case constructors e of
         [cDef'] -> cDef'
         _       -> error "mkReferences: datatype with unique key cannot have more than one constructor"
-      uDef = findOne "unique" id uniqueDefName (Just uName) $ constrUniques cDef
-      fields = map (\(fName, _) -> findOne "field" id fst fName $ constrParams cDef) $ getUniqueFields uDef
+      uDef = findOne "unique" uniqueDefName (Just uName) $ constrUniques cDef
+      fields = map (\(fName, _) -> findOne "field" fst fName $ constrParams cDef) $ getUniqueFields uDef
       parentColumns = foldr (mkColumns autoKeyType) [] fields
     Right (sch, table, parentColumns) -> Reference sch table (zipWith' (,) cols parentColumns) onDel onUpd
   zipWith' _ [] [] = []

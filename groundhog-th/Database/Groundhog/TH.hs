@@ -289,9 +289,9 @@ applyPrimitiveSettings PSPrimitiveDef{..} def@(THPrimitiveDef{..}) =
 
 mkFieldsForUniqueKey :: NamingStyle -> String -> THUniqueKeyDef -> THConstructorDef -> [THFieldDef]
 mkFieldsForUniqueKey style dName uniqueKey cDef = zipWith (setSelector . findField) (thUniqueFields uniqueDef) [0..] where
-  findField (Left name) = findOne "field" id thFieldName name $ thConstrFields cDef
+  findField (Left name) = findOne "field" thFieldName name $ thConstrFields cDef
   findField (Right expr) = error $ "A unique key may not contain expressions: " ++ expr
-  uniqueDef = findOne "unique" id thUniqueName (thUniqueKeyName uniqueKey) $ thConstrUniques cDef
+  uniqueDef = findOne "unique" thUniqueName (thUniqueKeyName uniqueKey) $ thConstrUniques cDef
   setSelector f i = f {thExprName = mkExprSelectorName style dName (thUniqueKeyConstrName uniqueKey) (thFieldName f) i}
 
 notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]

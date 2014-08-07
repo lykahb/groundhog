@@ -263,17 +263,17 @@ fromSinglePersistValueAutoKey :: forall m v . (PersistBackend m, PersistEntity v
                               => PersistValue -> m v
 fromSinglePersistValueAutoKey x = phantomDb >>= \p -> get (fromPrimitivePersistValue p x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) return
 
-replaceOne :: (Eq c, Show c) => String -> (a -> c) -> (b -> c) -> (a -> b -> b) -> a -> [b] -> [b]
-replaceOne what getter1 getter2 apply a bs = case length (filter ((getter1 a ==) . getter2) bs) of
-  1 -> map (\b -> if getter1 a == getter2 b then apply a b else b) bs
-  0 -> error $ "Not found " ++ what ++ " with name " ++ show (getter1 a)
-  _ -> error $ "Found more than one " ++ what ++ " with name " ++ show (getter1 a)
-
-findOne :: (Eq c, Show c) => String -> (a -> c) -> (b -> c) -> a -> [b] -> b
-findOne what getter1 getter2 a bs = case filter ((getter1 a ==) . getter2) bs of
-  [b] -> b
+replaceOne :: (Eq x, Show x) => String -> (a -> x) -> (b -> x) -> (a -> b -> b) -> a -> [b] -> [b]
+replaceOne what getter1 getter2 apply a bs = case filter ((getter1 a ==) . getter2) bs of
+  [_] -> map (\b -> if getter1 a == getter2 b then apply a b else b) bs
   []  -> error $ "Not found " ++ what ++ " with name " ++ show (getter1 a)
   _   -> error $ "Found more than one " ++ what ++ " with name " ++ show (getter1 a)
+
+findOne :: (Eq x, Show x) => String -> (a -> x) -> x -> [a] -> a
+findOne what getter x as = case filter ((x ==) . getter) as of
+  [a] -> a
+  []  -> error $ "Not found " ++ what ++ " with name " ++ show x
+  _   -> error $ "Found more than one " ++ what ++ " with name " ++ show x
 
 -- | Returns only old elements, only new elements, and matched pairs (old, new).
 -- The new ones exist only in datatype, the old are present only in DB, match is typically by name (the properties of the matched elements may differ).
