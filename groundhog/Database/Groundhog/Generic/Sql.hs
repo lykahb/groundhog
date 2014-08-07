@@ -263,11 +263,13 @@ renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoi
 -- Returns string with comma separated escaped fields like "name,age"
 -- If there are other columns before renderFields result, do not put comma because the result might be an empty string. This happens when the fields have no columns like ().
 -- One of the solutions is to add one more field with datatype that is known to have columns, eg renderFields id (("id", namedType (0 :: Int64)) : constrParams constr)
-renderFields :: (Utf8 -> Utf8) -> [(String, DbType)] -> Utf8
+{-# SPECIALIZE renderFields :: (Utf8 -> Utf8) -> [(String, DbType)] -> Utf8 #-}
+renderFields :: StringLike s => (s -> s) -> [(String, DbType)] -> s
 renderFields escape = commasJoin . foldr (flatten escape) []
 
 -- TODO: merge code of flatten and flattenP
-flatten :: (Utf8 -> Utf8) -> (String, DbType) -> ([Utf8] -> [Utf8])
+{-# SPECIALIZE flatten :: (Utf8 -> Utf8) -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
+flatten :: StringLike s => (s -> s) -> (String, DbType) -> ([s] -> [s])
 flatten escape (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbEmbedded emb _ -> handleEmb emb
@@ -276,7 +278,8 @@ flatten escape (fname, typ) acc = go typ where
   handleEmb (EmbeddedDef False ts) = foldr (flattenP escape fullName) acc ts
   handleEmb (EmbeddedDef True  ts) = foldr (flatten escape) acc ts
 
-flattenP :: (Utf8 -> Utf8) -> Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8])
+{-# SPECIALIZE flattenP :: (Utf8 -> Utf8) -> Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
+flattenP :: StringLike s => (s -> s) -> s -> (String, DbType) -> ([s] -> [s])
 flattenP escape prefix (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbEmbedded emb _ -> handleEmb emb

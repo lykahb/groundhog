@@ -32,7 +32,7 @@ import qualified Database.PostgreSQL.Simple.Types as PG
 import Database.PostgreSQL.Simple.Ok (Ok (..))
 import qualified Database.PostgreSQL.LibPQ as LibPQ
 
-import Control.Arrow ((***))
+import Control.Arrow ((***), second)
 import Control.Exception (throw)
 import Control.Monad (forM, liftM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO(..))
@@ -395,7 +395,7 @@ analyzeTable' schema name = do
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let indexQuery = "SELECT ic.relname,\
-\    coalesce(ta.attname, pg_get_indexdef(i.indexrelid, ia.attnum, true))\
+\    ta.attname, pg_get_indexdef(i.indexrelid, ia.attnum, true)\
 \  FROM pg_catalog.pg_index i\
 \  INNER JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid\
 \  INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid\
@@ -413,7 +413,9 @@ analyzeTable' schema name = do
           isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
                                 [c] -> colType c `elem` [DbInt32, DbInt64] && maybe False ("nextval" `isPrefixOf`) (colDefault c)
                                 _ -> False
-      let uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs UniqueIndex uniqIndexes ++ mkUniqs (UniquePrimary isAutoincremented) uniqPrimary
+      let uniqs = mkUniqs UniqueConstraint (map (second Left) uniqConstraints)
+               ++ mkUniqs UniqueIndex (map (second $ \(col, expr) -> maybe (Right expr) Left col) uniqIndexes)
+               ++ mkUniqs (UniquePrimary isAutoincremented) (map (second Left) uniqPrimary)
       references <- analyzeTableReferences schema name
       return $ Just $ TableInfo cols uniqs references
     Nothing -> return Nothing
@@ -483,7 +485,7 @@ showAlterTable table (AddUnique (UniqueDef uName UniqueConstraint cols)) = [(Fal
   , " ADD"
   , maybe "" ((" CONSTRAINT " ++) . escape) uName
   , " UNIQUE("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])]
 showAlterTable table (AddUnique (UniqueDef uName UniqueIndex cols)) = [(False, defaultPriority, concat
@@ -492,7 +494,7 @@ showAlterTable table (AddUnique (UniqueDef uName UniqueIndex cols)) = [(False, d
   , " ON "
   , table
   , "("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])]
 showAlterTable table (AddUnique (UniqueDef uName (UniquePrimary _) cols)) = [(False, defaultPriority, concat
@@ -501,7 +503,7 @@ showAlterTable table (AddUnique (UniqueDef uName (UniquePrimary _) cols)) = [(Fa
   , " ADD"
   , maybe "" ((" CONSTRAINT " ++) . escape) uName
   , " PRIMARY KEY("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])]
 showAlterTable table (DropConstraint uName) = [(False, defaultPriority, concat
@@ -622,7 +624,7 @@ showSqlType t = case t of
   DbBlob -> "BYTEA"
   DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
 
-compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
+compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
 compareUniqs (UniqueDef name1 type1 cols1) (UniqueDef name2 type2 cols2) = fromMaybe True (liftM2 (==) name1 name2) && type1 == type2 && haveSameElems (==) cols1 cols2
 

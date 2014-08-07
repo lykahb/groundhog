@@ -27,8 +27,9 @@ import Database.Groundhog.Generic (PSFieldDef(..))
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
-import Control.Monad (mzero)
-import Data.Yaml
+import Control.Monad (forM, mzero)
+import Data.Aeson
+import qualified Data.HashMap.Strict as H
 
 data PersistDefinitions = PersistDefinitions {definitions :: [PersistDefinition]} deriving Show
 data PersistDefinition = PSEntityDef' PSEntityDef
@@ -90,7 +91,7 @@ data THFieldDef = THFieldDef {
 data THUniqueDef = THUniqueDef {
     thUniqueName :: String
   , thUniqueType :: UniqueType
-  , thUniqueFields :: [String] -- ^ Names of fields, not column names, i.e, thFieldName
+  , thUniqueFields :: [Either String String] -- ^ Either name of field, i.e, thFieldName, or expression
 } deriving Show
 
 data THUniqueKeyDef = THUniqueKeyDef {
@@ -137,7 +138,7 @@ data PSConstructorDef = PSConstructorDef {
 data PSUniqueDef = PSUniqueDef {
     psUniqueName :: String
   , psUniqueType :: Maybe UniqueType
-  , psUniqueFields :: [String]
+  , psUniqueFields :: [Either String String]
 } deriving Show
 
 data PSUniqueKeyDef = PSUniqueKeyDef {
@@ -219,20 +220,23 @@ instance FromJSON PersistDefinitions where
     _ -> mzero
 
 instance FromJSON PersistDefinition where
-  parseJSON obj = PSEntityDef' <$> parseJSON obj
-              <|> PSEmbeddedDef' <$> parseJSON obj
-              <|> PSPrimitiveDef' <$> parseJSON obj
+  parseJSON obj@(Object v) = case () of
+    _ | H.member "entity" v -> PSEntityDef' <$> parseJSON obj
+    _ | H.member "embedded" v -> PSEmbeddedDef' <$> parseJSON obj
+    _ | H.member "primitive" v -> PSPrimitiveDef' <$> parseJSON obj
+    _ -> mzero
+  parseJSON _ = mzero
 
 instance FromJSON PSEntityDef where
-  parseJSON (Object v) = PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> v .:? "schema" <*> optional (v .: "autoKey") <*> v .:? "keys" <*> v .:? "constructors"
-  parseJSON _          = mzero
+  parseJSON = withObject "entity" $ \v ->
+    PSEntityDef <$> v .: "entity" <*> v .:? "dbName" <*> v .:? "schema" <*> optional (v .: "autoKey") <*> v .:? "keys" <*> v .:? "constructors"
 
 instance FromJSON PSEmbeddedDef where
-  parseJSON (Object v) = PSEmbeddedDef <$> v .: "embedded" <*> v .:? "dbName" <*> v .:? "fields"
-  parseJSON _          = mzero
+  parseJSON = withObject "embedded" $ \v ->
+    PSEmbeddedDef <$> v .: "embedded" <*> v .:? "dbName" <*> v .:? "fields"
 
 instance FromJSON PSPrimitiveDef where
-  parseJSON (Object v) = do
+  parseJSON = withObject "primitive" $ \v -> do
     x <- v .:? "representation"
     let representation = case x of
           Nothing -> pure True
@@ -240,15 +244,18 @@ instance FromJSON PSPrimitiveDef where
           Just "enum" -> pure False
           Just r -> fail $ "parseJSON: representation expected [\"showread\",\"enum\"], but got " ++ r
     PSPrimitiveDef <$> v .: "primitive" <*> v .:? "dbName" <*> pure representation
-  parseJSON _          = mzero
 
 instance FromJSON PSConstructorDef where
-  parseJSON (Object v) = PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "keyDbName" <*> v .:? "fields" <*> v .:? "uniques"
-  parseJSON _          = mzero
+  parseJSON = withObject "constructor" $ \v ->
+     PSConstructorDef <$> v .: "name" <*> v .:? "phantomName" <*> v .:? "dbName" <*> v .:? "keyDbName" <*> v .:? "fields" <*> v .:? "uniques"
 
 instance FromJSON PSUniqueDef where
-  parseJSON (Object v) = PSUniqueDef <$> v .: "name" <*> v .:? "type" <*> v .: "fields"
-  parseJSON _          = mzero
+  parseJSON = withObject "unique" $ \v -> do
+    fields <- v .: "fields"
+    fields' <- forM fields $ \f -> case f of
+      Object expr  -> Right <$> expr .: "expr"
+      field -> Left <$> parseJSON field
+    PSUniqueDef <$> v .: "name" <*> v .:? "type" <*> pure fields'
 
 instance FromJSON UniqueType where
   parseJSON o = do
@@ -267,8 +274,9 @@ instance FromJSON ReferenceActionType where
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
 instance FromJSON (PSFieldDef String) where
-  parseJSON (Object v) = PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> mkRefSettings where
-    mkRefSettings = do
+  parseJSON = withObject "field" $ \v ->
+    PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> mkRefSettings v where
+    mkRefSettings v = do
       ref <- v .:? "reference"
       (parent, onDel, onUpd) <- case ref of
         Just (Object r) -> (,,) <$> parentRef <*> r .:? "onDelete" <*> r .:? "onUpdate" where
@@ -279,12 +287,11 @@ instance FromJSON (PSFieldDef String) where
       pure $ case (parent, onDel <|> onDel', onUpd <|> onUpd') of
         (Nothing, Nothing, Nothing) -> Nothing
         refSettings -> Just refSettings
-  parseJSON _          = mzero
 
 instance FromJSON PSUniqueKeyDef where
-  parseJSON (Object v) = PSUniqueKeyDef <$> v .: "name" <*> v .:? "keyPhantom" <*> v .:? "constrName" <*> v .:? "dbName" <*> v .:? "fields" <*> v .:? "mkEmbedded" <*> v .:? "default"
-  parseJSON _          = mzero
+  parseJSON = withObject "unique key" $ \v ->
+    PSUniqueKeyDef <$> v .: "name" <*> v .:? "keyPhantom" <*> v .:? "constrName" <*> v .:? "dbName" <*> v .:? "fields" <*> v .:? "mkEmbedded" <*> v .:? "default"
 
 instance FromJSON PSAutoKeyDef where
-  parseJSON (Object v) = PSAutoKeyDef <$> v .:? "constrName" <*> v .:? "default"
-  parseJSON _          = mzero
+  parseJSON = withObject "autogenerated key" $ \v ->
+    PSAutoKeyDef <$> v .:? "constrName" <*> v .:? "default"

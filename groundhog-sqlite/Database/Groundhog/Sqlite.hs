@@ -180,7 +180,7 @@ migrationPack = GM.MigrationPack
   NoAction
   NoAction
 
-addUniquesReferences :: [UniqueDef' String String] -> [Reference] -> ([String], [AlterTable])
+addUniquesReferences :: [UniqueDefInfo] -> [Reference] -> ([String], [AlterTable])
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
   (constraints, indexes) = partition ((/= UniqueIndex) . uniqueDefType) uniques
 
@@ -231,7 +231,7 @@ analyzeTable' Nothing tName = do
             uType = if sql == Just [PersistNull]
               then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary False else UniqueConstraint
               else UniqueIndex
-        return $ UniqueDef (Just name) uType columnNames
+        return $ UniqueDef (Just name) uType (map Left columnNames)
       foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
       (foreigns :: [(Maybe String, Reference)]) <- do
           let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
@@ -252,7 +252,7 @@ analyzeTable' Nothing tName = do
             _ -> True
           uniques' = uniques ++ 
             if all (notPrimary . uniqueDefType) uniques && not (null primaryKeyColumnNames)
-              then  [UniqueDef Nothing (UniquePrimary True) primaryKeyColumnNames]
+              then  [UniqueDef Nothing (UniquePrimary True) (map Left primaryKeyColumnNames)]
               else []
       return $ Just $ TableInfo columns uniques' foreigns
 analyzeTable' sch _ = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
@@ -338,11 +338,11 @@ sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape 
   (our, foreign) = f *** f $ unzip referencedColumns
   f = intercalate ", " . map escape
 
-sqlUnique :: UniqueDef' String String -> String
+sqlUnique :: UniqueDefInfo -> String
 sqlUnique (UniqueDef name typ cols) = concat [
     maybe "" (\x -> "CONSTRAINT " ++ escape x ++ " ") name
   , constraintType
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ] where
     constraintType = case typ of
@@ -530,7 +530,7 @@ delim' = fromChar delim
 toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistEntity v) => v -> DbPersist Sqlite m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
-compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
+compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
 compareUniqs (UniqueDef _ type1 cols1) (UniqueDef _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
@@ -601,7 +601,7 @@ showAlterTable table (AddUnique (UniqueDef uName UniqueIndex cols)) = Just (Fals
   , " ON "
   , escape table
   , "("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])
 showAlterTable _ (DropIndex uName) = Just (False, defaultPriority, concat

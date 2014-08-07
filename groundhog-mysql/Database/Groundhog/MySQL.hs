@@ -358,7 +358,7 @@ analyzeTable' schema name = do
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.key_column_usage u USING (constraint_catalog, constraint_schema, constraint_name, table_schema, table_name) WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,database()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-      let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
+      let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map (Left . snd) us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName (fst c) `elem` map snd uniqPrimary) cols of
                                 [(c, extra)] -> colType c `elem` [DbInt32, DbInt64] && "auto_increment" `isInfixOf` (extra :: String)
                                 _ -> False
@@ -440,7 +440,7 @@ showAlterTable _ table (AddUnique (UniqueDef uName UniqueConstraint cols)) = [(F
   , " ADD"
   , maybe "" ((" CONSTRAINT " ++) . escape) uName
   , " UNIQUE("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])]
 showAlterTable _ table (AddUnique (UniqueDef uName UniqueIndex cols)) = [(False, defaultPriority, concat
@@ -449,7 +449,7 @@ showAlterTable _ table (AddUnique (UniqueDef uName UniqueIndex cols)) = [(False,
   , " ON "
   , table
   , "("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])]
 showAlterTable _ table (AddUnique (UniqueDef uName (UniquePrimary _) cols)) = [(False, defaultPriority, concat
@@ -458,7 +458,7 @@ showAlterTable _ table (AddUnique (UniqueDef uName (UniquePrimary _) cols)) = [(
   , " ADD"
   , maybe "" ((" CONSTRAINT " ++) . escape) uName
   , " PRIMARY KEY("
-  , intercalate "," $ map escape cols
+  , intercalate "," $ map (either escape id) cols
   , ")"
   ])]
 showAlterTable _ table (DropConstraint uName) = [(False, defaultPriority, concat
@@ -522,7 +522,7 @@ showSqlType t = case t of
   DbBlob -> "BLOB"
   DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
 
-compareUniqs :: UniqueDef' String String -> UniqueDef' String String -> Bool
+compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
 compareUniqs (UniqueDef name1 _ cols1) (UniqueDef name2 _ cols2) = fromMaybe True (liftM2 (==) name1 name2) && haveSameElems (==) cols1 cols2
 

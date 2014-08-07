@@ -27,7 +27,8 @@ import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 
 import Control.Monad (liftM, forM, (>=>))
-import Data.Maybe (catMaybes, fromJust)
+import Data.Either (isLeft)
+import Data.Maybe (catMaybes, fromJust, mapMaybe)
 import Data.Monoid
 
 {-# INLINABLE get #-}
@@ -253,8 +254,10 @@ insertByAll RenderConfig{..} queryFunc manyNulls v = do
       uniqueDefs = constrUniques constr
 
       query = "SELECT " <> maybe "1" id (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
-      conds = catMaybes $ zipWith (\u (_, uVals) -> checkNulls uVals $ intercalateS " AND " $ mkUniqueCond (f u) uVals) uniqueDefs uniques where
-        f = foldr (flatten esc) [] . uniqueDefFields
+      conds = catMaybes $ zipWith (\uFields (_, uVals) -> checkNulls uVals $ intercalateS " AND " $ mkUniqueCond uFields uVals) (mapMaybe f uniqueDefs) uniques where
+        f u@(UniqueDef _ _ uFields) = if all isLeft uFields
+          then Just $ foldr (flatten esc) [] $ getUniqueFields u
+          else Nothing
       -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
       checkNulls uVals x = if manyNulls && any (== PersistNull) (uVals []) then Nothing else Just x
       RenderS cond vals = intercalateS " OR " conds

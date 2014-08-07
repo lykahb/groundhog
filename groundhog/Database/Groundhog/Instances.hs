@@ -3,7 +3,7 @@
 module Database.Groundhog.Instances (Selector(..)) where
 
 import Database.Groundhog.Core
-import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, phantomDb)
+import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, phantomDb, getUniqueFields)
 
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -509,8 +509,8 @@ instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u))
   type ProjectionRestriction (u (UniqueMarker v)) (RestrictionHolder v' c) = v ~ v'
   projectionExprs u = result where
     result = ((map ExprField chains) ++)
-    UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
-    chains = map (\f -> (f, [])) uFields
+    uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
+    chains = map (\f -> (f, [])) $ getUniqueFields uDef
     constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
     db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
   projectionResult _ = fromPersistValues
@@ -581,8 +581,8 @@ instance (EntityConstr v c, PersistField a) => FieldLike (Field v c a) a where
 instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u))
       => FieldLike (u (UniqueMarker v)) k where
   fieldChain db u = chain where
-    UniqueDef _ _ uFields = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
-    chain = (("will_be_ignored", DbEmbedded (EmbeddedDef True uFields) Nothing), [])
+    uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
+    chain = (("will_be_ignored", DbEmbedded (EmbeddedDef True $ getUniqueFields uDef) Nothing), [])
     constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
 
 instance (PersistEntity v, EntityConstr' (IsSumType v) c) => EntityConstr v c where

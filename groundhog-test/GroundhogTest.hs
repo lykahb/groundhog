@@ -58,6 +58,7 @@ module GroundhogTest (
     , testGeometry
     , testArrays
     , testSelectDistinctOn
+    , testExpressionIndex
 #endif
 #if WITH_MYSQL
     , testSchemaAnalysisMySQL
@@ -121,7 +122,7 @@ data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
 data ShowRead = ShowRead String Int deriving (Eq, Show, Read)
 data NoColumns = NoColumns deriving (Eq, Show)
 data NoKeys = NoKeys Int Int deriving (Eq, Show)
-
+data ExpressionIndex = ExpressionIndex { expressionIndex :: Int } deriving (Eq, Show)
 
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
@@ -205,6 +206,13 @@ mkPersist defaultCodegenConfig [groundhog|
 - entity: NoColumns
 - entity: NoKeys
   autoKey: null
+- entity: ExpressionIndex
+  constructors:
+    - name: ExpressionIndex
+      uniques:
+        - name: Expression_index
+          type: index
+          fields: [{expr: "(abs(\"expressionIndex\") + 1)" }]
 |]
 
 data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
@@ -846,10 +854,10 @@ testSchemaAnalysis = do
         && haveSameElems ((==) `on` \x -> x {uniqueDefName = Just ""}) uniqs1 uniqs2
         && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` referencedTableName) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2 ) refs1 refs2
       expectedSingleInfo = TableInfo [Column "id" False DbInt64 Nothing, Column "single#uniqueKey2" False DbInt64 Nothing, Column "single#uniqueKey3" True DbInt64 Nothing]
-        [UniqueDef Nothing (UniquePrimary True) ["id"]]
+        [UniqueDef Nothing (UniquePrimary True) [Left "id"]]
         [(Nothing, Reference Nothing "UniqueKeySample" [("single#uniqueKey2","uniqueKey2"), ("single#uniqueKey3","uniqueKey3")] Nothing Nothing)]
       expectedUniqueInfo = TableInfo [Column "uniqueKey1" False DbInt64 Nothing, Column "uniqueKey2" False DbInt64 Nothing, Column "uniqueKey3" True DbInt64 Nothing]
-        [UniqueDef Nothing UniqueConstraint ["uniqueKey1"], UniqueDef Nothing UniqueConstraint ["uniqueKey2","uniqueKey3"], UniqueDef Nothing (UniquePrimary False) ["uniqueKey1", "uniqueKey2"]]
+        [UniqueDef Nothing UniqueConstraint [Left "uniqueKey1"], UniqueDef Nothing UniqueConstraint [Left "uniqueKey2",Left "uniqueKey3"], UniqueDef Nothing (UniquePrimary False) [Left "uniqueKey1", Left "uniqueKey2"]]
         []
 
   case singleInfo of
@@ -952,6 +960,13 @@ testSelectDistinctOn = do
   insert $ Single (5 :: Int, "def")
   insert val2
   [val1, val2] @=?? (select $ CondEmpty `distinctOn` (SingleField ~> Tuple2_0Selector) `orderBy` [Asc $ SingleField ~> Tuple2_0Selector, Asc $ SingleField ~> Tuple2_1Selector])
+
+testExpressionIndex :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
+testExpressionIndex = do
+  let val = ExpressionIndex 1
+  migr val
+  Just val @=?? (insert val >>= get)
+  assertExc "expression index should fail on duplicates" $ insert $ ExpressionIndex (-1)
 #endif
 
 #if WITH_MYSQL

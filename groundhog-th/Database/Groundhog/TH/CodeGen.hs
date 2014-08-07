@@ -31,8 +31,9 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Arrow (second)
 import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
+import Data.Either (isLeft, lefts)
 import Data.List (findIndex, nub, partition)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, mapMaybe)
 
 mkEmbeddedPersistFieldInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedPersistFieldInstance def = do
@@ -420,11 +421,11 @@ mkPersistEntityInstance def = do
         keyDescr <- [t| BackendSpecific |]
         return [ForallC [] [EqualP (VarT uParam) keyDescr] $ NormalC (mkName $ thAutoKeyConstrName k) [(NotStrict, ConT ''PersistValue)]]
     uniques <- forM (thUniqueKeys def) $ \unique -> do
-      let cDef = head $ thConstructors def
       uniqType <- [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName unique) |]
-      let uniqFieldNames = thUniqueFields $ findOne "unique" thUniqueKeyName thUniqueName unique $ thConstrUniques cDef
-      let uniqFields = concat $ flip map uniqFieldNames $ \name -> (filter ((== name) . thFieldName) $ thConstrFields cDef)
-      let uniqFields' = map (\f -> (NotStrict, thFieldType f)) uniqFields
+      let cDef = head $ thConstructors def
+          uniqFieldNames = lefts $ thUniqueFields $ findOne "unique" thUniqueKeyName thUniqueName unique $ thConstrUniques cDef
+          uniqFields = concat $ flip map uniqFieldNames $ \name -> (filter ((== name) . thFieldName) $ thConstrFields cDef)
+          uniqFields' = map (\f -> (NotStrict, thFieldType f)) uniqFields
       return $ ForallC [] [EqualP (VarT uParam) uniqType] $ NormalC (mkName $ thUniqueKeyConstrName unique) uniqFields'
     return $ DataInstD [] ''Key [entity, VarT uParam] (autoKey ++ uniques) []
 
@@ -476,9 +477,8 @@ mkPersistEntityInstance def = do
         mkConstructorDef c@(THConstructorDef _ _ name keyName params conss) = [| ConstructorDef name keyName $(listE $ map snd fields) $(listE $ map mkConstraint conss) |] where
           fields = zipWith (\i f -> (thFieldName f, mkField c i f)) [0..] params
           mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef (Just uName) uType $(listE $ map getField uFields) |]
-          getField fName = case lookup fName fields of
-            Just f -> f
-            Nothing -> error $ "Field name " ++ show fName ++ " declared in unique not found"
+          getField (Left fName) = [| Left $(snd $ findOne "field" id fst fName fields) |]
+          getField (Right expr) = [| Right expr |]
     
         paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
         fullEntityName = case null types of
@@ -528,15 +528,18 @@ mkPersistEntityInstance def = do
     mkClause cNum cdef | not (hasConstraints cdef) = clause [wildP, conP (thConstrName cdef) pats] (normalB [| (cNum, []) |]) [] where
       pats = map (const wildP) $ thConstrFields cdef
     mkClause cNum cdef = do
-      let allConstrainedFields = concatMap thUniqueFields $ thConstrUniques cdef
+      let allConstrainedFields = lefts $ concatMap thUniqueFields $ thConstrUniques cdef
       vars <- mapM (\f -> newName "x" >>= \x -> return $ if thFieldName f `elem` allConstrainedFields then Just (x, f) else Nothing) $ thConstrFields cdef
       proxy <- newName "p"
       let pat = conP (thConstrName cdef) $ map (maybe wildP (varP . fst)) vars
-          body = normalB $ [| (cNum, $(listE $ map mkUnique $ thConstrUniques cdef)) |]
-          mkUnique (THUniqueDef uName _ fnames) = [| (uName, $result) |] where
-            -- find corresponding field from vars
-            uFields = map (\f -> findOne "field" id (thFieldName . snd) f $ catMaybes vars) fnames
-            result = mkToPurePersistValues proxy $ map (second thFieldType) uFields
+          body = normalB $ [| (cNum, $(listE $ mapMaybe mkUnique $ thConstrUniques cdef)) |]
+          mkUnique (THUniqueDef uName _ fnames) = if all isLeft fnames
+            then let
+              -- find corresponding field from vars
+              uFields = map (\f -> findOne "field" id (thFieldName . snd) f $ catMaybes vars) $ lefts fnames
+              result = mkToPurePersistValues proxy $ map (second thFieldType) uFields
+              in Just [| (uName, $result) |]
+            else Nothing
       clause [varP proxy, pat] body []
     in funD 'getUniques clauses
 

@@ -289,7 +289,8 @@ applyPrimitiveSettings PSPrimitiveDef{..} def@(THPrimitiveDef{..}) =
 
 mkFieldsForUniqueKey :: NamingStyle -> String -> THUniqueKeyDef -> THConstructorDef -> [THFieldDef]
 mkFieldsForUniqueKey style dName uniqueKey cDef = zipWith (setSelector . findField) (thUniqueFields uniqueDef) [0..] where
-  findField name = findOne "field" id thFieldName name $ thConstrFields cDef
+  findField (Left name) = findOne "field" id thFieldName name $ thConstrFields cDef
+  findField (Right expr) = error $ "A unique key may not contain expressions: " ++ expr
   uniqueDef = findOne "unique" id thUniqueName (thUniqueKeyName uniqueKey) $ thConstrUniques cDef
   setSelector f i = f {thExprName = mkExprSelectorName style dName (thUniqueKeyConstrName uniqueKey) (thFieldName f) i}
 
@@ -438,7 +439,7 @@ toUnderscore = map toLower . go where
 --    \-- The declaration with defaulted names
 --
 --mkPersist defaultCodegenConfig [groundhog|
---entity: Settable                       # If we did not want to add a constraint, this line would be enough
+--entity: Settable                       # If we did not have a constraint, this line would be enough
 --keys:
 --  - name: someconstraint
 --constructors:
@@ -499,7 +500,12 @@ toUnderscore = map toLower . go where
 --        uniques:
 --          - name: someconstraint
 --            type: constraint           # The type can be be \"constraint\", \"index\", or \"primary\"
---            fields: [foo, bar]         # List of constructor parameter names. Not DB names(!)
+--            fields: [foo, bar]         # List of constructor parameter names. Not column names.
+--   # This is example for databases which support expression indexes.
+--   # Note that for checking index during migration expression should be written in exactly the same form as database returns.
+--   #  - name: myuniqueindex
+--   #    type: index
+--   #    fields: [foo, {expr: "(bar + 1)" }]
 -- |]
 -- @
 --

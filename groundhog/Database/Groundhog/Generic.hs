@@ -52,6 +52,7 @@ module Database.Groundhog.Generic
   , mapAllRows
   , phantomDb
   , getAutoKeyType
+  , getUniqueFields
   , isSimple
   , deleteByKey
   ) where
@@ -299,6 +300,9 @@ getAutoKeyType :: DbDescriptor db => proxy db -> DbTypePrimitive
 getAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoKeyType db) proxy) of
   DbTypePrimitive t _ _ _ -> t
   t -> error $ "autoKeyType: unexpected key type " ++ show t
+
+getUniqueFields :: UniqueDef' str (Either field str) -> [field]
+getUniqueFields (UniqueDef _ _ uFields) = map (either id (error "A unique key may not contain expressions")) uFields
 
 isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True

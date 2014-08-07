@@ -380,7 +380,7 @@ data ConstructorDef' str dbType = ConstructorDef {
   -- | Parameter names with their named type
   , constrParams  :: [(str, dbType)]
   -- | Uniqueness constraints on the constructor fiels
-  , constrUniques :: [UniqueDef' str (str, dbType)]
+  , constrUniques :: [UniqueDef' str (Either (str, dbType) str)]
 } deriving (Show, Eq)
 
 type ConstructorDef = ConstructorDef' String DbType
@@ -412,7 +412,8 @@ data UniqueDef' str field = UniqueDef {
   , uniqueDefFields :: [field]
 } deriving (Show, Eq)
 
-type UniqueDef = UniqueDef' String (String, DbType)
+-- | Field is either a pair of entity field name and its type or an expression which will be used in query as-is.
+type UniqueDef = UniqueDef' String (Either (String, DbType) String)
 
 -- | Defines how to treat the unique set of fields for a datatype
 data UniqueType = UniqueConstraint
