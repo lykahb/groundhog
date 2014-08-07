@@ -488,7 +488,7 @@ showAlterTable table (AddUnique (UniqueDef uName UniqueConstraint cols)) = [(Fal
   ])]
 showAlterTable table (AddUnique (UniqueDef uName UniqueIndex cols)) = [(False, defaultPriority, concat
   [ "CREATE UNIQUE INDEX "
-  , maybe (error $ "showAlterTable: index for table " ++ table ++ " does not have a name") escape uName
+  , maybe "" escape uName
   , " ON "
   , table
   , "("
