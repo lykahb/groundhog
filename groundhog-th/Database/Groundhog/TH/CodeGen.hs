@@ -31,7 +31,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Arrow (second)
 import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
-import Data.Either (isLeft, lefts)
+import Data.Either (lefts, rights)
 import Data.List (findIndex, nub, partition)
 import Data.Maybe (catMaybes, mapMaybe)
 
@@ -533,7 +533,7 @@ mkPersistEntityInstance def = do
       proxy <- newName "p"
       let pat = conP (thConstrName cdef) $ map (maybe wildP (varP . fst)) vars
           body = normalB $ [| (cNum, $(listE $ mapMaybe mkUnique $ thConstrUniques cdef)) |]
-          mkUnique (THUniqueDef uName _ fnames) = if all isLeft fnames
+          mkUnique (THUniqueDef uName _ fnames) = if null $ rights fnames
             then let
               -- find corresponding field from vars
               uFields = map (\f -> findOne "field" (thFieldName . snd) f $ catMaybes vars) $ lefts fnames
