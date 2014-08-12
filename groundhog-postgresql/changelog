@@ -1,6 +1,12 @@
+0.6.0
+* Entity and fields descriptions are parameterized so that they can be promoted
+* Entity and fields descriptions are dependent on database proxy. It allows to use different types depending on a database, for example, the same type can be array[] in PostgreSQL and varchar elsewhere
+* Migration support for indexes on expressions
+* Array literals don't need explicit casting anymore
+
 0.5.1
 * DISTINCT ON select option
-* Add getCurrentSchema function into SchemaAnalyzer
+* Added getCurrentSchema function into SchemaAnalyzer
 
 0.5.0
 * Simplified Geometry and Array function type signatures

@@ -1,5 +1,5 @@
 name:            groundhog
-version:         0.5.1
+version:         0.6.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -22,7 +22,7 @@ library
                    , mtl                      >= 2.0
                    , time                     >= 1.1.4
                    , text                     >= 0.8
-                   , blaze-builder            >= 0.3.0.0    && < 0.4
+                   , blaze-builder            >= 0.3        && < 0.4
                    , containers               >= 0.2
                    , monad-control            >= 0.3        && < 0.4
                    , monad-logger             >= 0.3        && < 0.4

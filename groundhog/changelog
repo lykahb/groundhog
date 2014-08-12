@@ -1,7 +1,13 @@
+0.6.0
+* Entities without keys. It can be useful for many-to-many tables which hold keys but are not referenced
+* Entity and fields descriptions are parameterized so that they can be promoted
+* Entity and fields descriptions are dependent on database proxy. It allows to use different types depending on a database, for example, the same type can be array[] in PostgreSQL and varchar elsewhere
+* Migration support for indexes on expressions
+
 0.5.1
 * DISTINCT select option
 * Support entities with no fields
-* Add getCurrentSchema function into SchemaAnalyzer
+* Added getCurrentSchema function into SchemaAnalyzer
 
 0.5.0
 * Reimplemented projections with constraint kinds
