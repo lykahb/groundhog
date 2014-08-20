@@ -18,7 +18,7 @@ instance PersistField Point where
   persistName _ = "Point"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ = DbTypePrimitive (DbOther $ OtherTypeDef $ const "point") False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "point"]) False Nothing Nothing
 
 -- These two instances of superclasses are useful but not necessary. They are like Functor and Applicative instances when you implement a Monad.
 instance SinglePersistField Point where

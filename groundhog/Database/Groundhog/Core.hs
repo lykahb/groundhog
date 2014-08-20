@@ -460,7 +460,7 @@ data DbType =
 -- Reference to a table that is not mapped = (Right (schema, tableName, columns), onDelete, onUpdate)
 type ParentTableReference = (Either (EntityDef, Maybe String) (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 
--- | Stores a database type. It needs to be formatted by backend. For example, @[Right DbInt64, Left "[]"]@ should become integer[] in PostgreSQL
+-- | Stores a database type. The list contains two kinds of tokens for the type string. Backend will choose a string representation for DbTypePrimitive's, and the string literals will go to the type as-is. As the final step, these tokens are concatenated. For example, @[Left \"varchar(50)\"]@ will become a string with max length and @[Right DbInt64, Left \"[]\"]@ will become integer[] in PostgreSQL.
 newtype OtherTypeDef' str = OtherTypeDef ([Either str (DbTypePrimitive' str)]) deriving (Eq, Show)
 
 type OtherTypeDef = OtherTypeDef' String

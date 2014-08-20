@@ -11,7 +11,7 @@ import Control.Monad.Trans.Control (MonadBaseControl (..))
 import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
 import Control.Monad.Base (MonadBase (liftBase))
 import Control.Monad.Reader (MonadReader(..))
-import Data.Conduit.Pool
+import Data.Pool
 
 main :: IO ()
 main = withSqlitePool ":memory:" 5 $ \pconn ->
