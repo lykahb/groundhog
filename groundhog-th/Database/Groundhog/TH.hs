@@ -257,7 +257,7 @@ applyConstructorSettings :: PSConstructorDef -> THConstructorDef -> THConstructo
 applyConstructorSettings PSConstructorDef{..} def@(THConstructorDef{..}) =
   def { thPhantomConstrName = fromMaybe thPhantomConstrName psPhantomConstrName
       , thDbConstrName = fromMaybe thDbConstrName psDbConstrName
-      , thDbAutoKeyName = fromMaybe thDbAutoKeyName psDbAutoKeyName
+      , thDbAutoKeyName = psDbAutoKeyName <|> thDbAutoKeyName
       , thConstrFields = maybe thConstrFields (f thConstrFields) psConstrFields
       , thConstrUniques = maybe thConstrUniques (map convertUnique) psConstrUniques
       } where
