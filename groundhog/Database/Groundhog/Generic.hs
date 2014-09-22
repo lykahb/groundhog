@@ -180,7 +180,7 @@ data PSFieldDef str = PSFieldDef {
   , psEmbeddedDef :: Maybe [PSFieldDef str]
   , psDefaultValue :: Maybe str
   , psReferenceParent :: Maybe (Maybe (Maybe str, str, [str]), Maybe ReferenceActionType, Maybe ReferenceActionType)
-} deriving Show
+} deriving (Eq, Show)
 
 applyDbTypeSettings :: PSFieldDef String -> DbType -> DbType
 applyDbTypeSettings (PSFieldDef _ _ dbTypeName _ Nothing def psRef) typ = case typ of

@@ -50,12 +50,12 @@ data THEntityDef = THEntityDef {
   , thUniqueKeys :: [THUniqueKeyDef]
   , thTypeParams :: [TyVarBndr]
   , thConstructors :: [THConstructorDef]
-} deriving Show
+} deriving (Eq, Show)
 
 data THAutoKeyDef = THAutoKeyDef {
     thAutoKeyConstrName :: String
   , thAutoKeyIsDef :: Bool
-} deriving Show
+} deriving (Eq, Show)
 
 data THEmbeddedDef = THEmbeddedDef {
     thEmbeddedName :: Name
@@ -63,13 +63,13 @@ data THEmbeddedDef = THEmbeddedDef {
   , thDbEmbeddedName :: String -- ^ It is used only to set polymorphic part of name of its container
   , thEmbeddedTypeParams :: [TyVarBndr]
   , thEmbeddedFields :: [THFieldDef]
-} deriving Show
+} deriving (Eq, Show)
 
 data THPrimitiveDef = THPrimitiveDef {
     thPrimitiveName :: Name
   , thPrimitiveDbName :: String -- ^ It is used only to set polymorphic part of name of its container
   , thPrimitiveStringEnumRepresentation :: Bool -- ^ Store in database as string using Show/Read instances (True) or as integer using Enum instance (False).
-} deriving Show
+} deriving (Eq, Show)
 
 data THConstructorDef = THConstructorDef {
     thConstrName    :: Name -- U2
@@ -78,7 +78,7 @@ data THConstructorDef = THConstructorDef {
   , thDbAutoKeyName :: Maybe String -- u2_id
   , thConstrFields  :: [THFieldDef]
   , thConstrUniques :: [THUniqueDef]
-} deriving Show
+} deriving (Eq, Show)
 
 data THFieldDef = THFieldDef {
     thFieldName :: String -- bar
@@ -89,13 +89,13 @@ data THFieldDef = THFieldDef {
   , thEmbeddedDef :: Maybe [PSFieldDef String]
   , thDefaultValue :: Maybe String
   , thReferenceParent :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
-} deriving Show
+} deriving (Eq, Show)
 
 data THUniqueDef = THUniqueDef {
     thUniqueName :: String
   , thUniqueType :: UniqueType
   , thUniqueFields :: [Either String String] -- ^ Either name of field, i.e, thFieldName, or expression
-} deriving Show
+} deriving (Eq, Show)
 
 data THUniqueKeyDef = THUniqueKeyDef {
     thUniqueKeyName :: String
@@ -106,7 +106,7 @@ data THUniqueKeyDef = THUniqueKeyDef {
   , thUniqueKeyFields :: [THFieldDef]
   , thUniqueKeyMakeEmbedded :: Bool -- ^ If True, make it an instance of Embedded
   , thUniqueKeyIsDef :: Bool
-} deriving Show
+} deriving (Eq, Show)
 
 data PSEntityDef = PSEntityDef {
     psDataName :: String -- SomeData
@@ -115,19 +115,19 @@ data PSEntityDef = PSEntityDef {
   , psAutoKey :: Maybe (Maybe PSAutoKeyDef) -- SomeDataKey. Nothing - default key. Just Nothing - no autokey. Just (Just _) - specify autokey settings
   , psUniqueKeys :: Maybe [PSUniqueKeyDef]
   , psConstructors :: Maybe [PSConstructorDef]
-} deriving Show
+} deriving (Eq, Show)
 
 data PSEmbeddedDef = PSEmbeddedDef {
     psEmbeddedName :: String
   , psDbEmbeddedName :: Maybe String -- ^ It is used only to set polymorphic part of name of its container
   , psEmbeddedFields :: Maybe [PSFieldDef String]
-} deriving Show
+} deriving (Eq, Show)
 
 data PSPrimitiveDef = PSPrimitiveDef {
     psPrimitiveName :: String
   , psPrimitiveDbName :: Maybe String -- ^ It is used only to set polymorphic part of name of its container
   , psPrimitiveStringEnumRepresentation :: Maybe Bool -- ^ Store in database as string using Show/Read instances (True) or as integer using Enum instance (False).
-} deriving Show
+} deriving (Eq, Show)
 
 data PSConstructorDef = PSConstructorDef {
     psConstrName :: String -- U2
@@ -136,13 +136,13 @@ data PSConstructorDef = PSConstructorDef {
   , psDbAutoKeyName :: Maybe String -- u2_id
   , psConstrFields  :: Maybe [PSFieldDef String]
   , psConstrUniques :: Maybe [PSUniqueDef]
-} deriving Show
+} deriving (Eq, Show)
 
 data PSUniqueDef = PSUniqueDef {
     psUniqueName :: String
   , psUniqueType :: Maybe UniqueType
   , psUniqueFields :: [Either String String]
-} deriving Show
+} deriving (Eq, Show)
 
 data PSUniqueKeyDef = PSUniqueKeyDef {
     psUniqueKeyName :: String
@@ -152,12 +152,12 @@ data PSUniqueKeyDef = PSUniqueKeyDef {
   , psUniqueKeyFields :: Maybe [PSFieldDef String]
   , psUniqueKeyMakeEmbedded :: Maybe Bool
   , psUniqueKeyIsDef :: Maybe Bool
-} deriving Show
+} deriving (Eq, Show)
 
 data PSAutoKeyDef = PSAutoKeyDef {
     psAutoKeyConstrName :: Maybe String
   , psAutoKeyIsDef :: Maybe Bool
-} deriving Show
+} deriving (Eq, Show)
 
 instance Lift PersistDefinition where
   lift (PSEntityDef' e) = [| PSEntityDef' e |]
