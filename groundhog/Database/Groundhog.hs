@@ -3,13 +3,14 @@
 -- See <http://github.com/lykahb/groundhog/blob/master/examples/>.
 
 module Database.Groundhog (
-  -- * Main definitions
+  -- * Core datatypes and functions
     PersistBackend(..)
   , DbPersist(..)
   , Key
   , DefaultKey
   , AutoKey
   , Unique
+  , UniqueMarker
   , BackendSpecific
   , extractUnique
   , Cond(..)
