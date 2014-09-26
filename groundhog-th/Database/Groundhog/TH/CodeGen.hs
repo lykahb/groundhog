@@ -387,7 +387,7 @@ mkEntityPhantomConstructors def = do
     let name = mkName $ thPhantomConstrName c
     phantom <- [t| ConstructorMarker $(return entity) |]
     let constr = ForallC (thTypeParams def) [EqualP (VarT v) phantom] $ NormalC name []
-    dataD (cxt []) name [PlainTV v] [return constr] []
+    return $ DataD [] name [PlainTV v] [constr] []
   
 mkEntityPhantomConstructorInstances :: THEntityDef -> Q [Dec]
 mkEntityPhantomConstructorInstances def = sequence $ zipWith f [0..] $ thConstructors def where
@@ -406,7 +406,7 @@ mkEntityUniqueKeysPhantoms def = do
         let name = mkName $ thUniqueKeyPhantomName u
         phantom <- [t| UniqueMarker $(return entity) |]
         let constr = ForallC (thTypeParams def) [EqualP (VarT v) phantom] $ NormalC name []
-        sequence [dataD (cxt []) name [PlainTV v] [return constr] []]
+        return [DataD [] name [PlainTV v] [constr] []]
       else return []
     
 mkPersistEntityInstance :: THEntityDef -> Q [Dec]
