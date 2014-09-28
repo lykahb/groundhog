@@ -236,6 +236,7 @@ instance NeverNull Bool
 instance NeverNull Day
 instance NeverNull TimeOfDay
 instance NeverNull UTCTime
+instance NeverNull ZonedTime
 instance PrimitivePersistField (Key v u) => NeverNull (Key v u)
 instance NeverNull (KeyForBackend db v)
 
