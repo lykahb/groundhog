@@ -373,7 +373,9 @@ instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
   fromPersistValues xs = fromPersistValues xs >>= \(x, xs') -> return (Just x, xs')
   dbType db a = case dbType db ((undefined :: Maybe a -> a) a) of
     DbTypePrimitive t _ def ref -> DbTypePrimitive t True def ref
-    t -> error $ "dbType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
+    DbEmbedded (EmbeddedDef concatName [(field, DbTypePrimitive t _ def ref')]) ref ->
+      DbEmbedded (EmbeddedDef concatName [(field, DbTypePrimitive t True def ref')]) ref
+    t -> error $ "dbType " ++ persistName a ++ ": expected DbTypePrimitive or DbEmbedded with one field, got " ++ show t
 
 instance (PersistField a) => PersistField [a] where
   persistName a = "List" ++ delim : delim : persistName ((undefined :: [] a -> a) a)
