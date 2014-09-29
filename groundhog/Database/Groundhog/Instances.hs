@@ -230,7 +230,14 @@ instance NeverNull String
 instance NeverNull T.Text
 instance NeverNull ByteString
 instance NeverNull Int
+instance NeverNull Int8
+instance NeverNull Int16
+instance NeverNull Int32
 instance NeverNull Int64
+instance NeverNull Word8
+instance NeverNull Word16
+instance NeverNull Word32
+instance NeverNull Word64
 instance NeverNull Double
 instance NeverNull Bool
 instance NeverNull Day
