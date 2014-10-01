@@ -46,7 +46,7 @@ import Data.Function (on)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (groupBy, intercalate, isPrefixOf, stripPrefix)
-import Data.Maybe (fromJust, fromMaybe, isJust)
+import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
 import Data.Monoid
 import Data.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
@@ -105,14 +105,25 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
   analyzeTable = analyzeTable'
   analyzeTrigger schema name = do
     x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,current_schema()) AND trigger_name=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
-    case x of
-      Nothing  -> return Nothing
-      Just src -> return (fst $ fromPurePersistValues proxy src)
+    return $ case x of
+      Nothing  -> Nothing
+      Just src -> fst $ fromPurePersistValues proxy src
   analyzeFunction schema name = do
-    x <- queryRaw' "SELECT p.prosrc FROM pg_catalog.pg_namespace n INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid WHERE n.nspname = coalesce(?,current_schema()) AND p.proname = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
-    case x of
-      Nothing  -> return Nothing
-      Just src -> return (fst $ fromPurePersistValues proxy src)
+    let query = "SELECT arg_types.typname, arg_types.typndims, arg_types_te.typname, ret.typname, ret.typndims, ret_te.typname, p.prosrc\
+\     FROM pg_catalog.pg_namespace n\
+\     INNER JOIN pg_catalog.pg_proc p ON p.pronamespace = n.oid\
+\     LEFT JOIN (SELECT oid, unnest(coalesce(proallargtypes, proargtypes)) as arg FROM pg_catalog.pg_proc) as args ON p.oid = args.oid\
+\     LEFT JOIN pg_type arg_types ON arg_types.oid = args.arg\
+\     LEFT JOIN pg_type arg_types_te ON arg_types_te.oid = arg_types.typelem\
+\     INNER JOIN pg_type ret ON p.prorettype = ret.oid\
+\     LEFT JOIN pg_type ret_te ON ret_te.oid = ret.typelem\
+\     WHERE n.nspname = coalesce(?,current_schema()) AND p.proname = ?"
+    result <- queryRaw' query [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+    let read' (typ, arr) = readSqlType typ (Nothing, Nothing, Nothing, Nothing, Nothing) arr
+    return $ case result of
+      []  -> Nothing
+      ((_, (ret, src)):_) -> Just $ (Just $ map read' args, Just $ read' ret, src) where
+        args = mapMaybe (\(typ, arr) -> fmap (\typ' -> (typ', arr)) typ) $ map fst result
   getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
 
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
@@ -327,12 +338,13 @@ migTriggerOnDelete schema name deletes = do
       funcMig = case func of
         Nothing | null deletes -> []
         Nothing   -> [addFunction]
-        Just body -> if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
+        Just (_, Just (DbOther (OtherTypeDef [Left "trigger"])), body) -> if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
           then [DropFunction schema funcName]
           else if body == funcBody
             then []
             -- this can happen when an ephemeral field was added or removed.
             else [DropFunction schema funcName, addFunction]
+        _ -> [] -- ignore same name functions which don't return a trigger.
 
       trigBody = "EXECUTE PROCEDURE " ++ withSchema schema funcName ++ "()"
       addTrigger = AddTriggerOnDelete schema trigName schema name trigBody
@@ -359,10 +371,11 @@ migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
       addFunction = CreateOrReplaceFunction $ "CREATE OR REPLACE FUNCTION " ++ withSchema schema funcName ++ "() RETURNS trigger AS $$" ++ funcBody ++ "$$ LANGUAGE plpgsql"
       funcMig = case func of
         Nothing   -> [addFunction]
-        Just body -> if body == funcBody
+        Just (_, Just (DbOther (OtherTypeDef [Left "trigger"])), body) -> if body == funcBody
             then []
             -- this can happen when an ephemeral field was added or removed.
             else [DropFunction schema funcName, addFunction]
+        _ -> []
 
       trigBody = "EXECUTE PROCEDURE " ++ withSchema schema funcName ++ "()"
       addTrigger = AddTriggerOnUpdate schema trigName schema name (Just fieldName) trigBody

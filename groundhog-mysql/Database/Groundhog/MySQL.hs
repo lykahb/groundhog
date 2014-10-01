@@ -101,14 +101,17 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
   analyzeTable = analyzeTable'
   analyzeTrigger schema name = do
     x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,database()) AND trigger_name=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
-    case x of
-      Nothing  -> return Nothing
-      Just src -> return (fst $ fromPurePersistValues proxy src)
+    return $ case x of
+      Nothing  -> Nothing
+      Just src -> fst $ fromPurePersistValues proxy src
   analyzeFunction schema name = do
-    x <- queryRaw' "SELECT routine_definition FROM information_schema.routines WHERE routine_schema=coalesce(?,database())  AND routine_name=?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
-    case x of
-      Nothing  -> return Nothing
-      Just src -> return (fst $ fromPurePersistValues proxy src)
+    result <- queryRaw' "SELECT param_list, returns, body_utf8 from mysql.proc WHERE db = coalesce(?, database()) AND name = ?" [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] id
+    let read' typ = readSqlType typ typ (Nothing, Nothing, Nothing)
+    return $ case result of
+      Nothing  -> Nothing
+      -- TODO: parse param_list
+      Just result' -> Just (Just [DbOther (OtherTypeDef [Left param_list])], if ret == "" then Nothing else Just $ read' ret, src) where
+        (param_list, ret, src) = fst . fromPurePersistValues proxy $ result'
   getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
 
 withMySQLPool :: (MonadBaseControl IO m, MonadIO m)

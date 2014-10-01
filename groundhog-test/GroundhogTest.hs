@@ -95,6 +95,7 @@ import Data.ByteString.Char8 (unpack)
 import Data.Function (on)
 import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
+import Data.Maybe (fromMaybe)
 import qualified Data.Map as Map
 import qualified Data.String.Utils as Utils
 import qualified Data.Time as Time
@@ -947,9 +948,11 @@ testSchemaAnalysisPostgresql = do
   trigSql <- analyzeTrigger Nothing "myTrigger"
   let trigSql' = maybe (error "No trigger found") id trigSql
   liftIO $ action `isInfixOf` trigSql' H.@? "Trigger does not contain action statement"
-  funcSql <- analyzeFunction Nothing "myFunction"
-  let funcSql' = maybe (error "No function found") id funcSql
-  liftIO $ "RETURN NEW;" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
+  func <- analyzeFunction Nothing "myFunction"
+  let (args, ret, body) = fromMaybe (error "No function found") func
+  Just [] @=? args
+  Just (DbOther (OtherTypeDef [Left "trigger"])) @=? ret
+  liftIO $ "RETURN NEW;" `isInfixOf` body H.@? "Function does not contain action statement"
 
 testSelectDistinctOn :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
 testSelectDistinctOn = do
@@ -982,9 +985,10 @@ testSchemaAnalysisMySQL = do
   let sql' = maybe (error "No trigger found") id sql
   liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
   executeRaw' "CREATE FUNCTION myfunc() RETURNS decimal DETERMINISTIC BEGIN RETURN 42;END" []
-  funcSql <- analyzeFunction Nothing "myfunc"
-  let funcSql' = maybe (error "No function found") id funcSql
-  liftIO $ "RETURN 42" `isInfixOf` funcSql' H.@? "Function does not contain action statement"
+  func <- analyzeFunction Nothing "myfunc"
+  let (_, ret, body) = fromMaybe (error "No function found") func
+  Just (DbOther (OtherTypeDef [Left "decimal(10,0)"])) @=? ret
+  liftIO $ "RETURN 42" `isInfixOf` body H.@? "Function does not contain action statement"
 #endif
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => String -> m a -> m ()

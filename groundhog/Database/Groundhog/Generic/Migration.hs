@@ -395,5 +395,5 @@ class (Applicative m, Monad m) => SchemaAnalyzer m where
                  -> m (Maybe String)
   analyzeFunction :: Maybe String -- ^ Schema name
                   -> String -- ^ Function name
-                  -> m (Maybe String)
+                  -> m (Maybe (Maybe [DbTypePrimitive], Maybe DbTypePrimitive, String)) -- ^ Argument types, return type, and body
   getMigrationPack :: m (MigrationPack m)
