@@ -32,8 +32,8 @@ import Database.Groundhog.Postgresql hiding (append)
 import Blaze.ByteString.Builder (fromByteString, toByteString)
 import Blaze.ByteString.Builder.Word (fromWord8)
 import Control.Applicative
-import Data.Attoparsec.Char8
-import qualified Data.Attoparsec as A
+import Data.Attoparsec.ByteString.Char8
+import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Zepto as Z
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString as B
