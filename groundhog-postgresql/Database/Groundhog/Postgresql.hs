@@ -394,20 +394,27 @@ analyzeTable' schema name = do
       
       uniqConstraints <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("UNIQUE" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       uniqPrimary <- queryRaw' constraintQuery [toPrimitivePersistValue proxy ("PRIMARY KEY" :: String), toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-      let indexQuery = "SELECT ic.relname,\
-\    ta.attname, pg_get_indexdef(i.indexrelid, ia.attnum, true)\
+      -- indexes with system columns like oid are omitted
+      let indexQuery = "WITH indexes as (\
+\SELECT ic.oid, ic.relname,\
+\    ta.attnum, ta.attname, pg_get_indexdef(i.indexrelid, ia.attnum, true) as expr\
 \  FROM pg_catalog.pg_index i\
 \  INNER JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid\
 \  INNER JOIN pg_catalog.pg_class tc ON i.indrelid = tc.oid\
 \  INNER JOIN pg_catalog.pg_attribute ia ON ia.attrelid=ic.oid\
-\  LEFT JOIN pg_catalog.pg_attribute ta ON ta.attrelid=tc.oid AND NOT ta.attisdropped AND ta.attnum = i.indkey[ia.attnum-1]\
+\  LEFT JOIN pg_catalog.pg_attribute ta ON ta.attrelid=tc.oid AND ta.attnum = i.indkey[ia.attnum-1] AND NOT ta.attisdropped\
 \  INNER JOIN pg_namespace sch ON sch.oid = tc.relnamespace\
 \  WHERE sch.nspname = coalesce(?, current_schema())\
 \    AND tc.relname = ?\
 \    AND ic.oid NOT IN (SELECT conindid FROM pg_catalog.pg_constraint)\
 \    AND NOT i.indisprimary\
 \    AND i.indisunique\
-\  ORDER BY ic.relname, ia.attnum"
+\  ORDER BY ic.relname, ia.attnum)\
+\SELECT i.relname, i.attname, i.expr\
+\  FROM indexes i\
+\  INNER JOIN (SELECT oid FROM indexes\
+\    GROUP BY oid\
+\    HAVING every(attnum > 0 OR attnum IS NULL)) non_system ON i.oid = non_system.oid"
       uniqIndexes <- queryRaw' indexQuery [toPrimitivePersistValue proxy schema, toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
       let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
