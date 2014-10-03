@@ -14,6 +14,7 @@ import Data.Bits (finiteBitSize)
 import Data.Bits (bitSize)
 #endif
 import Data.ByteString.Char8 (ByteString, unpack)
+import qualified Data.ByteString.Lazy.Char8 as Lazy
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, utc, utcToZonedTime)
@@ -120,6 +121,11 @@ instance PrimitivePersistField ByteString where
   toPrimitivePersistValue _ s = PersistByteString s
   fromPrimitivePersistValue _ (PersistByteString a) = a
   fromPrimitivePersistValue p x = T.encodeUtf8 . T.pack $ fromPrimitivePersistValue p x
+
+instance PrimitivePersistField Lazy.ByteString where
+  toPrimitivePersistValue _ s = PersistByteString $ Lazy.toStrict s
+  fromPrimitivePersistValue _ (PersistByteString a) = Lazy.fromStrict a
+  fromPrimitivePersistValue p x = Lazy.fromStrict . T.encodeUtf8 . T.pack $ fromPrimitivePersistValue p x
 
 instance PrimitivePersistField Int where
   toPrimitivePersistValue _ a = PersistInt64 (fromIntegral a)
@@ -229,6 +235,7 @@ instance PrimitivePersistField a => SinglePersistField a where
 instance NeverNull String
 instance NeverNull T.Text
 instance NeverNull ByteString
+instance NeverNull Lazy.ByteString
 instance NeverNull Int
 instance NeverNull Int8
 instance NeverNull Int16
@@ -258,6 +265,12 @@ readHelper s errMessage = case s of
       _        -> error $ "readHelper: " ++ errMessage
 
 instance PersistField ByteString where
+  persistName _ = "ByteString"
+  toPersistValues = primToPersistValue
+  fromPersistValues = primFromPersistValue
+  dbType _ _ = DbTypePrimitive DbBlob False Nothing Nothing
+
+instance PersistField Lazy.ByteString where
   persistName _ = "ByteString"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
