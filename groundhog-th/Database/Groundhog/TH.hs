@@ -225,10 +225,9 @@ applyEntitySettings style PSEntityDef{..} def@(THEntityDef{..}) =
       , thConstructors = thConstructors'
       } where
   thAutoKey' = maybe thAutoKey (liftM2 applyAutoKeySettings thAutoKey) psAutoKey
-
   thConstructors' = maybe thConstructors'' (f thConstructors'') $ psConstructors where
-    thConstructors'' = maybe id (\_ -> zipWith putAutoKey [0..]) thAutoKey' thConstructors
-    putAutoKey cNum cDef@(THConstructorDef{..}) = cDef {thDbAutoKeyName = Just $ mkDbConstrAutoKeyName style (nameBase thDataName) (nameBase thConstrName) cNum}
+    thConstructors'' = map checkAutoKey thConstructors
+    checkAutoKey cDef@(THConstructorDef{..}) = cDef {thDbAutoKeyName = thAutoKey' >> thDbAutoKeyName}
 
   mkUniqueKey' = mkUniqueKey style (nameBase thDataName) (head thConstructors')
   f = foldr $ replaceOne "constructor" psConstrName (nameBase . thConstrName) applyConstructorSettings
@@ -321,7 +320,7 @@ validateEntity def = do
       [] -> return ()
       ys -> fail $ "Constraints must have at least one field: " ++ show ys
     when (isNothing (thDbAutoKeyName cdef) /= isNothing (thAutoKey def)) $
-      fail $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def)
+      fail $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def) ++ ": " ++ show (thDbAutoKeyName cdef) ++ " - " ++ show (thAutoKey def)
       
   -- check that unique keys = [] for multiple constructor datatype
   if length constrs > 1 && not (null $ thUniqueKeys def)
@@ -371,7 +370,7 @@ mkTHEntityDef NamingStyle{..} (DataD _ dName typeVars cons _) =
     InfixC{} -> error $ "Types with infix constructors are not supported" ++ show dName
     ForallC{} -> error $ "Types with existential quantification are not supported" ++ show dName
    where
-    mkConstr' name params = THConstructorDef name (apply mkPhantomName) (apply mkDbConstrName) Nothing params [] where
+    mkConstr' name params = THConstructorDef name (apply mkPhantomName) (apply mkDbConstrName) (Just $ apply mkDbConstrAutoKeyName) params [] where
       apply f = f dName' (nameBase name) cNum
 
     mkField :: String -> StrictType -> Int -> THFieldDef
