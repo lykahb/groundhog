@@ -179,7 +179,7 @@ data PSFieldDef str = PSFieldDef {
   , psExprName :: Maybe str -- BarField
   , psEmbeddedDef :: Maybe [PSFieldDef str]
   , psDefaultValue :: Maybe str
-  , psReferenceParent :: Maybe (Maybe (Maybe str, str, [str]), Maybe ReferenceActionType, Maybe ReferenceActionType)
+  , psReferenceParent :: Maybe (Maybe ((Maybe str, str), [str]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 } deriving (Eq, Show)
 
 applyDbTypeSettings :: PSFieldDef String -> DbType -> DbType
@@ -200,7 +200,7 @@ applyDbTypeSettings (PSFieldDef _ _ _ _ (Just subs) _ psRef) typ = (case typ of
         Just name' -> (True, (name', applyDbTypeSettings fDef fType):fields')
     _ -> let (flag, fields') = go st fs in (flag, field:fields')
 
-applyReferencesSettings :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType) -> Maybe ParentTableReference -> Maybe ParentTableReference
+applyReferencesSettings :: Maybe (Maybe ((Maybe String, String), [String]), Maybe ReferenceActionType, Maybe ReferenceActionType) -> Maybe ParentTableReference -> Maybe ParentTableReference
 applyReferencesSettings Nothing ref = ref
 applyReferencesSettings (Just (parent, onDel, onUpd)) (Just (parent', onDel', onUpd')) = Just (maybe parent' Right parent, onDel <|> onDel', onUpd <|> onUpd')
 applyReferencesSettings (Just (Just parent, onDel, onUpd)) Nothing = Just (Right parent, onDel, onUpd)

@@ -88,7 +88,7 @@ data THFieldDef = THFieldDef {
   , thFieldType :: Type
   , thEmbeddedDef :: Maybe [PSFieldDef String]
   , thDefaultValue :: Maybe String
-  , thReferenceParent :: Maybe (Maybe (Maybe String, String, [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
+  , thReferenceParent :: Maybe (Maybe ((Maybe String, String), [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 } deriving (Eq, Show)
 
 data THUniqueDef = THUniqueDef {
@@ -282,8 +282,8 @@ instance FromJSON (PSFieldDef String) where
     mkRefSettings v = do
       ref <- v .:? "reference"
       (parent, onDel, onUpd) <- case ref of
-        Just (Object r) -> (,,) <$> parentRef <*> r .:? "onDelete" <*> r .:? "onUpdate" where
-          parentRef = optional ((,,) <$> r .:? "schema" <*> r .: "table" <*> r .: "columns")
+        Just (Object r) -> (,,) <$> optional parentRef <*> r .:? "onDelete" <*> r .:? "onUpdate" where
+          parentRef = (,) <$> ((,) <$> r .:? "schema" <*> r .: "table") <*> r .: "columns"
         _ -> pure (Nothing, Nothing, Nothing)
       -- this temporary solution uses onDelete and onUpdate both from inside reference object (preferred) and from field level (for compatibility)
       (onDel', onUpd') <- (,) <$> v .:? "onDelete" <*> v .:? "onUpdate"
@@ -339,7 +339,7 @@ instance ToJSON (PSFieldDef String) where
       fields = catMaybes $ parent' ++ ["onDelete" .=? onDel, "onUpdate" .=? onUpd]
       parent' = case parent of
         Nothing -> []
-        Just (schema, table, columns) -> ["schema" .=? schema, Just $ "table" .= table, Just $ "columns" .= columns]
+        Just ((schema, table), columns) -> ["schema" .=? schema, Just $ "table" .= table, Just $ "columns" .= columns]
 
 instance ToJSON PSUniqueKeyDef where
   toJSON PSUniqueKeyDef{..} = object $ catMaybes [Just $ "name" .= psUniqueKeyName, "keyPhantom" .=? psUniqueKeyPhantomName, "constrName" .=? psUniqueKeyConstrName, "dbName" .=? psUniqueKeyDbName, "mkEmbedded" .=? psUniqueKeyMakeEmbedded, "default" .=? psUniqueKeyIsDef, "fields" .=: psUniqueKeyFields]

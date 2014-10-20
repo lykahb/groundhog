@@ -92,15 +92,15 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
   getCurrentSchema = return Nothing
   listTables Nothing = queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] (mapAllRows $ return . fst . fromPurePersistValues proxy)
   listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
-  listTableTriggers Nothing name = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
-  listTableTriggers sch _ = fail $ "listTableTriggers: schemas are not supported by Sqlite: " ++ show sch
+  listTableTriggers (Nothing, name) = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTableTriggers (sch, _) = fail $ "listTableTriggers: schemas are not supported by Sqlite: " ++ show sch
   analyzeTable = analyzeTable'
-  analyzeTrigger Nothing name = do
+  analyzeTrigger (Nothing, name) = do
     x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue proxy name] id
     case x of
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues proxy src)
-  analyzeTrigger sch _ = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
+  analyzeTrigger (sch, _) = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
   analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
   getMigrationPack = return migrationPack
 
@@ -184,35 +184,35 @@ addUniquesReferences :: [UniqueDefInfo] -> [Reference] -> ([String], [AlterTable
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
   (constraints, indexes) = partition ((/= UniqueIndex) . uniqueDefType) uniques
 
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
-migTriggerOnDelete schema name deletes = do
-  let addTrigger = AddTriggerOnDelete Nothing name Nothing name (concatMap snd deletes)
-  x <- analyzeTrigger schema name
+migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => QualifiedName -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
+migTriggerOnDelete qualifiedName deletes = do
+  let addTrigger = AddTriggerOnDelete qualifiedName qualifiedName (concatMap snd deletes)
+  x <- analyzeTrigger qualifiedName
   return $ case x of
     Nothing | null deletes -> (False, [])
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
-      then [DropTrigger Nothing name Nothing name]
+      then [DropTrigger qualifiedName qualifiedName]
       else if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
         -- this can happen when an ephemeral field was added or removed.
-        else [DropTrigger Nothing name Nothing name, addTrigger])
+        else [DropTrigger qualifiedName qualifiedName, addTrigger])
         
 -- | Schema name, table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> [(String, String)] -> DbPersist Sqlite m [(Bool, [AlterDB])]
-migTriggerOnUpdate schema name dels = forM dels $ \(fieldName, del) -> do
-  let trigName = name ++ delim : fieldName
-  let addTrigger = AddTriggerOnUpdate Nothing trigName Nothing name (Just fieldName) del
-  x <- analyzeTrigger schema trigName
+migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => QualifiedName -> [(String, String)] -> DbPersist Sqlite m [(Bool, [AlterDB])]
+migTriggerOnUpdate name dels = forM dels $ \(fieldName, del) -> do
+  let trigName = (Nothing, snd name ++ delim : fieldName)
+  let addTrigger = AddTriggerOnUpdate trigName name (Just fieldName) del
+  x <- analyzeTrigger trigName
   return $ case x of
     Nothing -> (False, [addTrigger])
     Just sql -> (True, if Right [(False, triggerPriority, sql)] == showAlterDb addTrigger
         then []
-        else [DropTrigger Nothing trigName Nothing name, addTrigger])
+        else [DropTrigger trigName name, addTrigger])
 
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Maybe String -> String -> DbPersist Sqlite m (Maybe TableInfo)
-analyzeTable' Nothing tName = do
+analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => QualifiedName -> DbPersist Sqlite m (Maybe TableInfo)
+analyzeTable' (Nothing, tName) = do
   let fromName = escapeS . fromString
   tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
   case tableInfo of
@@ -246,7 +246,7 @@ analyzeTable' Nothing tName = do
                 Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
               Just _ -> return $ map (fromMaybe (error "analyzeTable: all parents must be either NULL or values")) parents
             let refs = zip children parents'
-            return (Nothing, Reference Nothing foreignTable refs (mkAction onDelete) (mkAction onUpdate))
+            return (Nothing, Reference (Nothing, foreignTable) refs (mkAction onDelete) (mkAction onUpdate))
       let notPrimary x = case x of
             UniquePrimary _ -> False
             _ -> True
@@ -255,7 +255,7 @@ analyzeTable' Nothing tName = do
               then  [UniqueDef Nothing (UniquePrimary True) (map Left primaryKeyColumnNames)]
               else []
       return $ Just $ TableInfo columns uniques' foreigns
-analyzeTable' sch _ = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
+analyzeTable' (sch, _) = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
 
 analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe [String])
 analyzePrimaryKey tName = do
@@ -332,7 +332,7 @@ showColumn (Column name nullable typ def) = escape name ++ " " ++ showSqlType ty
     maybe "" (" DEFAULT " ++) def]
 
 sqlReference :: Reference -> String
-sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape referencedTableName ++ "(" ++ foreign ++ ")" ++ actions where
+sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape (snd referencedTableName) ++ "(" ++ foreign ++ ")" ++ actions where
   actions = maybe "" ((" ON DELETE " ++) . showReferenceAction) referenceOnDelete
          ++ maybe "" ((" ON UPDATE " ++) . showReferenceAction) referenceOnUpdate
   (our, foreign) = f *** f $ unzip referencedColumns
@@ -535,8 +535,8 @@ compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _
 compareUniqs (UniqueDef _ type1 cols1) (UniqueDef _ type2 cols2) = haveSameElems (==) cols1 cols2 && type1 == type2
 
 compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
-compareRefs (_, Reference _ tbl1 pairs1 onDel1 onUpd1) (_, Reference _ tbl2 pairs2 onDel2 onUpd2) =
-     unescape tbl1 == unescape tbl2
+compareRefs (_, Reference tbl1 pairs1 onDel1 onUpd1) (_, Reference tbl2 pairs2 onDel2 onUpd2) =
+     unescape (snd tbl1) == unescape (snd tbl2)
   && haveSameElems (==) pairs1 pairs2
   && fromMaybe NoAction onDel1 == fromMaybe NoAction onDel2
   && fromMaybe NoAction onUpd1 == fromMaybe NoAction onUpd2 where
@@ -554,7 +554,7 @@ mainTableId = "id"
 
 showAlterDb :: AlterDB -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
-showAlterDb (AlterTable _ table createTable (TableInfo oldCols _ _) (TableInfo newCols _ _) alts) = case mapM (showAlterTable table) alts of
+showAlterDb (AlterTable (_, table) createTable (TableInfo oldCols _ _) (TableInfo newCols _ _) alts) = case mapM (showAlterTable table) alts of
   Just alts' -> Right alts'
   Nothing -> (Right
     [ (False, defaultPriority, "CREATE TEMP TABLE " ++ escape tableTmp ++ "(" ++ columnsTmp ++ ")")
@@ -569,12 +569,12 @@ showAlterDb (AlterTable _ table createTable (TableInfo oldCols _ _) (TableInfo n
       (oldOnlyColumns, _, commonColumns) = matchElements ((==) `on` colName) oldCols newCols
       columnsTmp = intercalate "," $ map (escape . colName . snd) commonColumns
       columnsNew = intercalate "," $ map (escape . colName . snd) commonColumns
-showAlterDb (DropTrigger _ name _ _) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape name)]
-showAlterDb (AddTriggerOnDelete _ trigName _ tName body) = Right [(False, triggerPriority,
-  "CREATE TRIGGER " ++ escape trigName ++ " DELETE ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")]
-showAlterDb (AddTriggerOnUpdate _ trigName _ tName fieldName body) = Right [(False, triggerPriority,
-  "CREATE TRIGGER " ++ escape trigName ++ " UPDATE OF " ++ fieldName' ++ " ON " ++ escape tName ++ " BEGIN " ++ body ++ "END")] where
-    fieldName' = maybe (error $ "showAlterDb: AddTriggerOnUpdate does not have fieldName for trigger " ++ trigName) escape fieldName
+showAlterDb (DropTrigger trigName _) = Right [(False, triggerPriority, "DROP TRIGGER " ++ escape (snd trigName))]
+showAlterDb (AddTriggerOnDelete trigName tName body) = Right [(False, triggerPriority,
+  "CREATE TRIGGER " ++ escape (snd trigName) ++ " DELETE ON " ++ escape (snd tName) ++ " BEGIN " ++ body ++ "END")]
+showAlterDb (AddTriggerOnUpdate trigName tName fieldName body) = Right [(False, triggerPriority,
+  "CREATE TRIGGER " ++ escape (snd trigName) ++ " UPDATE OF " ++ fieldName' ++ " ON " ++ escape (snd tName) ++ " BEGIN " ++ body ++ "END")] where
+    fieldName' = maybe (error $ "showAlterDb: AddTriggerOnUpdate does not have fieldName for trigger " ++ show trigName) escape fieldName
 showAlterDb alt = error $ "showAlterDb: does not support " ++ show alt
 
 showAlterTable :: String -> AlterTable -> Maybe (Bool, Int, String)

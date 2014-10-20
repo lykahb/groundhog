@@ -848,15 +848,15 @@ testSchemaAnalysis :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, Schem
 testSchemaAnalysis = do
   let val = Single (UniqueKeySample 1 2 (Just 3))
   migr val
-  singleInfo <- analyzeTable Nothing $ persistName val
-  uniqueInfo <- analyzeTable Nothing $ persistName (undefined :: UniqueKeySample)
+  singleInfo <- analyzeTable (Nothing, persistName val)
+  uniqueInfo <- analyzeTable (Nothing, persistName (undefined :: UniqueKeySample))
   let match (TableInfo cols1 uniqs1 refs1) (TableInfo cols2 uniqs2 refs2) =
            haveSameElems ((==) `on` \x -> x {colDefault = Nothing}) cols1 cols2
         && haveSameElems ((==) `on` \x -> x {uniqueDefName = Just ""}) uniqs1 uniqs2
-        && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` referencedTableName) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2 ) refs1 refs2
+        && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` (snd . referencedTableName)) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2 ) refs1 refs2
       expectedSingleInfo = TableInfo [Column "id" False DbInt64 Nothing, Column "single#uniqueKey2" False DbInt64 Nothing, Column "single#uniqueKey3" True DbInt64 Nothing]
         [UniqueDef Nothing (UniquePrimary True) [Left "id"]]
-        [(Nothing, Reference Nothing "UniqueKeySample" [("single#uniqueKey2","uniqueKey2"), ("single#uniqueKey3","uniqueKey3")] Nothing Nothing)]
+        [(Nothing, Reference (Nothing, "UniqueKeySample") [("single#uniqueKey2","uniqueKey2"), ("single#uniqueKey3","uniqueKey3")] Nothing Nothing)]
       expectedUniqueInfo = TableInfo [Column "uniqueKey1" False DbInt64 Nothing, Column "uniqueKey2" False DbInt64 Nothing, Column "uniqueKey3" True DbInt64 Nothing]
         [UniqueDef Nothing UniqueConstraint [Left "uniqueKey1"], UniqueDef Nothing UniqueConstraint [Left "uniqueKey2",Left "uniqueKey3"], UniqueDef Nothing (UniquePrimary False) [Left "uniqueKey1", Left "uniqueKey2"]]
         []
@@ -876,8 +876,8 @@ testSchemaAnalysisSqlite = do
   let action = "select * from \"Single#String\";"
   executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW BEGIN " ++ action ++ " END") []
   ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
-  sql <- analyzeTrigger Nothing "myTrigger"
+  ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
+  sql <- analyzeTrigger (Nothing, "myTrigger")
   let sql' = maybe (error "No trigger found") id sql
   liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
 #endif
@@ -944,11 +944,11 @@ testSchemaAnalysisPostgresql = do
   executeRaw False "CREATE OR REPLACE FUNCTION \"myFunction\"() RETURNS trigger AS $$ BEGIN RETURN NEW;END; $$ LANGUAGE plpgsql" []
   executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW " ++ action) []
   ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
-  trigSql <- analyzeTrigger Nothing "myTrigger"
+  ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
+  trigSql <- analyzeTrigger (Nothing, "myTrigger")
   let trigSql' = maybe (error "No trigger found") id trigSql
   liftIO $ action `isInfixOf` trigSql' H.@? "Trigger does not contain action statement"
-  func <- analyzeFunction Nothing "myFunction"
+  func <- analyzeFunction (Nothing, "myFunction")
   let (args, ret, body) = fromMaybe (error "No function found") func
   Just [] @=? args
   Just (DbOther (OtherTypeDef [Left "trigger"])) @=? ret
@@ -980,12 +980,12 @@ testSchemaAnalysisMySQL = do
   let action = "delete from `Single#String`;"
   executeRaw' ("CREATE TRIGGER `myTrigger` AFTER DELETE ON `Single#String` FOR EACH ROW BEGIN " ++ action ++ " END") []
   ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers Nothing "Single#String")
-  sql <- analyzeTrigger Nothing "myTrigger"
+  ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
+  sql <- analyzeTrigger (Nothing, "myTrigger")
   let sql' = maybe (error "No trigger found") id sql
   liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
   executeRaw' "CREATE FUNCTION myfunc() RETURNS decimal DETERMINISTIC BEGIN RETURN 42;END" []
-  func <- analyzeFunction Nothing "myfunc"
+  func <- analyzeFunction (Nothing, "myfunc")
   let (_, ret, body) = fromMaybe (error "No function found") func
   Just (DbOther (OtherTypeDef [Left "decimal(10,0)"])) @=? ret
   liftIO $ "RETURN 42" `isInfixOf` body H.@? "Function does not contain action statement"
