@@ -24,6 +24,11 @@ module Database.Groundhog.TH
   , firstChar
   -- * Utility functions
   , mkTHEntityDef
+  , mkTHEmbeddedDef
+  , mkTHPrimitiveDef
+  , applyEntitySettings
+  , applyEmbeddedSettings
+  , applyPrimitiveSettings
   ) where
 
 import Database.Groundhog.Core (delim, UniqueType(..))
