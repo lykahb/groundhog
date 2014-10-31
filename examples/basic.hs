@@ -18,7 +18,7 @@ mkPersist defaultCodegenConfig [groundhog|
 |]
 
 main = withSqliteConn ":memory:" $ runDbConn $ do
-  runMigration defaultMigrationLogger $ do
+  runMigration $ do
     migrate (undefined :: Customer)
     migrate (undefined :: Product)
   johnKey <- insert $ Customer "John Doe" "0123456789"

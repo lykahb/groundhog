@@ -13,7 +13,7 @@ mkPersist defaultCodegenConfig [groundhog|
 |]
 
 main = withSqliteConn ":memory:" $ runDbConn $ do
-  runMigration defaultMigrationLogger $ migrate (undefined :: SomeData)
+  runMigration $ migrate (undefined :: SomeData)
   k1 <- insert $ SomeData 1 (2, "abc")
   k2 <- insert $ SomeData 10 (20, "def")
   proxy <- phantomDb

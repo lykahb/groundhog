@@ -21,7 +21,7 @@ mkPersist defaultCodegenConfig [groundhog|
 |]
 
 main = withSqliteConn ":memory:" $ runDbConn $ do
-  runMigration defaultMigrationLogger $ do
+  runMigration $ do
     migrate (undefined :: Alarm)
   let alarm = Alarm Monday (Time 07 00)
   insert alarm

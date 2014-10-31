@@ -35,7 +35,7 @@ mkPersist defaultCodegenConfig [groundhog|
 |]
 
 main = withSqliteConn ":memory:" $ runDbConn $ do
-  runMigration defaultMigrationLogger $ do
+  runMigration $ do
     migrate (undefined :: Machine)
     migrate (undefined :: Part)
 ```

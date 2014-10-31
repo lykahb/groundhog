@@ -20,11 +20,12 @@ mkPersist defaultCodegenConfig [groundhog|
 main = withSqliteConn ":memory:" $ runDbConn $ do
   let circle = Circle 5
   -- Both table for Circle and for Triangle of the Shape datatype are migrated.
-  runMigration defaultMigrationLogger $ migrate circle
+  runMigration $ migrate circle
   k <- insert circle
   insert (Circle 10)
   let triangle = Triangle 3 4 (pi / 2)
   replace k triangle
-  count (CircleRadius <. (11 :: Double)) >>= \c -> liftIO (putStrLn $ "Small circles: " ++ show c)
+  smallCirclesCount <- count (CircleRadius <. (11 :: Double))
+  liftIO $ putStrLn $ "Small circles: " ++ show smallCirclesCount
   shapes <- selectAll
   liftIO $ print (shapes :: [(AutoKey Shape, Shape)])

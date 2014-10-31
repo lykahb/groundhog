@@ -18,6 +18,6 @@ mkPersist defaultCodegenConfig $ PersistDefinitions [
 
 main = withSqliteConn ":memory:" $ runDbConn $ do
   let table = Create "DROP" maxBound "DELETE"
-  runMigration defaultMigrationLogger $ migrate table
+  runMigration $ migrate table
   k <- insert table
   get k >>= liftIO . print

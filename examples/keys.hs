@@ -63,7 +63,7 @@ main :: IO ()
 main = withSqliteConn ":memory:" $ runDbConn $ do
   let artists = [Artist "John Lennon", Artist "George Harrison"]
       imagineAlbum = Album "Imagine"
-  runMigration defaultMigrationLogger $ do
+  runMigration $ do
     migrate (undefined :: ArtistAlbum)
     migrate (undefined :: Track)
   mapM_ insert artists

@@ -45,7 +45,7 @@ definitions:
 main = withSqliteConn ":memory:" $ runDbConn $ do
   let address = Address "Sunnyvale" "18144" "El Camino Real"
   let company = Company "Cyberdyne Systems" (False, False) address address address
-  runMigration defaultMigrationLogger $ migrate company
+  runMigration $ migrate company
   k <- insert company
   -- compare embedded data fields as a whole and compare their subfields individually
   select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) >>= liftIO . print

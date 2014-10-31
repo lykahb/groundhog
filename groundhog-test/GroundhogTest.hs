@@ -67,7 +67,7 @@ module GroundhogTest (
 
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
-import Control.Monad (replicateM_, liftM, mapM_, forM_, (>=>), unless)
+import Control.Monad (liftM, forM_, unless)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (MonadLogger)
 import Control.Monad.Trans.Control (MonadBaseControl, control)
@@ -232,7 +232,7 @@ mkPersist defaultCodegenConfig [groundhog|
 migr :: (PersistEntity v, PersistBackend m, MonadBaseControl IO m, MonadIO m) => v -> m ()
 migr v = do
   m1 <- createMigration $ migrate v
-  executeMigration silentMigrationLogger m1
+  executeMigration m1
   m2 <- createMigration $ migrate v
   let afterMigration = filter (/= Right []) (Map.elems m2)
   liftIO $ unless (null afterMigration) $
@@ -673,7 +673,7 @@ testLongNames = do
   let val2 = Single [([""], Single "", 0 :: Int)]
   migr val2
   m2 <- createMigration (migrate val2)
-  executeMigration silentMigrationLogger m2
+  executeMigration m2
   -- this might fail because the constraint names are too long. They constraints are created successfully, but with stripped names. Then during the second migration the stripped names differ from expected and this leads to migration errors.
   [] @=? filter (/= Right []) (Map.elems m2)
 

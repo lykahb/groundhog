@@ -29,7 +29,7 @@ import Control.Applicative (Applicative)
 import Control.Arrow ((***), (&&&))
 import Control.Monad (liftM, when)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.State (StateT (..), gets, modify)
+import Control.Monad.Trans.State (gets, modify)
 import Data.Either (lefts)
 import Data.Function (on)
 import qualified Data.Map as Map
@@ -162,7 +162,7 @@ migrateRecursively :: (PersistBackend m, PersistEntity v) =>
   -> (EntityDef -> m SingleMigration) -- ^ migrate entity
   -> (DbType    -> m SingleMigration) -- ^ migrate list
   -> v                                -- ^ initial entity
-  -> StateT NamedMigrations m ()
+  -> Migration m
 migrateRecursively migS migE migL v = result where
   result = migEntity $ entityDef proxy v
   proxy = (undefined :: t m a -> proxy (PhantomDb m)) result

@@ -36,8 +36,6 @@ module Database.Groundhog (
   , runMigration
   , runMigrationUnsafe
   , printMigration
-  , silentMigrationLogger
-  , defaultMigrationLogger
 ) where
 
 import Database.Groundhog.Core

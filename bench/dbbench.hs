@@ -14,7 +14,7 @@ mkPersist defaultCodegenConfig [groundhog|
 main :: IO ()
 main = withSqliteConn ":memory:" $ runDbConn $ do
 --main = withPostgresqlConn "dbname=test user=test password=test host=localhost" $ runPostgresqlConn $ do
-  runMigration silentMigrationLogger $ migrate (undefined :: Person)
+  runMigration $ migrate (undefined :: Person)
   let person = Person "abc" 22 180
   k <- insert $ person
   replicateM_ 100000 $ get k --4.3

@@ -6,16 +6,14 @@ module Database.Groundhog.Generic
   -- * Migration
     createMigration
   , executeMigration
+  , executeMigrationSilent
   , executeMigrationUnsafe
-  , getQueries
   , runMigration
+  , runMigrationSilent
   , runMigrationUnsafe
+  , getQueries
   , printMigration
   , mergeMigrations
-  , silentMigrationLogger
-  , defaultMigrationLogger
-  , failMessage
-  , failMessageNamed
   -- * Helpers for running Groundhog actions
   , HasConn
   , runDb
@@ -39,6 +37,8 @@ module Database.Groundhog.Generic
   , fromPersistValuesUnique
   , toSinglePersistValueAutoKey
   , fromSinglePersistValueAutoKey
+  , failMessage
+  , failMessageNamed
   -- * Other
   , bracket
   , finally
@@ -60,7 +60,7 @@ module Database.Groundhog.Generic
 import Database.Groundhog.Core
 
 import Control.Applicative ((<|>))
-import Control.Monad (liftM, forM_, (>=>))
+import Control.Monad (liftM, forM_, unless, (>=>))
 import Control.Monad.Logger (MonadLogger, NoLoggingT(..))
 import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
@@ -71,9 +71,10 @@ import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.List (partition, sortBy)
 import qualified Data.Map as Map
+import System.IO (hPutStrLn, stderr)
 
 -- | Produce the migrations but not execute them. Fails when an unsafe migration occurs.
-createMigration :: PersistBackend m => Migration m -> m NamedMigrations
+createMigration :: Monad m => Migration m -> m NamedMigrations
 createMigration m = liftM snd $ runStateT m Map.empty
 
 -- | Returns either a list of errors in migration or a list of queries
@@ -89,20 +90,26 @@ getQueries runUnsafe (Right migs) = (if runUnsafe || null unsafe
   migs' = sortBy (compare `on` \(_, i, _) -> i) migs
   unsafe = filter (\(isUnsafe, _, _) -> isUnsafe) migs'
 
-executeMigration' :: (PersistBackend m, MonadIO m) => Bool -> (String -> IO ()) -> NamedMigrations -> m ()
-executeMigration' runUnsafe logger m = do
+executeMigration' :: (PersistBackend m, MonadIO m) => Bool -> Bool -> NamedMigrations -> m ()
+executeMigration' runUnsafe silent m = do
   let migs = getQueries runUnsafe $ mergeMigrations $ Map.elems m
   case migs of
     Left errs -> fail $ unlines errs
-    Right qs -> mapM_ (executeMigrate logger) qs
+    Right qs -> forM_  qs $ \q -> do
+      unless silent $ liftIO $ hPutStrLn stderr $ "Migrating: " ++ q
+      executeRaw False q []
 
--- | Execute the migrations and log them. 
-executeMigration :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> NamedMigrations -> m ()
-executeMigration = executeMigration' False
+-- | Execute the migrations with printing to stderr. Fails when an unsafe migration occurs.
+executeMigration :: (PersistBackend m, MonadIO m) => NamedMigrations -> m ()
+executeMigration = executeMigration' False True
 
--- | Execute migrations and log them. Executes the unsafe migrations without warnings
-executeMigrationUnsafe :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> NamedMigrations -> m ()
-executeMigrationUnsafe = executeMigration' True
+-- | Execute the migrations. Fails when an unsafe migration occurs.
+executeMigrationSilent :: (PersistBackend m, MonadIO m) => NamedMigrations -> m ()
+executeMigrationSilent = executeMigration' False True
+
+-- | Execute migrations. Executes the unsafe migrations without warnings and prints them to stderr
+executeMigrationUnsafe :: (PersistBackend m, MonadIO m) => NamedMigrations -> m ()
+executeMigrationUnsafe = executeMigration' True False
 
 -- | Pretty print the migrations
 printMigration :: MonadIO m => NamedMigrations -> m ()
@@ -114,35 +121,26 @@ printMigration migs = liftIO $ forM_ (Map.assocs migs) $ \(k, v) -> do
       let showSql (isUnsafe, _, sql) = (if isUnsafe then "Unsafe:\t" else "Safe:\t") ++ sql
       mapM_ (putStrLn . ("\t" ++) . showSql) sqls
 
--- | Run migrations and log them. Fails when an unsafe migration occurs.
-runMigration :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> Migration m -> m ()
-runMigration logger m = createMigration m >>= executeMigration logger
+-- | Creates migrations and executes them with printing to stderr. Fails when an unsafe migration occurs.
+-- > runMigration m = createMigration m >>= executeMigration
+runMigration :: (PersistBackend m, MonadIO m) => Migration m -> m ()
+runMigration m = createMigration m >>= executeMigration
 
--- | Run migrations and log them. Executes the unsafe migrations without warnings
-runMigrationUnsafe :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> Migration m -> m ()
-runMigrationUnsafe logger m = createMigration m >>= executeMigrationUnsafe logger
+-- | Creates migrations and silently executes them. Fails when an unsafe migration occurs.
+-- > runMigration m = createMigration m >>= executeMigrationSilent
+runMigrationSilent :: (PersistBackend m, MonadIO m) => Migration m -> m ()
+runMigrationSilent m = createMigration m >>= executeMigrationSilent
 
-executeMigrate :: (PersistBackend m, MonadIO m) => (String -> IO ()) -> String -> m ()
-executeMigrate logger query = do
-  liftIO $ logger query
-  executeRaw False query []
-  return ()
-
--- | No-op
-silentMigrationLogger :: String -> IO ()
-silentMigrationLogger _ = return ()
-
--- | Prints the queries to stdout
-defaultMigrationLogger :: String -> IO ()
-defaultMigrationLogger query = putStrLn $ "Migrating: " ++ query
+-- | Creates migrations and executes them with printing to stderr. Executes the unsafe migrations without warnings
+-- > runMigrationUnsafe m = createMigration m >>= executeMigrationUnsafe
+runMigrationUnsafe :: (PersistBackend m, MonadIO m) => Migration m -> m ()
+runMigrationUnsafe m = createMigration m >>= executeMigrationUnsafe
 
 -- | Joins the migrations. The result is either all error messages or all queries
 mergeMigrations :: [SingleMigration] -> SingleMigration
-mergeMigrations ms =
-  let (errors, statements) = partitionEithers ms
-  in if null errors
-       then Right (concat statements)
-       else Left  (concat errors)
+mergeMigrations ms = case partitionEithers ms of
+  ([], statements) -> Right $ concat statements
+  (errors, _)      -> Left  $ concat errors
 
 failMessage :: PersistField a => a -> [PersistValue] -> String
 failMessage a = failMessageNamed (persistName a)
@@ -312,7 +310,7 @@ isSimple _   = False
 class (MonadIO m, MonadLogger m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
 instance (MonadIO m, MonadLogger m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
 
--- | It helps to run database operations within your application monad.
+-- | It helps to run database operations within an application monad.
 runDb :: HasConn m cm conn => DbPersist conn m a -> m a
 runDb f = ask >>= withConn (runDbPersist f)
 
