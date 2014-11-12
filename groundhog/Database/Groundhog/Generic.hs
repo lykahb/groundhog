@@ -101,7 +101,7 @@ executeMigration' runUnsafe silent m = do
 
 -- | Execute the migrations with printing to stderr. Fails when an unsafe migration occurs.
 executeMigration :: (PersistBackend m, MonadIO m) => NamedMigrations -> m ()
-executeMigration = executeMigration' False True
+executeMigration = executeMigration' False False
 
 -- | Execute the migrations. Fails when an unsafe migration occurs.
 executeMigrationSilent :: (PersistBackend m, MonadIO m) => NamedMigrations -> m ()
