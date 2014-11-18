@@ -1,0 +1,89 @@
+[
+    {
+        "entity": "Tbl1",
+        "dbName": "tbl1",
+        "schema": "test",
+        "autoKey": null,
+        "constructors": [
+            {
+                "name": "Tbl1",
+                "fields": [
+                    {
+                        "name": "tbl1A",
+                        "dbName": "a"
+                    },
+                    {
+                        "name": "tbl1B",
+                        "dbName": "b"
+                    },
+                    {
+                        "name": "tbl1C",
+                        "dbName": "c"
+                    },
+                    {
+                        "name": "tbl1D",
+                        "dbName": "d"
+                    },
+                    {
+                        "name": "tbl1E",
+                        "dbName": "e",
+                        "type": "tinyint(1)"
+                    },
+                    {
+                        "name": "tbl1F",
+                        "dbName": "f"
+                    },
+                    {
+                        "name": "tbl1G",
+                        "dbName": "g"
+                    },
+                    {
+                        "name": "tbl1H",
+                        "dbName": "h",
+                        "default": "CURRENT_TIMESTAMP"
+                    },
+                    {
+                        "name": "tbl1J",
+                        "dbName": "j"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "entity": "Tbl2",
+        "dbName": "tbl2",
+        "schema": "test",
+        "autoKey": null,
+        "constructors": [
+            {
+                "name": "Tbl2",
+                "fields": [
+                    {
+                        "name": "tbl2A",
+                        "dbName": "a"
+                    },
+                    {
+                        "name": "tbl2B",
+                        "dbName": "b"
+                    },
+                    {
+                        "name": "tbl2C",
+                        "dbName": "c",
+                        "type": "varchar(2)"
+                    },
+                    {
+                        "name": "tbl2D",
+                        "dbName": "d",
+                        "type": "binary(2)"
+                    },
+                    {
+                        "name": "tbl2E",
+                        "dbName": "e",
+                        "type": "varbinary(2)"
+                    }
+                ]
+            }
+        ]
+    }
+]

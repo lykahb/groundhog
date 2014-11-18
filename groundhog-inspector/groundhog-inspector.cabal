@@ -1,0 +1,37 @@
+name:            groundhog-inspector
+version:         0.6.0
+license:         BSD3
+license-file:    LICENSE
+author:          Boris Lykah <lykahb@gmail.com>
+maintainer:      Boris Lykah <lykahb@gmail.com>
+synopsis:        Type-safe datatype-database mapping library.
+description:     This library analyzes database tables and creates corresponding datatypes and their mappings for Groundhog <https://www.fpcomplete.com/user/lykahb/groundhog> and examples <https://github.com/lykahb/groundhog/tree/master/examples> on GitHub.
+category:        Database
+stability:       Stable
+cabal-version:   >= 1.6
+build-type:      Simple
+homepage:        http://github.com/lykahb/groundhog
+
+extra-source-files:
+    changelog
+
+library
+    build-depends:   base                     >= 4       && < 5
+                   , bytestring               >= 0.9
+                   , time                     >= 1.1.4
+                   , transformers             >= 0.2.1
+                   , groundhog                >= 0.6     && < 0.7
+                   , groundhog-th             >= 0.6     && < 0.7
+                   , template-haskell
+                   , containers               >= 0.2
+                   , aeson-pretty             >= 0.7
+                   , text                     >= 0.8
+                   , regex-compat                           < 1.0
+                   , syb                      >= 0.3     && < 0.5
+                   , groundhog-sqlite
+    exposed-modules: Database.Groundhog.Inspector
+    ghc-options:     -Wall
+    
+source-repository head
+  type:     git
+  location: git://github.com/lykahb/groundhog.git
