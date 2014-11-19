@@ -3,7 +3,6 @@
 
 module Database.Groundhog.TH.Settings
   ( PersistDefinitions(..)
-  , PersistDefinition(..)
   , THEntityDef(..)
   , THEmbeddedDef(..)
   , THPrimitiveDef(..)
@@ -30,15 +29,12 @@ import Control.Applicative
 import Control.Monad (forM, mzero)
 import Data.Aeson
 import Data.Aeson.Types (Pair)
+import qualified Data.Foldable as Fold
 import qualified Data.HashMap.Strict as H
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 
-data PersistDefinitions = PersistDefinitions {definitions :: [PersistDefinition]} deriving Show
-data PersistDefinition = PSEntityDef' PSEntityDef
-                       | PSEmbeddedDef' PSEmbeddedDef
-                       | PSPrimitiveDef' PSPrimitiveDef
-     deriving Show
+data PersistDefinitions = PersistDefinitions {psEntities :: [PSEntityDef], psEmbeddeds :: [PSEmbeddedDef], psPrimitives :: [PSPrimitiveDef]} deriving Show
 
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
@@ -159,16 +155,11 @@ data PSAutoKeyDef = PSAutoKeyDef {
   , psAutoKeyIsDef :: Maybe Bool
 } deriving (Eq, Show)
 
-instance Lift PersistDefinition where
-  lift (PSEntityDef' e) = [| PSEntityDef' e |]
-  lift (PSEmbeddedDef' e) = [| PSEmbeddedDef' e |]
-  lift (PSPrimitiveDef' e) = [| PSPrimitiveDef' e |]
-
 instance Lift PSPrimitiveDef where
   lift (PSPrimitiveDef {..}) = [| PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveStringEnumRepresentation) |]
 
 instance Lift PersistDefinitions where
-  lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift definitions) |]
+  lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift psEntities) $(lift psEmbeddeds) $(lift psPrimitives) |]
 
 instance Lift PSEntityDef where
   lift (PSEntityDef {..}) = [| PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psEntitySchema) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors) |]
@@ -212,23 +203,22 @@ instance FromJSON PersistDefinitions where
         ---
           entity: name
   -}
-  parseJSON value = PersistDefinitions <$> case value of
+  parseJSON value = (case value of
     Object v -> do
       defs <- v .:? "definitions"
       case defs of
-        Just defs'@(Array _) -> parseJSON defs'
+        Just (Array arr) -> Fold.foldrM go initial arr
+        Nothing -> go value initial
         Just _ -> mzero
-        Nothing -> fmap (\a -> [a]) $ parseJSON value
-    defs@(Array _) -> parseJSON defs
-    _ -> mzero
+    Array arr -> Fold.foldrM go initial arr
+    _ -> mzero) where
+    initial = PersistDefinitions [] [] []
+    go obj p@(PersistDefinitions{..}) = flip (withObject "definition") obj $ \v -> case () of
+      _ | H.member "entity" v -> (\x -> p {psEntities = x:psEntities}) <$> parseJSON obj
+      _ | H.member "embedded" v -> (\x -> p {psEmbeddeds = x:psEmbeddeds}) <$> parseJSON obj
+      _ | H.member "primitive" v -> (\x -> p {psPrimitives = x:psPrimitives}) <$> parseJSON obj
+      _ -> fail $ "Invalid definition: " ++ show obj
 
-instance FromJSON PersistDefinition where
-  parseJSON obj@(Object v) = case () of
-    _ | H.member "entity" v -> PSEntityDef' <$> parseJSON obj
-    _ | H.member "embedded" v -> PSEmbeddedDef' <$> parseJSON obj
-    _ | H.member "primitive" v -> PSPrimitiveDef' <$> parseJSON obj
-    _ -> mzero
-  parseJSON _ = mzero
 
 instance FromJSON PSEntityDef where
   parseJSON = withObject "entity" $ \v ->

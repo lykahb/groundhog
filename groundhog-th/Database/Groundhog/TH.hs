@@ -42,7 +42,7 @@ import Control.Applicative
 import Control.Monad (forM, forM_, when, unless, liftM2)
 import Data.Char (isUpper, isLower, isSpace, isDigit, toUpper, toLower)
 import Data.List (nub, (\\))
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.String
 import Data.Text.Encoding (encodeUtf8)
 import Data.Yaml as Y (decodeHelper, ParseException(..))
@@ -54,9 +54,9 @@ data CodegenConfig = CodegenConfig {
   -- | Codegenerator will create a function with this name that will run 'migrate' for each non-polymorphic entity in definition
   , migrationFunction :: Maybe String
   -- | Functions that produce Haskell code for the entities. In most cases when overriding, the default functions that produce mappings are not replaced but kept along with custom code. Example: @['defaultMkEntityDecs', mkMyDecs]@.
-  , mkEntityDecs :: [THEntityDef -> Q [Dec]]
-  , mkEmbeddedDecs :: [THEmbeddedDef -> Q [Dec]]
-  , mkPrimitiveDecs :: [THPrimitiveDef -> Q [Dec]]
+  , mkEntityDecs :: [[THEntityDef] -> Q [Dec]]
+  , mkEmbeddedDecs :: [[THEmbeddedDef] -> Q [Dec]]
+  , mkPrimitiveDecs :: [[THPrimitiveDef] -> Q [Dec]]
 }
 
 defaultCodegenConfig :: CodegenConfig
@@ -193,11 +193,9 @@ lowerCaseSuffixNamingStyle = suffixNamingStyle {
 -- The default names of auxiliary datatypes and names used in database are generated using the naming style and can be changed via configuration.
 -- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'. 
 mkPersist :: CodegenConfig -> PersistDefinitions -> Q [Dec]
-mkPersist CodegenConfig{..} (PersistDefinitions defs) = do
-  let duplicates = notUniqueBy id $ flip map defs $ \a -> case a of
-        PSEntityDef'    e -> psDataName e
-        PSEmbeddedDef'  e -> psEmbeddedName e
-        PSPrimitiveDef' e -> psPrimitiveName e
+mkPersist CodegenConfig{..} PersistDefinitions{..} = do
+  let duplicates = notUniqueBy id $ 
+        map psDataName psEntities ++ map psEmbeddedName psEmbeddeds ++ map psPrimitiveName psPrimitives
   unless (null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
   let getDecl name = do
         info <- reify $ mkName name
@@ -208,18 +206,14 @@ mkPersist CodegenConfig{..} (PersistDefinitions defs) = do
             _ -> error $ "Unknown declaration type: " ++ name ++ " " ++ show x
           _        -> error $ "Only datatypes can be processed: " ++ name
       
-  entities  <- catMaybes <$> forM defs (\d -> case d of
-    PSEntityDef'   e -> Just . either error id . validateEntity   . applyEntitySettings namingStyle e . mkTHEntityDef namingStyle   <$> getDecl (psDataName e)
-    _ -> return Nothing)
-  embeddeds <- catMaybes <$> forM defs (\d -> case d of
-    PSEmbeddedDef' e -> Just . either error id . validateEmbedded . applyEmbeddedSettings e           . mkTHEmbeddedDef namingStyle <$> getDecl (psEmbeddedName e)
-    _ -> return Nothing)
-  primitives <- catMaybes <$> forM defs (\d -> case d of
-    PSPrimitiveDef'     e -> Just .                                 applyPrimitiveSettings e               . mkTHPrimitiveDef namingStyle     <$> getDecl (psPrimitiveName e)
-    _ -> return Nothing)
-  decs <- fmap concat $ sequence $ (mkEntityDecs <*> entities) ++ ( mkEmbeddedDecs <*> embeddeds) ++ (mkPrimitiveDecs <*> primitives)
-  migrateFunc <- maybe (return []) (\name -> mkMigrateFunction name entities) migrationFunction
-  return $ migrateFunc ++ decs
+  entities   <- forM psEntities $ \e ->
+    either error id . validateEntity   . applyEntitySettings namingStyle e . mkTHEntityDef namingStyle    <$> getDecl (psDataName e)
+  embeddeds  <- forM psEmbeddeds $ \e ->
+    either error id . validateEmbedded . applyEmbeddedSettings e           . mkTHEmbeddedDef namingStyle  <$> getDecl (psEmbeddedName e)
+  primitives <- forM psPrimitives $ \e ->
+                                         applyPrimitiveSettings e          . mkTHPrimitiveDef namingStyle <$> getDecl (psPrimitiveName e)
+  let mkEntityDecs' = maybe id (\name -> (mkMigrateFunction name:)) migrationFunction $ mkEntityDecs
+  fmap concat $ sequence $ map ($ entities) mkEntityDecs' ++ map ($ embeddeds) mkEmbeddedDecs ++ map ($ primitives) mkPrimitiveDecs
 
 applyEntitySettings :: NamingStyle -> PSEntityDef -> THEntityDef -> THEntityDef
 applyEntitySettings style PSEntityDef{..} def@(THEntityDef{..}) =
@@ -595,8 +589,8 @@ parseDefinitions s = do
     Right (Left err) -> fail err
     Right (Right result') -> lift (result' :: PersistDefinitions)
 
-defaultMkEntityDecs :: THEntityDef -> Q [Dec]
-defaultMkEntityDecs def = do
+defaultMkEntityDecs :: [THEntityDef] -> Q [Dec]
+defaultMkEntityDecs = fmap concat . mapM (\def -> do
   --runIO (print def)
   decs <- fmap concat $ sequence $ map ($ def)
     [ mkEntityPhantomConstructors
@@ -615,10 +609,10 @@ defaultMkEntityDecs def = do
     , mkEntityNeverNullInstance
     ]
   --runIO $ putStrLn $ pprint decs
-  return decs
+  return decs)
 
-defaultMkEmbeddedDecs :: THEmbeddedDef -> Q [Dec]
-defaultMkEmbeddedDecs def = do
+defaultMkEmbeddedDecs :: [THEmbeddedDef] -> Q [Dec]
+defaultMkEmbeddedDecs = fmap concat . mapM (\def -> do
   --runIO (print def)
   decs <- fmap concat $ sequence $ map ($ def)
     [ mkEmbeddedPersistFieldInstance
@@ -626,14 +620,14 @@ defaultMkEmbeddedDecs def = do
     , mkEmbeddedInstance
     ]
 --  runIO $ putStrLn $ pprint decs
-  return decs
+  return decs)
 
-defaultMkPrimitiveDecs :: THPrimitiveDef -> Q [Dec]
-defaultMkPrimitiveDecs def = do
+defaultMkPrimitiveDecs :: [THPrimitiveDef] -> Q [Dec]
+defaultMkPrimitiveDecs = fmap concat . mapM (\def -> do
   --runIO (print def)
   decs <- fmap concat $ sequence $ map ($ def)
     [ mkPrimitivePersistFieldInstance
     , mkPrimitivePrimitivePersistFieldInstance
     ]
 --  runIO $ putStrLn $ pprint decs
-  return decs
+  return decs)
