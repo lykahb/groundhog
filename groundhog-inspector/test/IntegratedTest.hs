@@ -8,20 +8,22 @@ import qualified Data.Map as Map
 import Language.Haskell.TH (runIO)
 
 do
-  (decs, mappings) <- runIO $ withSqliteConn ":memory:" $ runDbConn $ do
+  (decs, mappingSettings) <- runIO $ withSqliteConn ":memory:" $ runDbConn $ do
     mapM_ (\s -> executeRaw False s []) [
       "CREATE TABLE customer (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR NOT NULL, phone VARCHAR NOT NULL)",
-      "CREATE TABLE booking (id INTEGER PRIMARY KEY NOT NULL, details VARCHAR, customer INTEGER NOT NULL, FOREIGN KEY(customer) REFERENCES customer(id))"
-      ]
+      "CREATE TABLE booking (id INTEGER PRIMARY KEY NOT NULL, details VARCHAR, customer INTEGER NOT NULL, FOREIGN KEY(customer) REFERENCES customer(id))"]
     ts <- collectTables (const True) Nothing
-    let decs = generateData defaultDataCodegenConfig {mkType = sqliteMkType, generateUniqueKeysPhantoms = False} defaultReverseNamingStyle ts
-    mappings <- generateMapping defaultReverseNamingStyle ts
-    return (decs, mappings)
-  -- Function 'mkPersist' cannot be used here because it tries to reify datatypes which don't exist yet. So we manually combine declaration with mapping
-  let entities = Map.elems $ Map.intersectionWith (\d m -> applyEntitySettings suffixNamingStyle m $ mkTHEntityDef suffixNamingStyle $ fst d) decs mappings
-  mapped <- mapM defaultMkEntityDecs entities
-  migrateFunction <- mkMigrateFunction "migrateAll" entities
-  return $ migrateFunction ++ concat ((map (uncurry (:)) $ Map.elems decs) ++ mapped)
+    let dataConfig = defaultDataCodegenConfig {mkType = sqliteMkType, generateUniqueKeysPhantoms = False}
+        decs = generateData dataConfig defaultReverseNamingStyle ts
+    mappingSettings <- generateMapping defaultReverseNamingStyle ts
+    return (decs, mappingSettings)
+  -- Function 'mkPersist' cannot be used here because it tries to reify datatypes which don't exist yet.
+  -- So we manually combine declaration with mapping settings to generate mapping declarations
+  let mkThEntity dec mapping = applyEntitySettings suffixNamingStyle mapping $ mkTHEntityDef suffixNamingStyle $ fst dec
+      thEntities = Map.elems $ Map.intersectionWith mkThEntity decs mappingSettings
+  mappingDecs <- defaultMkEntityDecs thEntities
+  migrateFunction <- mkMigrateFunction "migrateAll" thEntities
+  return $ concat (map (uncurry (:)) $ Map.elems decs) ++ mappingDecs ++ migrateFunction
 
 deriving instance Show Customer
 deriving instance Show Booking
