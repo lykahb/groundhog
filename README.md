@@ -1,8 +1,8 @@
 ## Interact with relational databases in Haskell [![Build Status](https://travis-ci.org/lykahb/groundhog.png?branch=master)](https://travis-ci.org/lykahb/groundhog)
 
-Migrate and access PostgreSQL, MySQL, and SQLite with type safety and detailed control. 
+Access PostgreSQL, MySQL, and SQLite with type safety.
 Advanced migration capabilities allow you to precisely specify the schema description, fitting it to an existing database, or
-creating a migration script for a new one. Groundhog is not opinionated about schema and can bind your datatypes to a relational model which may have composite keys, references across different schemas, indexes, etc.
+creating a migration script for a new one. Groundhog is not opinionated about schema and can bind your datatypes to a relational model which may have composite keys, references across multiple schemas, indexes, etc.
 It is used in hobby projects and commercial applications.
 
 ## Useful links
