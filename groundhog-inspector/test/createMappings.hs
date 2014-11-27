@@ -31,10 +31,10 @@ main = do
     -- cleanMySQL
     let stmts = filter ((\s -> not $ null s || "--" `isPrefixOf` s) . dropWhile isSpace) . lines $ stmts'
     mapM_ (\s -> executeRaw False s []) stmts
-    ts <- collectTables (\(_, name) -> not $ "_not_mapped" `isSuffixOf` name) Nothing
+    tables <- collectTables (\(_, name) -> not $ "_not_mapped" `isSuffixOf` name) Nothing
     executeRaw False "ROLLBACK" [] >> executeRaw False "BEGIN" []
-    let decs = generateData defaultDataCodegenConfig defaultReverseNamingStyle ts
-    mappings <- generateMapping defaultReverseNamingStyle ts
+    let decs = generateData defaultDataCodegenConfig defaultReverseNamingStyle tables
+    mappings <- generateMapping defaultReverseNamingStyle tables
     return (decs, mappings)
 --  mapM_ (putStrLn . showData) decs
   writeFile "Datatypes.hs" $
