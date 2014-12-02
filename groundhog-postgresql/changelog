@@ -1,3 +1,6 @@
+0.7.0
+* Ignore system indexes when analyzing tables
+
 0.6.0
 * Entity and fields descriptions are parameterized so that they can be promoted
 * Entity and fields descriptions are dependent on database proxy. It allows to use different types depending on a database, for example, the same type can be array[] in PostgreSQL and varchar elsewhere

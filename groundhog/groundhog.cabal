@@ -1,11 +1,11 @@
 name:            groundhog
-version:         0.6.0
+version:         0.7.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        Type-safe datatype-database mapping library.
-description:     This library maps your datatypes to a relational model, in a way similar to what ORM libraries do in OOP. The schema can be configured flexibly which makes integration with existing databases easy. Groundhog supports schema migrations, composite keys, advanced expressions in queries, and much more. See tutorial <https://www.fpcomplete.com/user/lykahb/groundhog> and examples <https://github.com/lykahb/groundhog/tree/master/examples> on GitHub.
+description:     This library maps your datatypes to a relational model, in a way similar to what ORM libraries do in object-oriented programming. The mapping can be configured to work with almost any schema. Groundhog supports schema migrations, composite keys, advanced expressions in queries, and much more. See tutorial <https://www.fpcomplete.com/user/lykahb/groundhog> and examples <https://github.com/lykahb/groundhog/tree/master/examples> on GitHub.
 category:        Database
 stability:       Stable
 cabal-version:   >= 1.6

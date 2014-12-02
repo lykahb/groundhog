@@ -1,5 +1,5 @@
 name:            groundhog-inspector
-version:         0.6.0
+version:         0.7.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -20,15 +20,14 @@ library
                    , bytestring               >= 0.9
                    , time                     >= 1.1.4
                    , transformers             >= 0.2.1
-                   , groundhog                >= 0.6     && < 0.7
-                   , groundhog-th             >= 0.6     && < 0.7
+                   , groundhog                >= 0.7     && < 0.8
+                   , groundhog-th             >= 0.7     && < 0.8
                    , template-haskell
                    , containers               >= 0.2
                    , aeson-pretty             >= 0.7
                    , text                     >= 0.8
                    , regex-compat                           < 1.0
                    , syb                      >= 0.3     && < 0.5
-                   , groundhog-sqlite
     exposed-modules: Database.Groundhog.Inspector
     ghc-options:     -Wall
     

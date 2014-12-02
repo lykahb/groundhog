@@ -1,3 +1,6 @@
+0.7.0
+* Bump with groundhog
+
 0.6.0
 * Entity and fields descriptions are parameterized so that they can be promoted
 * Entity and fields descriptions are dependent on database proxy. It allows to use different types depending on a database, for example, the same type can be array[] in PostgreSQL and varchar elsewhere
@@ -52,4 +55,4 @@ The library supports new features of groundhog-0.1.0: composite keys, projection
 * Migration analyzes schema instead of comparing CREATE statements as strings
 
 0.0.1
-The first release.
+* The first release.
