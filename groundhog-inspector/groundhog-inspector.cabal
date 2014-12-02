@@ -5,9 +5,9 @@ license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
 maintainer:      Boris Lykah <lykahb@gmail.com>
 synopsis:        Type-safe datatype-database mapping library.
-description:     This library analyzes database tables and creates corresponding datatypes and their mappings for Groundhog <https://www.fpcomplete.com/user/lykahb/groundhog> and examples <https://github.com/lykahb/groundhog/tree/master/examples> on GitHub.
+description:     This library analyzes database tables and creates corresponding datatypes and their mappings for Groundhog <https://www.fpcomplete.com/user/lykahb/groundhog>. See examples at <https://github.com/lykahb/groundhog/tree/master/groundhog-inspector/examples>.
 category:        Database
-stability:       Stable
+stability:       Experimental
 cabal-version:   >= 1.6
 build-type:      Simple
 homepage:        http://github.com/lykahb/groundhog

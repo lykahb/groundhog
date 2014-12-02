@@ -10,7 +10,7 @@ import qualified Data.ByteString.Lazy.Char8 as B
 
 main :: IO ()
 main = withSqliteConn ":memory:" $ runDbConn $ do
-	-- Initialize schema
+  -- Initialize schema
   mapM_ (\s -> executeRaw False s []) [
     "CREATE TABLE customer (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR NOT NULL, phone VARCHAR NOT NULL)",
     "CREATE TABLE booking (id INTEGER PRIMARY KEY NOT NULL, details VARCHAR, customer INTEGER NOT NULL, FOREIGN KEY(customer) REFERENCES customer(id))"]

@@ -1,8 +1,8 @@
 {-# LANGUAGE RecordWildCards, TemplateHaskell, QuasiQuotes, CPP, OverloadedStrings, FlexibleContexts #-}
 
--- | A library for . The Haskell datatypes may not always be valid. The generated identifiers may collide with each other and with Haskell keywords.
--- If that happens, adjust 'ReverseNamingStyle'. The library guarantees that the mappings match the database structure.
--- So the migration for the generated mappings must not change the schema.
+-- | A library for creating datatypes and Groundhog mappings from a database schema. The mappings match the database structure
+-- so if you run migration for the generated mappings, no changes to schema should be suggested.
+-- The generated Haskell identifiers may sometimes conflict with each other and with Haskell keywords. If that happens, adjust 'ReverseNamingStyle'.
 
 module Database.Groundhog.Inspector
   ( 
