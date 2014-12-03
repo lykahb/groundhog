@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, DeriveDataTypeable #-}
+{-# LANGUAGE CPP, DeriveDataTypeable, RecordWildCards #-}
 
 module Main where
 
@@ -21,7 +21,7 @@ import Database.Groundhog.Postgresql
 import Database.Groundhog.MySQL
 #endif
 
-data Args = Args {database :: String, connectionInfo :: String} deriving (Show, Data, Typeable)
+data Args = Args {database :: String, connectionInfo :: String, schema :: Maybe String} deriving (Show, Data, Typeable)
 
 databases :: [String]
 databases =
@@ -38,14 +38,15 @@ databases =
 
 sample :: Mode (CmdArgs Args)
 sample = cmdArgsMode $ Args { database = def &= argPos 0 &= typ (show databases) &= opt (head databases)
-              , connectionInfo = def &= argPos 1 &= typ "CONNECTION_STRING" }
+              , connectionInfo = def &= argPos 1 &= typ "CONNECTION_STRING"
+              , schema = def &= help "schema" }
          &= summary "groundhog-inspector"
          &= details ["Pass a name of a database. The connection string is an argument to with*Conn. "
            , "MySQL connection string is \"ConnectInfo {...}\""]
 
-analyze :: (PersistBackend m, SchemaAnalyzer m, MonadIO m) => m ()
-analyze = do
-  tables <- collectTables (const True) Nothing
+analyze :: (PersistBackend m, SchemaAnalyzer m, MonadIO m) => Maybe String -> m ()
+analyze schema = do
+  tables <- collectTables (const True) schema
   -- Analyze tables
   let decs = generateData defaultDataCodegenConfig defaultReverseNamingStyle tables
   mappings <- generateMapping defaultReverseNamingStyle tables
@@ -58,15 +59,15 @@ analyze = do
 
 main :: IO ()
 main = do
-  arg <- cmdArgsRun sample
-  case database arg of
+  Args{..} <- cmdArgsRun sample
+  case database of
 #if WITH_SQLITE
-    "sqlite" -> withSqliteConn (connectionInfo arg) $ runDbConn analyze
+    "sqlite" -> withSqliteConn connectionInfo $ runDbConn $ analyze schema
 #endif
 #if WITH_POSTGRESQL
-    "postgresql" -> withPostgresqlConn (connectionInfo arg) $ runDbConn analyze
+    "postgresql" -> withPostgresqlConn connectionInfo $ runDbConn $ analyze schema
 #endif
 #if WITH_MYSQL
-    "mysql" -> withMySQLConn (read $ connectionInfo arg) $ runDbConn analyze
+    "mysql" -> withMySQLConn (read connectionInfo) $ runDbConn $ analyze schema
 #endif
     other -> fail $ "Unknown database: " ++ other
