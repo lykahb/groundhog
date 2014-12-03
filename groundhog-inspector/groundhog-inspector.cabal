@@ -8,12 +8,24 @@ synopsis:        Type-safe datatype-database mapping library.
 description:     This library analyzes database tables and creates corresponding datatypes and their mappings for Groundhog <https://www.fpcomplete.com/user/lykahb/groundhog>. See examples at <https://github.com/lykahb/groundhog/tree/master/groundhog-inspector/examples>.
 category:        Database
 stability:       Experimental
-cabal-version:   >= 1.6
+cabal-version:   >= 1.8
 build-type:      Simple
 homepage:        http://github.com/lykahb/groundhog
 
 extra-source-files:
     changelog
+
+Flag sqlite
+   Description: analyze Slite
+   Default: True
+
+Flag postgresql
+   Description: analyze PostgreSQL
+   Default: False
+
+Flag mysql
+   Description: analyze MySQL
+   Default: False
 
 library
     build-depends:   base                     >= 4       && < 5
@@ -34,3 +46,32 @@ library
 source-repository head
   type:     git
   location: git://github.com/lykahb/groundhog.git
+
+executable groundhog_inspector
+  hs-source-dirs: main
+  main-is:        Main.hs
+
+  ghc-options:
+    -Wall -rtsopts
+
+  build-depends:
+      base
+    , mtl                      >= 2.0
+    , cmdargs                  >= 0.10
+    , containers               >= 0.2
+    , bytestring               >= 0.9
+    , groundhog
+    , groundhog-th
+    , groundhog-inspector
+
+  if flag(sqlite)
+    build-depends: groundhog-sqlite
+    cpp-options: -DWITH_SQLITE
+
+  if flag(postgresql)
+    build-depends: groundhog-postgresql
+    cpp-options: -DWITH_POSTGRESQL
+
+  if flag(mysql)
+    build-depends: groundhog-mysql
+    cpp-options: -DWITH_MYSQL
