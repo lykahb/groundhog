@@ -15,7 +15,7 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
     "CREATE TABLE customer (id INTEGER PRIMARY KEY NOT NULL, name VARCHAR NOT NULL, phone VARCHAR NOT NULL)",
     "CREATE TABLE booking (id INTEGER PRIMARY KEY NOT NULL, details VARCHAR, customer INTEGER NOT NULL, FOREIGN KEY(customer) REFERENCES customer(id))"]
   -- Collect tables for further analysis
-  tables <- collectTables (\(_, name) -> not $ "_not_mapped" `isSuffixOf` name) Nothing
+  tables <- collectTables (const True) Nothing
   -- Analyze tables
   let decs = generateData defaultDataCodegenConfig defaultReverseNamingStyle tables
   mappings <- generateMapping defaultReverseNamingStyle tables
