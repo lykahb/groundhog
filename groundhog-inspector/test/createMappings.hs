@@ -19,16 +19,15 @@ import qualified Data.ByteString.Lazy.Char8 as B
 main :: IO ()
 main = do
   stmts' <- getArgs >>= readFile . head
-  -- (decs, mappings) <- withSqliteConn ":memory:" $ runDbConn $ do
+  (decs, mappings) <- withSqliteConn ":memory:" $ runDbConn $ do
   -- (decs, mappings) <- withPostgresqlConn "dbname=test user=test password=test host=localhost" $ runDbConn $ do
-  let mySQLConnInfo = defaultConnectInfo
-                    { connectHost     = "localhost"
-                    , connectUser     = "test"
-                    , connectPassword = "test"
-                    , connectDatabase = "test"
-                    }
-  (decs, mappings) <- withMySQLConn mySQLConnInfo $ runDbConn $ cleanMySQL >> do
-    -- cleanMySQL
+  -- let mySQLConnInfo = defaultConnectInfo
+  --                   { connectHost     = "localhost"
+  --                   , connectUser     = "test"
+  --                   , connectPassword = "test"
+  --                   , connectDatabase = "test"
+  --                   }
+  -- (decs, mappings) <- withMySQLConn mySQLConnInfo $ runDbConn $ cleanMySQL >> do
     let stmts = filter ((\s -> not $ null s || "--" `isPrefixOf` s) . dropWhile isSpace) . lines $ stmts'
     mapM_ (\s -> executeRaw False s []) stmts
     tables <- collectTables (\(_, name) -> not $ "_not_mapped" `isSuffixOf` name) Nothing
@@ -51,6 +50,7 @@ main = do
 --  B.putStrLn serializedMappings
   B.writeFile "mapping.yml" serializedMappings
 
+cleanMySQL :: PersistBackend m => m ()
 cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 0" []
   let recreate schema = do

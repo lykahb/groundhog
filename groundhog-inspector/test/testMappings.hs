@@ -17,21 +17,21 @@ mkPersist (defaultCodegenConfig {migrationFunction = Just "mig"})
 main :: IO ()
 main = do
   stmts' <- liftIO $ getArgs >>= readFile . head
-  -- withSqliteConn ":memory:" $ runDbConn $ do
+  withSqliteConn ":memory:" $ runDbConn $ do
   -- withPostgresqlConn "dbname=test user=test password=test host=localhost" $ runDbConn $ do
-  let mySQLConnInfo = defaultConnectInfo
-                    { connectHost     = "localhost"
-                    , connectUser     = "test"
-                    , connectPassword = "test"
-                    , connectDatabase = "test"
-                    }
-  withMySQLConn mySQLConnInfo $ runDbConn $ cleanMySQL >> do 
-  
+  -- let mySQLConnInfo = defaultConnectInfo
+  --                   { connectHost     = "localhost"
+  --                   , connectUser     = "test"
+  --                   , connectPassword = "test"
+  --                   , connectDatabase = "test"
+  --                   }
+  -- withMySQLConn mySQLConnInfo $ runDbConn $ cleanMySQL >> do  
     let stmts = filter ((\s -> not $ null s || "--" `isPrefixOf` s) . dropWhile isSpace) . lines $ stmts'
     mapM_ (\s -> executeRaw False s []) stmts
     createMigration mig >>= printMigration
     executeRaw False "ROLLBACK" [] >> executeRaw False "BEGIN" []
 
+cleanMySQL :: PersistBackend m => m ()
 cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 0" []
   let recreate schema = do
