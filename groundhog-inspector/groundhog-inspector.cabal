@@ -16,7 +16,7 @@ extra-source-files:
     changelog
 
 Flag sqlite
-   Description: analyze Slite
+   Description: analyze SQLite
    Default: True
 
 Flag postgresql
