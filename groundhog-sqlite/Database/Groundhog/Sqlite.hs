@@ -299,16 +299,17 @@ showSqlType t = case t of
   DbOther (OtherTypeDef ts) -> concatMap (either id showSqlType) ts
 
 readSqlType :: String -> DbTypePrimitive
-readSqlType "VARCHAR" = DbString
-readSqlType "INTEGER" = DbInt64
-readSqlType "REAL" = DbReal
-readSqlType "BOOLEAN" = DbBool
-readSqlType "DATE" = DbDay
-readSqlType "TIME" = DbTime
-readSqlType "TIMESTAMP" = DbDayTime
-readSqlType "TIMESTAMP WITH TIME ZONE" = DbDayTimeZoned
-readSqlType "BLOB" = DbBlob
-readSqlType typ = DbOther $ OtherTypeDef [Left typ]
+readSqlType typ = case map toUpper typ of
+  "VARCHAR" -> DbString
+  "INTEGER" -> DbInt64
+  "REAL" -> DbReal
+  "BOOLEAN" -> DbBool
+  "DATE" -> DbDay
+  "TIME" -> DbTime
+  "TIMESTAMP" -> DbDayTime
+  "TIMESTAMP WITH TIME ZONE" -> DbDayTimeZoned
+  "BLOB" -> DbBlob
+  _ -> DbOther $ OtherTypeDef [Left typ]
 
 data Affinity = TEXT | NUMERIC | INTEGER | REAL | NONE deriving (Eq, Show)
 
