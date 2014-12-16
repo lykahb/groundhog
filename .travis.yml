@@ -2,6 +2,7 @@ language: haskell
 
 before_install:
   - cd groundhog-test
+  - cabal sandbox init
 
 install:
   - cabal install --only-dependencies --enable-tests -fsqlite -fpostgresql -fmysql --force-reinstalls
@@ -14,3 +15,6 @@ script:
   - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
   - cabal build
   - cabal test --log=/dev/stdout
+
+after_script:
+  - cabal sandbox delete
