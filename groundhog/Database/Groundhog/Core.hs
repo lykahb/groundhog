@@ -91,10 +91,13 @@ import Control.Monad.Logger (MonadLogger(..))
 import Control.Monad.Trans.Class (MonadTrans(..))
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
-import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
+import Control.Monad.Trans.Reader (ReaderT(..), runReaderT, mapReaderT)
 import Control.Monad.Trans.State (StateT)
 import Control.Monad.Reader (MonadReader(..))
 import Control.Monad (liftM)
+import qualified Control.Monad.Writer.Class as Mtl
+import qualified Control.Monad.Error.Class as Mtl
+import qualified Control.Monad.State.Class as Mtl
 import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
@@ -276,6 +279,24 @@ instance MonadLogger m => MonadLogger (DbPersist conn m) where
 
 runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
 runDbPersist = runReaderT . unDbPersist
+
+mapDbPersist :: (m a -> n b) -> DbPersist conn m a -> DbPersist conn n b
+mapDbPersist f m = DbPersist $ mapReaderT f $ unDbPersist m
+
+instance Mtl.MonadWriter w m => Mtl.MonadWriter w (DbPersist conn m) where
+    writer = lift . Mtl.writer
+    tell = lift . Mtl.tell
+    listen = mapDbPersist Mtl.listen
+    pass = mapDbPersist Mtl.pass
+
+instance Mtl.MonadError e m => Mtl.MonadError e (DbPersist conn m) where
+    throwError = lift . Mtl.throwError
+    catchError m h = DbPersist $ Mtl.catchError (unDbPersist m) (unDbPersist . h)
+
+instance Mtl.MonadState s m => Mtl.MonadState s (DbPersist conn m) where
+    get = lift Mtl.get
+    put = lift . Mtl.put
+    state = lift . Mtl.state
 
 class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   -- | Type of the database default autoincremented key. For example, Sqlite has Int64
