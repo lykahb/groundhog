@@ -1,3 +1,6 @@
+0.7.0.1
+* Support for monad-control 1.0
+
 0.7.0
 * Ignore system indexes when analyzing tables
 

@@ -1,3 +1,7 @@
+0.7.0
+* Instances of ToJSON for settings
+* Refactoring and export of some utility functions
+
 0.6.0
 * Entities without keys. It can be useful for many-to-many tables which hold keys but are not referenced
 * Entity and fields descriptions are parameterized so that they can be promoted

@@ -1,3 +1,6 @@
+0.7.0.1
+* Support for monad-control 1.0
+
 0.7.0
 * Removed logger argument from executeMigration and runMigration
 * PersistField instance for lazy ByteString
