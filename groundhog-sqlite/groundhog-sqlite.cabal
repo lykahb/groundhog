@@ -19,7 +19,7 @@ library
                    , bytestring               >= 0.9
                    , transformers             >= 0.2.1
                    , groundhog                >= 0.7       && < 0.8
-                   , monad-control            >= 0.3       && < 0.4
+                   , monad-control            >= 0.3       && < 1.1
                    , monad-logger             >= 0.3       && < 0.4
                    , containers               >= 0.2
                    , text                     >= 0.8

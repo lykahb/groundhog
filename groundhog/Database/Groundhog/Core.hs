@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds #-}
+{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds, CPP #-}
 {-# LANGUAGE UndecidableInstances #-} -- Required for Projection'
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
@@ -262,14 +262,26 @@ instance MonadBase IO m => MonadBase IO (DbPersist conn m) where
   liftBase = lift . liftBase
 
 instance MonadTransControl (DbPersist conn) where
+#if MIN_VERSION_monad_control(1, 0, 0)
+  type StT (DbPersist conn) a = StT (ReaderT conn) a
+  liftWith f = DbPersist $ ReaderT $ \r -> f $ \t -> runReaderT (unDbPersist t) r
+  restoreT = DbPersist . ReaderT . const
+#else
   newtype StT (DbPersist conn) a = StReader {unStReader :: a}
   liftWith f = DbPersist $ ReaderT $ \r -> f $ \t -> liftM StReader $ runReaderT (unDbPersist t) r
   restoreT = DbPersist . ReaderT . const . liftM unStReader
+#endif
 
 instance MonadBaseControl IO m => MonadBaseControl IO (DbPersist conn m) where
+#if MIN_VERSION_monad_control(1, 0, 0)
+  type StM (DbPersist conn m) a = ComposeSt (DbPersist conn) m a
+  liftBaseWith = defaultLiftBaseWith
+  restoreM     = defaultRestoreM
+#else
   newtype StM (DbPersist conn m) a = StMSP {unStMSP :: ComposeSt (DbPersist conn) m a}
   liftBaseWith = defaultLiftBaseWith StMSP
   restoreM     = defaultRestoreM   unStMSP
+#endif
 
 instance MonadLogger m => MonadLogger (DbPersist conn m) where
   monadLoggerLog a b c = lift . monadLoggerLog a b c

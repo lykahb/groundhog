@@ -54,7 +54,7 @@ library
                    , text                     >= 0.8
                    , blaze-builder            >= 0.3.0.0 && < 0.4
                    , containers               >= 0.2
-                   , monad-control            >= 0.3     && < 0.4
+                   , monad-control            >= 0.3     && < 1.1
                    , monad-logger             >= 0.3     && < 0.4
                    , resource-pool            >= 0.2.1
                    , transformers-base
@@ -116,7 +116,7 @@ test-suite test
                    , HUnit
                    , MissingH
                    , containers               >= 0.2
-                   , monad-control            >= 0.3 && < 0.4
+                   , monad-control            >= 0.3 && < 1.1
                    , monad-logger             >= 0.3 && < 0.4
 
     if flag(sqlite)
