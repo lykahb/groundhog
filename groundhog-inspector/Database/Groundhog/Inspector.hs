@@ -149,7 +149,7 @@ defaultReverseNamingStyle = ReverseNamingStyle {
         _ -> False
       -- try primary key, then constraints, then indexes
       uniq = case filter (isPrimary . uniqueDefType) uniqs' ++ filter ((== UniqueConstraint) . uniqueDefType) uniqs' ++ uniqs' of
-        [] -> error $ "mkUniqueKeyPhantomName: " ++ show tName ++ "uniques list must be not empty"
+        [] -> error $ "mkChooseReferencedUnique: " ++ show tName ++ " uniques list must be not empty"
         (u:_) -> u
     in uniq
   , mkUniqueKeyPhantomName = \(_, tName) uniq -> let
