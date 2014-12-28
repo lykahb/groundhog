@@ -148,7 +148,8 @@ defaultReverseNamingStyle = ReverseNamingStyle {
         UniquePrimary _ -> True
         _ -> False
       -- try primary key, then constraints, then indexes
-      uniq = case filter (isPrimary . uniqueDefType) uniqs' ++ filter ((== UniqueConstraint) . uniqueDefType) uniqs' ++ uniqs' of
+      filterUnique f = filter (f . uniqueDefType)
+      uniq = case filterUnique isPrimary uniqs' ++ filterUnique (== UniqueConstraint) uniqs' ++ filterUnique (== UniqueIndex) uniqs' of
         [] -> error $ "mkChooseReferencedUnique: " ++ show tName ++ " uniques list must be not empty"
         (u:_) -> u
     in uniq
@@ -233,11 +234,11 @@ generateData' DataCodegenConfig{..} ReverseNamingStyle{..} tables tName tInfo = 
       [] -> Nothing
       [ref] -> Just ref
       refs' -> error $ "Column " ++ c ++ " in table " ++ show tName ++ " participates in multiple references: " ++ show refs'
-  getReferencedUnique parentName parentInfo parentCols = mkChooseReferencedUnique parentName uniqs where
-    uniqs = filter (haveSameElems (==) (map (Left . colName) parentCols) . uniqueDefFields) $ tableUniques parentInfo
+  refUniqueMatch ref u = haveSameElems (==) (map (Left . snd) $ referencedColumns ref) $ uniqueDefFields u
+  getReferencedUnique parentName parentInfo ref = mkChooseReferencedUnique parentName uniqs where
+    uniqs = filter (refUniqueMatch ref) $ tableUniques parentInfo
   isReferenced u = Fold.any getRefs tables where
-    compareRef ref = referencedTableName ref == tName
-                  && haveSameElems (==) (map (Left . snd) $ referencedColumns ref) (uniqueDefFields u)
+    compareRef ref = referencedTableName ref == tName && refUniqueMatch ref u
     getRefs = any (compareRef . snd) . tableReferences
   uniquePhantoms = if generateUniqueKeysPhantoms then map mkPhantom uniqueKeys else [] where
     entity = ConT $ mkName $ mkEntityName tName
@@ -271,7 +272,7 @@ generateData' DataCodegenConfig{..} ReverseNamingStyle{..} tables tName tInfo = 
             _     -> foldl AppT (TupleT (length childCols)) $ map mkType childCols
           mkKeyType parentInfo = typ' where
             entity = ConT $ mkName $ mkEntityName parentName
-            uniq = getReferencedUnique parentName parentInfo parentCols
+            uniq = getReferencedUnique parentName parentInfo ref
             typ = if uniqueDefType uniq == UniquePrimary True
               then ConT ''AutoKey `AppT` entity
               else ConT ''Key     `AppT` entity `AppT` (ConT ''Unique `AppT` (ConT $ mkName $ mkUniqueKeyPhantomName parentName uniq))
@@ -306,12 +307,11 @@ generateMapping' ReverseNamingStyle{..} m@MigrationPack{..} tables tName tInfo =
     [] -> (Just Nothing, Nothing)
     [Left name] -> (Nothing, Just name)
     _ -> error $ "More than one autoincremented column for " ++ show tName ++ ": " ++ show idColumns
-  -- create keys from uniques only if there are references to them. Autoincremented keys is processed separately, so we ignore it.
-  getReferencedUnique parentName parentInfo parentCols = mkChooseReferencedUnique parentName uniqs where
-    uniqs = filter (haveSameElems (==) (map (Left . colName) parentCols) . uniqueDefFields) $ tableUniques parentInfo
+  refUniqueMatch ref u = haveSameElems (==) (map (Left . snd) $ referencedColumns ref) $ uniqueDefFields u
+  getReferencedUnique parentName parentInfo ref = mkChooseReferencedUnique parentName uniqs where
+    uniqs = filter (refUniqueMatch ref) $ tableUniques parentInfo
   isReferenced u = Fold.any getRefs tables where
-    compareRef ref = referencedTableName ref == tName
-                  && haveSameElems (==) (map (Left . snd) $ referencedColumns ref) (uniqueDefFields u)
+    compareRef ref = referencedTableName ref == tName && refUniqueMatch ref u
     getRefs = any (compareRef . snd) . tableReferences
   uniqueKeyDefs = map mkUniqueKeyDef uniqueKeys where
     mkUniqueKeyDef u = PSUniqueKeyDef (mkUniqueName tName (fromJust $ elemIndex u uniqueDefs) u) Nothing Nothing Nothing Nothing Nothing (isDef u)
@@ -320,6 +320,7 @@ generateMapping' ReverseNamingStyle{..} m@MigrationPack{..} tables tName tInfo =
     isDef u = case autoKey of
       Just Nothing | u == defaultUnique -> Just True
       _                                 -> Nothing
+  -- create keys from uniques only if there are references to them. Autoincremented key is processed separately, so we ignore it.
   uniqueKeys = filter isReferenced
              $ map (mkChooseReferencedUnique tName)
              $ groupBy ((==) `on` sort . uniqueDefFields) uniqueDefs
@@ -334,7 +335,7 @@ generateMapping' ReverseNamingStyle{..} m@MigrationPack{..} tables tName tInfo =
     go (c:cs) = case getReference $ colName c of
       Just ref -> (case Map.lookup parentName tables of
         Just parentInfo -> let
-          uniq = getReferencedUnique parentName parentInfo parentCols
+          uniq = getReferencedUnique parentName parentInfo ref
           parentCols = getCols parentInfo $ map snd $ referencedColumns ref
           in if uniqueDefType uniq == UniquePrimary True
              then autoKeyRef
