@@ -29,11 +29,13 @@ import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
+import Control.Applicative
 import Control.Arrow (second)
 import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
 import Data.Either (lefts, rights)
 import Data.List (findIndex, nub, partition)
 import Data.Maybe (catMaybes, mapMaybe)
+import qualified Text.Read as R
 
 mkEmbeddedPersistFieldInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedPersistFieldInstance def = do
@@ -326,11 +328,13 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
 mkKeyEqShowInstances :: THEntityDef -> Q [Dec]
 mkKeyEqShowInstances def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
-  let keysInfo = maybe [] (\k -> [(thAutoKeyConstrName k, 1)]) (thAutoKey def)
-               ++ map (\k -> (thUniqueKeyConstrName k, length $ thUniqueKeyFields k)) (thUniqueKeys def)
+  let keysInfo = maybe [] (\k -> [(thAutoKeyConstrName k, 1, [t| BackendSpecific |])]) (thAutoKey def)
+               ++ map (\k -> (thUniqueKeyConstrName k, length $ thUniqueKeyFields k, [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName k) |])) (thUniqueKeys def)
+  let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
+  typ <- [t| Key $(return entity) $(newName "a" >>= varT) |]
 
   showsPrec' <- let
-    mkClause (cName, fieldsNum) = do
+    mkClause (cName, fieldsNum, _) = do
       p <- newName "p"
       fields <- replicateM fieldsNum (newName "x")
       let pat = conP (mkName cName) $ map varP fields
@@ -341,7 +345,7 @@ mkKeyEqShowInstances def = do
     in funD 'showsPrec $ map mkClause keysInfo
     
   eq' <- let
-    mkClause (cName, fieldsNum) = do
+    mkClause (cName, fieldsNum, _) = do
       let fields = replicateM fieldsNum (newName "x")
       (fields1, fields2) <- liftM2 (,) fields fields
       let mkPat = conP (mkName cName) . map varP
@@ -351,17 +355,26 @@ mkKeyEqShowInstances def = do
     noMatch = if length clauses > 1 then [clause [wildP, wildP] (normalB [| False |]) []] else []
     in funD '(==) $ clauses ++ noMatch
 
-  let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
-  typ <- [t| Key $(return entity) $(newName "a" >>= varT) |]
+  read' <- let
+    mkRead (cName, fieldsNum, u) = do
+      let key = foldl (\a b -> [| $a <*> $b |]) [| $(conE $ mkName cName) <$> R.step R.readPrec |]
+            $ replicate (fieldsNum - 1) [| R.step R.readPrec |]
+          body = [| R.parens $ R.prec 10 $ R.lexP >>= \(R.Ident $(litP $ StringL cName)) -> $key |]
+      keyType <- [t| Key $(return entity) $u |]
+      readPrec' <- funD 'R.readPrec [clause [] (normalB body) []]
+      readListPrec' <- funD 'R.readListPrec [clause [] (normalB [| R.readListPrecDefault |]) []]
+      return $ InstanceD context (AppT (ConT ''Read) keyType) [readPrec', readListPrec']
+    in mapM mkRead keysInfo
+
   return $ if null keysInfo
     then []
-    else [InstanceD context (AppT (ConT ''Eq) typ) [eq'], InstanceD context (AppT (ConT ''Show) typ) [showsPrec']]
+    else [InstanceD context (AppT (ConT ''Eq) typ) [eq'], InstanceD context (AppT (ConT ''Show) typ) [showsPrec']] ++ read'
 
 mkEmbeddedInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedInstance def = do
   let types = map extractType $ thEmbeddedTypeParams def
-  let embedded = foldl AppT (ConT (thEmbeddedName def)) types
-  let context = paramsContext (thEmbeddedTypeParams def) (thEmbeddedFields def)
+      embedded = foldl AppT (ConT (thEmbeddedName def)) types
+      context = paramsContext (thEmbeddedTypeParams def) (thEmbeddedFields def)
   mkEmbeddedInstance' embedded (thEmbeddedFields def) context
   
 mkEmbeddedInstance' :: Type -> [THFieldDef] -> Cxt -> Q [Dec]
@@ -373,7 +386,7 @@ mkEmbeddedInstance' dataType fDefs context = do
 
   selectorNum' <- do
     let mkClause fNum field = clause [conP (mkName $ thExprName field) []] (normalB $ lift fNum) []
-    let clauses = zipWith mkClause [0 :: Int ..] fDefs
+        clauses = zipWith mkClause [0 :: Int ..] fDefs
     funD 'selectorNum clauses
 
   let decs = [selector', selectorNum']

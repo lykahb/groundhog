@@ -83,7 +83,7 @@ module Database.Groundhog.Core
   , Savepoint(..)
   ) where
 
-import Blaze.ByteString.Builder (Builder, toByteString)
+import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
 import Control.Applicative (Applicative)
 import Control.Monad.Base (MonadBase (liftBase))
 import Control.Monad.Logger (MonadLogger(..))
@@ -513,6 +513,8 @@ instance Eq Utf8 where
   a == b = fromUtf8 a == fromUtf8 b
 instance Show Utf8 where
   show = show . fromUtf8
+instance Read Utf8 where
+  readsPrec prec str = map (\(a, b) -> (Utf8 $ fromByteString a, b)) $ readsPrec prec str
 
 fromUtf8 :: Utf8 -> ByteString
 fromUtf8 (Utf8 a) = toByteString a
@@ -531,7 +533,7 @@ data PersistValue = PersistString String
                   | PersistNull
                   -- | Creating some datatypes may require calling a function, using a special constructor, or other syntax. The string (which can have placeholders) is included into query without escaping. The recursive constructions are not allowed, i.e., [PersistValue] cannot contain PersistCustom values.
                   | PersistCustom Utf8 [PersistValue]
-  deriving (Eq, Show)
+  deriving (Eq, Show, Read)
 
 -- | Avoid orphan instances.
 newtype ZT = ZT ZonedTime deriving (Show, Read)

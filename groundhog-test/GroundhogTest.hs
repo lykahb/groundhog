@@ -44,6 +44,7 @@ module GroundhogTest (
     , testPrimitiveData
     , testNoColumns
     , testNoKeys
+    , testJSON
     , testMigrateOrphanConstructors
     , testSchemas
     , testFloating
@@ -91,6 +92,7 @@ import qualified Database.Groundhog.Postgresql.Geometry as Geo
 #if WITH_MYSQL
 import Database.Groundhog.MySQL
 #endif
+import qualified Data.Aeson as A
 import Data.ByteString.Char8 (unpack)
 import Data.Function (on)
 import Data.Int
@@ -805,6 +807,13 @@ testNoKeys = do
     else return ()
   migr val
   [val] @=?? (insert val >> select CondEmpty)
+
+testJSON :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
+testJSON = do
+  let val = Single "abc"
+  migr val
+  k <- insert val
+  A.Success k @=? A.fromJSON (A.toJSON k)
 
 testSchemas :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => m ()
 testSchemas = do

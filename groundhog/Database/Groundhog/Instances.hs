@@ -5,6 +5,7 @@ module Database.Groundhog.Instances (Selector(..)) where
 import Database.Groundhog.Core
 import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, phantomDb, getUniqueFields)
 
+import qualified Data.Aeson as A
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
@@ -15,10 +16,16 @@ import Data.Bits (bitSize)
 #endif
 import Data.ByteString.Char8 (ByteString, unpack)
 import qualified Data.ByteString.Lazy.Char8 as Lazy
+import qualified Data.ByteString.Base64 as B64
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, utc, utcToZonedTime)
 import Data.Word (Word8, Word16, Word32, Word64)
+#if MIN_VERSION_aeson(0, 7, 0)
+import qualified Data.Scientific
+#else
+import qualified Data.Attoparsec.Number as AN
+#endif
 
 instance (PersistField a', PersistField b') => Embedded (a', b') where
   data Selector (a', b') constr where
@@ -616,3 +623,42 @@ instance EntityConstr' HFalse c where
   entityConstrNum' _ _ = 0
 instance Constructor c => EntityConstr' HTrue c where
   entityConstrNum' _ = phantomConstrNum
+
+instance A.FromJSON PersistValue where
+  parseJSON (A.String t) = return $ PersistString $ T.unpack t
+#if MIN_VERSION_aeson(0, 7, 0)
+  parseJSON (A.Number n) = return $
+    if fromInteger (floor n) == n
+      then PersistInt64 $ floor n
+      else PersistDouble $ fromRational $ toRational n
+#else
+  parseJSON (A.Number (AN.I i)) = return $ PersistInt64 $ fromInteger i
+  parseJSON (A.Number (AN.D d)) = return $ PersistDouble d
+#endif
+  parseJSON (A.Bool b) = return $ PersistBool b
+  parseJSON A.Null = return $ PersistNull
+  parseJSON a = fail $ "parseJSON PersistValue: unexpected " ++ show a
+
+instance A.ToJSON PersistValue where
+  toJSON (PersistString t) = A.String $ T.pack t
+  toJSON (PersistByteString b) = A.String $ T.decodeUtf8 $ B64.encode b
+  toJSON (PersistInt64 i) = A.Number $ fromIntegral i
+  toJSON (PersistDouble d) = A.Number $
+#if MIN_VERSION_aeson(0, 7, 0)
+    Data.Scientific.fromFloatDigits d
+#else
+    AN.D d
+#endif
+  toJSON (PersistBool b) = A.Bool b
+  toJSON (PersistTimeOfDay t) = A.String $ T.pack $ show t
+  toJSON (PersistUTCTime u) = A.String $ T.pack $ show u
+  toJSON (PersistDay d) = A.String $ T.pack $ show d
+  toJSON (PersistZonedTime (ZT z)) = A.String $ T.pack $ show z
+  toJSON PersistNull = A.Null
+  toJSON a@(PersistCustom _ _) = error $ "toJSON: unexpected " ++ show a
+
+instance Read (Key v u) => A.FromJSON (Key v u) where
+  parseJSON a = fmap read $ A.parseJSON a
+
+instance Show (Key v u) => A.ToJSON (Key v u) where
+  toJSON k = A.toJSON $ show k

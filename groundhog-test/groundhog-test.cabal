@@ -48,10 +48,13 @@ library
 
     build-depends:   base                     >= 4       && < 5
                    , bytestring               >= 0.9
+                   , base64-bytestring
                    , transformers             >= 0.2.1   && < 0.5
                    , mtl                      >= 2.0
                    , time                     >= 1.1.4
                    , text                     >= 0.8
+                   , aeson                    >= 0.5
+                   , scientific
                    , blaze-builder            >= 0.3.0.0 && < 0.4
                    , containers               >= 0.2
                    , monad-control            >= 0.3     && < 1.1
@@ -109,6 +112,7 @@ test-suite test
     build-depends:   base >= 4 && < 5
                    , bytestring               >= 0.9
                    , transformers             >= 0.2.1 && < 0.5
+                   , aeson                    >= 0.5
                    , groundhog-test
                    , test-framework-hunit     >= 0.3
                    , test-framework           >= 0.2

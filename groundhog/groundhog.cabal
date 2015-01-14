@@ -18,9 +18,12 @@ extra-source-files:
 library
     build-depends:   base                     >= 4          && < 5
                    , bytestring               >= 0.9
+                   , base64-bytestring
                    , transformers             >= 0.2.1      && < 0.5
                    , mtl                      >= 2.0
                    , time                     >= 1.1.4
+                   , aeson                    >= 0.5
+                   , scientific
                    , text                     >= 0.8
                    , blaze-builder            >= 0.3        && < 0.4
                    , containers               >= 0.2

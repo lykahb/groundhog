@@ -116,6 +116,8 @@ mkTestSuite run = map (\(name, func) -> testCase name $ run func)
   , ("testTime", testTime)
   , ("testPrimitiveData", testPrimitiveData)
   , ("testNoColumns", testNoColumns)
+  , ("testNoKeys", testNoKeys)
+  , ("testJSON", testJSON)
   ]
 
 #if WITH_SQLITE
