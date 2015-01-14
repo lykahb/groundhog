@@ -1,7 +1,5 @@
 {-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances, StandaloneDeriving #-}
-import Control.Monad
 import Control.Monad.IO.Class (liftIO)
-import Database.Groundhog.Core (UniqueMarker)
 import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
 
