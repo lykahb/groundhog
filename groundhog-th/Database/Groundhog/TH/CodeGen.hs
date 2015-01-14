@@ -359,7 +359,8 @@ mkKeyEqShowInstances def = do
     mkRead (cName, fieldsNum, u) = do
       let key = foldl (\a b -> [| $a <*> $b |]) [| $(conE $ mkName cName) <$> R.step R.readPrec |]
             $ replicate (fieldsNum - 1) [| R.step R.readPrec |]
-          body = [| R.parens $ R.prec 10 $ R.lexP >>= \(R.Ident $(litP $ StringL cName)) -> $key |]
+          func = lamE [conP 'R.Ident [litP $ StringL cName]] key
+          body = [| R.parens $ R.prec 10 $ R.lexP >>= $func |]
       keyType <- [t| Key $(return entity) $u |]
       readPrec' <- funD 'R.readPrec [clause [] (normalB body) []]
       readListPrec' <- funD 'R.readListPrec [clause [] (normalB [| R.readListPrecDefault |]) []]
