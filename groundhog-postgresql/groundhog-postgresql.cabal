@@ -1,5 +1,5 @@
 name:            groundhog-postgresql
-version:         0.7.0.1
+version:         0.7.0.2
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -19,7 +19,7 @@ library
                    , postgresql-simple        >= 0.3       && < 0.5
                    , postgresql-libpq         >= 0.6.1
                    , bytestring               >= 0.9
-                   , blaze-builder            >= 0.3       && < 0.4
+                   , blaze-builder            >= 0.3       && < 0.5
                    , transformers             >= 0.2.1     && < 0.5
                    , groundhog                >= 0.7       && < 0.8
                    , monad-control            >= 0.3       && < 1.1

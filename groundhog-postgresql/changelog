@@ -1,3 +1,6 @@
+0.7.0.2
+* Bump blaze-builder dependency
+
 0.7.0.1
 * Support for monad-control 1.0
 
