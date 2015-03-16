@@ -1,3 +1,6 @@
+0.7.0.3
+* Add attoparsec dependency
+
 0.7.0.2
 * Bump blaze-builder dependency
 
