@@ -22,6 +22,7 @@ library
                    , transformers             >= 0.2.1      && < 0.5
                    , mtl                      >= 2.0
                    , time                     >= 1.1.4
+                   , attoparsec               >= 0.11
                    , aeson                    >= 0.5
                    , scientific
                    , text                     >= 0.8
