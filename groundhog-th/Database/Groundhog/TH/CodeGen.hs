@@ -28,7 +28,7 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
 import Control.Arrow (second)
 import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
@@ -382,7 +382,7 @@ mkEmbeddedInstance' :: Type -> [THFieldDef] -> Cxt -> Q [Dec]
 mkEmbeddedInstance' dataType fDefs context = do
   selector' <- do
     fParam <- newName "f"
-    let mkField field = ForallC [] ([EqualP (VarT fParam) (thFieldType field)]) $ NormalC (mkName $ thExprName field) []
+    let mkField field = ForallC [] ([equalP' (VarT fParam) (thFieldType field)]) $ NormalC (mkName $ thExprName field) []
     return $ DataInstD [] ''Selector [dataType, VarT fParam] (map mkField fDefs) []
 
   selectorNum' <- do
@@ -400,7 +400,7 @@ mkEntityPhantomConstructors def = do
     v <- newName "v"
     let name = mkName $ thPhantomConstrName c
     phantom <- [t| ConstructorMarker $(return entity) |]
-    let constr = ForallC (thTypeParams def) [EqualP (VarT v) phantom] $ NormalC name []
+    let constr = ForallC (thTypeParams def) [equalP' (VarT v) phantom] $ NormalC name []
     return $ DataD [] name [PlainTV v] [constr] []
   
 mkEntityPhantomConstructorInstances :: THEntityDef -> Q [Dec]
@@ -419,7 +419,7 @@ mkEntityUniqueKeysPhantoms def = do
         v <- newName "v"
         let name = mkName $ thUniqueKeyPhantomName u
         phantom <- [t| UniqueMarker $(return entity) |]
-        let constr = ForallC (thTypeParams def) [EqualP (VarT v) phantom] $ NormalC name []
+        let constr = ForallC (thTypeParams def) [equalP' (VarT v) phantom] $ NormalC name []
         return [DataD [] name [PlainTV v] [constr] []]
       else return []
     
@@ -433,14 +433,14 @@ mkPersistEntityInstance def = do
       Nothing -> return []
       Just k -> do
         keyDescr <- [t| BackendSpecific |]
-        return [ForallC [] [EqualP (VarT uParam) keyDescr] $ NormalC (mkName $ thAutoKeyConstrName k) [(NotStrict, ConT ''PersistValue)]]
+        return [ForallC [] [equalP' (VarT uParam) keyDescr] $ NormalC (mkName $ thAutoKeyConstrName k) [(NotStrict, ConT ''PersistValue)]]
     uniques <- forM (thUniqueKeys def) $ \unique -> do
       uniqType <- [t| Unique $(conT $ mkName $ thUniqueKeyPhantomName unique) |]
       let cDef = head $ thConstructors def
           uniqFieldNames = lefts $ thUniqueFields $ findOne "unique" thUniqueName (thUniqueKeyName unique) $ thConstrUniques cDef
           uniqFields = concat $ flip map uniqFieldNames $ \name -> (filter ((== name) . thFieldName) $ thConstrFields cDef)
           uniqFields' = map (\f -> (NotStrict, thFieldType f)) uniqFields
-      return $ ForallC [] [EqualP (VarT uParam) uniqType] $ NormalC (mkName $ thUniqueKeyConstrName unique) uniqFields'
+      return $ ForallC [] [equalP' (VarT uParam) uniqType] $ NormalC (mkName $ thUniqueKeyConstrName unique) uniqFields'
     return $ DataInstD [] ''Key [entity, VarT uParam] (autoKey ++ uniques) []
 
   autoKey' <- do
@@ -466,7 +466,7 @@ mkPersistEntityInstance def = do
   fields' <- do
     cParam <- newName "c"
     fParam <- newName "f"
-    let mkField name field = ForallC [] [EqualP (VarT cParam) (ConT name), EqualP (VarT fParam) (thFieldType field)] $ NormalC (mkName $ thExprName field) []
+    let mkField name field = ForallC [] [equalP' (VarT cParam) (ConT name), equalP' (VarT fParam) (thFieldType field)] $ NormalC (mkName $ thExprName field) []
     let f cdef = map (mkField $ mkName $ thPhantomConstrName cdef) $ thConstrFields cdef
     let constrs = concatMap f $ thConstructors def
     return $ DataInstD [] ''Field [entity, VarT cParam, VarT fParam] constrs []
@@ -732,7 +732,7 @@ getDefaultKey def = case thAutoKey def of
 
 paramsContext :: [TyVarBndr] -> [THFieldDef] -> Cxt
 paramsContext types fields = classPred ''PersistField params ++ classPred ''SinglePersistField maybys ++ classPred ''NeverNull maybys where
-  classPred clazz = map (\t -> ClassP clazz [t])
+  classPred clazz = map (\t -> classP' clazz [t])
   -- every type must be an instance of PersistField
   params = map extractType types
   -- all datatype fields also must be instances of PersistField
@@ -748,7 +748,7 @@ paramsPureContext types fields = do
   return $ case invalid of
     [] -> Just $ classPred ''PurePersistField params ++ classPred ''PrimitivePersistField maybys ++ classPred ''NeverNull maybys where
           params = map extractType types
-          classPred clazz = map (\t -> ClassP clazz [t])
+          classPred clazz = map (\t -> classP' clazz [t])
           -- all datatype fields also must be instances of PersistField
           -- if Maybe is applied to a type param, the param must be also an instance of NeverNull
           -- so that (Maybe param) is an instance of PersistField
@@ -823,4 +823,20 @@ mkTySynInstD name ts t =
   TySynInstD name $ TySynEqn ts t
 #else
   TySynInstD name ts t
+#endif
+
+classP' :: Name -> [Type] -> Pred
+classP' name ts =
+#if MIN_VERSION_template_haskell(2, 10, 0)
+  foldl AppT (ConT name) ts
+#else
+  ClassP name ts
+#endif
+
+equalP' :: Type -> Type -> Pred
+equalP' t1 t2 =
+#if MIN_VERSION_template_haskell(2, 10, 0)
+  foldl AppT EqualityT [t1 t2]
+#else
+  EqualP t1 t2
 #endif
