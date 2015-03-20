@@ -121,12 +121,12 @@ mkFromPersistValues failureName values constrName fieldDefs = do
         return $ doE $ stmts ++ [noBindS expr]
       goPrim xs vars = do
         xs' <- newName "xs"
-        (prim, rest) <- spanM (isPrim . snd) vars
+        (prims, rest) <- spanM (isPrim . snd) vars
         body' <- case rest of
           [] -> return [| return ($result, $(varE xs')) |]
           _  -> goField xs' rest
-        let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
-        return $ if null prim
+        let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prims) (normalB body') []
+        return $ if null prims
           then caseE (varE xs) [m]
           else caseE (varE xs) [m, failure]
   body <- goPrim values allVars
@@ -153,14 +153,14 @@ mkPurePersistFieldInstance dataType cName fDefs context = do
       return (isFailureUsed, letE stmts expr)
     goPrim xs vars result failure proxy = do
       xs' <- newName "xs"
-      (prim, rest) <- spanM (isPrim . snd) vars
+      (prims, rest) <- spanM (isPrim . snd) vars
       (isFailureUsed, body') <- case rest of
         [] -> return (False, [| ($result, $(varE xs')) |])
         _  -> goField xs' rest result failure proxy
-      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prim) (normalB body') []
-      return $ if not (null prim)
-         then (True, caseE (varE xs) [m, failure])
-         else (isFailureUsed, caseE (varE xs) [m])
+      let m = match (foldr (\(fname, _) p -> infixP (varP fname) '(:) p) (varP xs') prims) (normalB body') []
+      return $ if null prims
+         then (isFailureUsed, caseE (varE xs) [m])
+         else (True, caseE (varE xs) [m, failure])
     mkArg proxy (fname, t) = isPrim t >>= \isP -> (if isP then [| fromPrimitivePersistValue $(varE proxy) $(varE fname) |] else (varE fname))
     in do
       xs <- newName "xs"
@@ -666,7 +666,7 @@ mkEntityNeverNullInstance def = do
 
 mkPrimitivePersistFieldInstance :: THPrimitiveDef -> Q [Dec]
 mkPrimitivePersistFieldInstance def = do
-  let prim = ConT (thPrimitiveName def)
+  let primitive = ConT (thPrimitiveName def)
   persistName' <- do
     let body = normalB $ stringE $ nameBase $ thPrimitiveName def
     funD 'persistName $ [ clause [wildP] body [] ]
@@ -678,13 +678,13 @@ mkPrimitivePersistFieldInstance def = do
           else [| DbTypePrimitive DbInt32  False Nothing Nothing |]
     funD 'dbType $ [ clause [wildP, wildP] (normalB typ) [] ]
   let decs = [persistName', toPersistValues', fromPersistValues', dbType']
-  return [ InstanceD [] (AppT (ConT ''PersistField) prim) decs
-         , InstanceD [] (AppT (ConT ''NeverNull) prim) []
+  return [ InstanceD [] (AppT (ConT ''PersistField) primitive) decs
+         , InstanceD [] (AppT (ConT ''NeverNull) primitive) []
          ]
 
 mkPrimitivePrimitivePersistFieldInstance :: THPrimitiveDef -> Q [Dec]
 mkPrimitivePrimitivePersistFieldInstance def = do
-  let prim = ConT (thPrimitiveName def)
+  let primitive = ConT (thPrimitiveName def)
   toPrim' <- do
     proxy <- newName "p"
     x <- newName "x"
@@ -703,9 +703,9 @@ mkPrimitivePrimitivePersistFieldInstance def = do
     funD 'fromPrimitivePersistValue [clause [varP proxy, varP x] (normalB body) []]
   let context = []
   let decs = [toPrim', fromPrim']
-  sequence $ [return $ InstanceD context (AppT (ConT ''PrimitivePersistField) prim) decs
-           , mkDefaultPurePersistFieldInstance context prim
-           , mkDefaultSinglePersistFieldInstance context prim]
+  sequence $ [return $ InstanceD context (AppT (ConT ''PrimitivePersistField) primitive) decs
+           , mkDefaultPurePersistFieldInstance context primitive
+           , mkDefaultSinglePersistFieldInstance context primitive]
 
 mkMigrateFunction :: String -> [THEntityDef] -> Q [Dec]
 mkMigrateFunction name defs = do
