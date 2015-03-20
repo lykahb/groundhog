@@ -28,7 +28,7 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
 import Language.Haskell.TH
-import Language.Haskell.TH.Syntax (Lift(..))
+import Language.Haskell.TH.Syntax
 import Control.Applicative
 import Control.Arrow (second)
 import Control.Monad (liftM, liftM2, forM, forM_, foldM, filterM, replicateM)
