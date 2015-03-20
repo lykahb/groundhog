@@ -836,7 +836,7 @@ classP' name ts =
 equalP' :: Type -> Type -> Pred
 equalP' t1 t2 =
 #if MIN_VERSION_template_haskell(2, 10, 0)
-  foldl AppT EqualityT [t1 t2]
+  foldl AppT EqualityT [t1, t2]
 #else
   EqualP t1 t2
 #endif
