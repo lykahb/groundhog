@@ -246,7 +246,7 @@ generateData' DataCodegenConfig{..} ReverseNamingStyle{..} tables tName tInfo = 
       v = mkName "v"
       name = mkName $ mkUniqueKeyPhantomName tName u
       phantom = ConT ''UniqueMarker `AppT` entity
-      c = ForallC [] [EqualP (VarT v) phantom] $ NormalC name []
+      c = ForallC [] [equalP' (VarT v) phantom] $ NormalC name []
   uniqueKeys = filter isReferenced
              $ map (mkChooseReferencedUnique tName)
              $ groupBy ((==) `on` sort . uniqueDefFields) uniqueDefs
@@ -282,6 +282,15 @@ generateData' DataCodegenConfig{..} ReverseNamingStyle{..} tables tName tInfo = 
               _ -> notMappedRefType
             parentCols = getCols parentInfo $ map snd $ referencedColumns ref
       Nothing -> (mkName $ mkFieldName tName $ colName c, NotStrict, mkType c):go cs
+
+equalP' :: Type -> Type -> Pred
+equalP' t1 t2 =
+#if MIN_VERSION_template_haskell(2, 10, 0)
+  foldl AppT EqualityT [t1, t2]
+#else
+  EqualP t1 t2
+#endif
+
 
 generateMapping :: (PersistBackend m, SchemaAnalyzer m) => ReverseNamingStyle -> Map QualifiedName TableInfo -> m (Map QualifiedName PSEntityDef)
 generateMapping style tables = do
