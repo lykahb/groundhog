@@ -1,3 +1,6 @@
+0.7.0.1
+* Compatibility with template-haskell-2.10
+
 0.7.0
 * Instances of ToJSON for settings
 * Refactoring and export of some utility functions
