@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse #-}
+{-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse, ExplicitForAll #-}
 {-# LANGUAGE CPP #-}
 
 module Database.Groundhog.TH.CodeGen
@@ -712,7 +712,7 @@ mkMigrateFunction name defs = do
   let (normal, polymorhpic) = partition (null . thTypeParams) defs
   forM_ polymorhpic $ \def -> reportWarning $ "Datatype " ++ show (thDataName def) ++ " will not be migrated automatically by function " ++ name ++ " because it has type parameters"
   let body = doE $ map (\def -> noBindS [| migrate (undefined :: $(conT $ thDataName def)) |]) normal
-  sig <- sigD (mkName name) [t| PersistBackend m => Migration m |]
+  sig <- sigD (mkName name) [t| forall m . PersistBackend m => Migration m |]
   func <- funD (mkName name) [clause [] (normalB body) []]
   return [sig, func]
 
