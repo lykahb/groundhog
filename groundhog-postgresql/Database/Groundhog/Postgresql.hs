@@ -127,7 +127,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (Db
   getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
 
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
-                   => String -- ^ connection string
+                   => String -- ^ connection string in keyword\/value format like "host=localhost port=5432 dbname=mydb". For more details and options see http://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-PARAMKEYWORDS
                    -> Int -- ^ number of connections to open
                    -> (Pool Postgresql -> m a)
                    -> m a
