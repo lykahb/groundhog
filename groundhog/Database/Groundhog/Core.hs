@@ -341,8 +341,16 @@ class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
   -- | Return a list of the records satisfying the condition. Example: @select $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`limitTo\` 100@
   select        :: (PersistEntity v, EntityConstr v c, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
                 => opts -> m [v]
+  -- | Return a list of the records satisfying the condition. Example: @select $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`limitTo\` 100@
+  selectStream  :: (PersistEntity v, EntityConstr v c, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
+                => opts
+                -> (m (Maybe v) -> m r) -- ^ results processing function
+                -> m r
   -- | Return a list of all records. Order is undefined. It can be useful for datatypes with multiple constructors.
   selectAll     :: PersistEntity v => m [(AutoKey v, v)]
+  -- | Return a list of all records. Order is undefined. It can be useful for datatypes with multiple constructors.
+  selectAllStream :: PersistEntity v => (m (Maybe (AutoKey v, v)) -> m r) -- ^ results processing function
+                -> m [r]
   -- | Fetch an entity from a database
   get           :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m (Maybe v)
   -- | Fetch an entity from a database by its unique key
@@ -364,6 +372,11 @@ class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
                 => p
                 -> opts
                 -> m [a]
+  projectStream :: (PersistEntity v, EntityConstr v c, Projection' p (PhantomDb m) (RestrictionHolder v c) a, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
+                => p
+                -> opts
+                -> (m (Maybe a) -> m r) -- ^ results processing function
+                -> m r
   -- | Check database schema and create migrations for the entity and the entities it contains
   migrate       :: PersistEntity v => v -> Migration m
   -- | Execute raw query

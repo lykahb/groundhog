@@ -6,8 +6,11 @@ module Database.Groundhog.Generic.PersistBackendHelpers
     get
   , select
   , selectAll
+  , selectStream
+  , selectAllStream
   , getBy
   , project
+  , projectStream
   , count
   , replace
   , replaceBy
@@ -26,7 +29,7 @@ import qualified Database.Groundhog.Core as Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql
 
-import Control.Monad (liftM, forM, (>=>))
+import Control.Monad (liftM, (>=>))
 import Data.Either (rights)
 import Data.Maybe (catMaybes, fromJust, mapMaybe)
 import Data.Monoid
@@ -62,9 +65,22 @@ get RenderConfig{..} queryFunc (k :: Key v BackendSpecific) = do
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
 
+popperToList :: Monad m => m (Maybe a) -> m [a]
+popperToList pop = go where
+  go = pop >>= maybe (return []) (\a -> liftM (a:) go)
+
+mapPopper :: Monad m => (a -> m b) -> m (Maybe a) -> m (Maybe b)
+mapPopper f pop = pop >>= \a -> case a of
+  Nothing -> return Nothing
+  Just a' -> liftM Just $ f a'
+
 select :: forall m db r v c opts . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, HasSelectOptions opts db r)
        => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> opts -> m [v]
-select conf@RenderConfig{..} queryFunc preColumns noLimit options = doSelectQuery where
+select conf queryFunc preColumns noLimit options = selectStream conf queryFunc preColumns noLimit options popperToList
+
+selectStream :: forall m db r v c opts result . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, HasSelectOptions opts db r)
+       => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> opts -> (m (Maybe v) -> m result) -> m result
+selectStream conf@RenderConfig{..} queryFunc preColumns noLimit options f = doSelectQuery where
   SelectOptions cond limit offset ords dist _ = getSelectOptions options
 
   e = entityDef proxy (undefined :: v)
@@ -80,25 +96,31 @@ select conf@RenderConfig{..} queryFunc preColumns noLimit options = doSelectQuer
   distinctClause = if dist then "DISTINCT " else mempty
   RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
   whereClause = maybe "" (" WHERE " <>) cond'
-  doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . fromEntityPersistValues . (toPrimitivePersistValue proxy cNum:)
+  doSelectQuery = queryFunc query (binds []) $ f . mapPopper (\xs -> liftM fst $ fromEntityPersistValues $ (toPrimitivePersistValue proxy cNum):xs)
   cNum = entityConstrNum (undefined :: proxy v) (undefined :: c a)
   constr = constructors e !! cNum
 
 selectAll :: forall m v . (PersistBackend m, PersistEntity v)
           => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> m [(AutoKey v, v)]
-selectAll RenderConfig{..} queryFunc = start where
-  start = if isSimple (constructors e)
-    then let
-      constr = head $ constructors e
-      fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId esc constr) $ renderFields esc (constrParams constr)
-      query = "SELECT " <> fields <> " FROM " <> tableName esc e constr
-      in queryFunc query [] $ mapAllRows $ mkEntity proxy 0
-    else liftM concat $ forM (zip [0..] (constructors e)) $ \(cNum, constr) -> do
-        let fields = fromJust (constrId esc constr) <> fromChar ',' <> renderFields esc (constrParams constr)
-        let query = "SELECT " <> fields <> " FROM " <> tableName esc e constr
-        queryFunc query [] $ mapAllRows $ mkEntity proxy cNum
+selectAll conf queryFunc = result where
+  result = fmap (foldr ($) []) $ selectAllStream conf queryFunc popperToDiffList
+  popperToDiffList pop = go where
+    go = pop >>= maybe (return id) (\a -> liftM ((a:) .) go)
+
+-- | It may call the passed function multiple times
+selectAllStream :: forall m v result . (PersistBackend m, PersistEntity v)
+                => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (m (Maybe (AutoKey v, v)) -> m result) -> m [result]
+selectAllStream RenderConfig{..} queryFunc f = start where
+  start = sequence $ zipWith selectConstr [0..] $ constructors e
+  selectConstr cNum constr = queryFunc query [] $ f . mkEntity cNum where
+    fields = maybe id (\key cont -> key <> fromChar ',' <> cont) (constrId esc constr) $ renderFields esc (constrParams constr)
+    query = "SELECT " <> fields <> " FROM " <> tableName esc e constr
   e = entityDef proxy (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
+  mkEntity cNum = mapPopper $ \xs -> do
+    let (k, xs') = fromPurePersistValues proxy xs
+    (v, _) <- fromEntityPersistValues (toPrimitivePersistValue proxy (cNum :: Int):xs')
+    return (k, v)
 
 getBy :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
       => RenderConfig
@@ -122,7 +144,11 @@ getBy conf@RenderConfig{..} queryFunc (k :: Key v (Unique u)) = do
 
 project :: forall m db r v c p opts a'. (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p a', ProjectionDb p db, ProjectionRestriction p r, HasSelectOptions opts db r)
         => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> p -> opts -> m [a']
-project conf@RenderConfig{..} queryFunc preColumns noLimit p options = doSelectQuery where
+project conf queryFunc preColumns noLimit p options = projectStream conf queryFunc preColumns noLimit p options popperToList
+
+projectStream :: forall m db r v c p opts a' result . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c, Projection p a', ProjectionDb p db, ProjectionRestriction p r, HasSelectOptions opts db r)
+        => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> (opts -> RenderS db r) -> Utf8 -> p -> opts -> (m (Maybe a') -> m result) -> m result
+projectStream conf@RenderConfig{..} queryFunc preColumns noLimit p options f = doSelectQuery where
   SelectOptions cond limit offset ords dist _ = getSelectOptions options
   e = entityDef proxy (undefined :: v)
   proxy = undefined :: proxy (PhantomDb m)
@@ -138,7 +164,7 @@ project conf@RenderConfig{..} queryFunc preColumns noLimit p options = doSelectQ
   distinctClause = if dist then "DISTINCT " else mempty
   RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
   whereClause = maybe "" (" WHERE " <>) cond'
-  doSelectQuery = queryFunc query (binds []) $ mapAllRows $ liftM fst . projectionResult p
+  doSelectQuery = queryFunc query (binds []) $ f . mapPopper (liftM fst . projectionResult p)
   constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
 
 count :: forall m db r v c . (SqlDb db, db ~ PhantomDb m, r ~ RestrictionHolder v c, PersistBackend m, PersistEntity v, EntityConstr v c)
@@ -327,11 +353,6 @@ insertBy conf@RenderConfig{..} queryFunc manyNulls u v = do
 
 constrId :: (Utf8 -> Utf8) -> ConstructorDef -> Maybe Utf8
 constrId escape = fmap (escape . fromString) . constrAutoKeyName
-
--- | receives constructor number and row of values from the constructor table
-mkEntity :: (PersistEntity v, PersistBackend m) => proxy (PhantomDb m) -> Int -> [PersistValue] -> m (AutoKey v, v)
-mkEntity proxy i xs = fromEntityPersistValues (toPrimitivePersistValue proxy i:xs') >>= \(v, _) -> return (k, v) where
-  (k, xs') = fromPurePersistValues proxy xs
 
 toEntityPersistValues' :: (PersistBackend m, PersistEntity v) => v -> m [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues

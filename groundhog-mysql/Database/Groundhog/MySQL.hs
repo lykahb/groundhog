@@ -76,7 +76,9 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   replace k v = H.replace renderConfig queryRaw' executeRaw' insertIntoConstructorTable k v
   replaceBy k v = H.replaceBy renderConfig executeRaw' k v
   select options = H.select renderConfig queryRaw' preColumns noLimit options
+  selectStream options = H.selectStream renderConfig queryRaw' preColumns noLimit options
   selectAll = H.selectAll renderConfig queryRaw'
+  selectAllStream = H.selectAllStream renderConfig queryRaw'
   get k = H.get renderConfig queryRaw' k
   getBy k = H.getBy renderConfig queryRaw' k
   update upds cond = H.update renderConfig executeRaw' upds cond
@@ -86,6 +88,7 @@ instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (Db
   count cond = H.count renderConfig queryRaw' cond
   countAll fakeV = H.countAll renderConfig queryRaw' fakeV
   project p options = H.project renderConfig queryRaw' preColumns noLimit p options
+  projectStream p options = H.projectStream renderConfig queryRaw' preColumns noLimit p options
   migrate fakeV = migrate' fakeV
 
   executeRaw _ query ps = executeRaw' (fromString query) ps
