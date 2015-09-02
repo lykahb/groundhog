@@ -103,7 +103,7 @@ selectStream conf@RenderConfig{..} queryFunc preColumns noLimit options f = doSe
 selectAll :: forall m v . (PersistBackend m, PersistEntity v)
           => RenderConfig -> (forall a . Utf8 -> [PersistValue] -> (RowPopper m -> m a) -> m a) -> m [(AutoKey v, v)]
 selectAll conf queryFunc = result where
-  result = fmap (foldr ($) []) $ selectAllStream conf queryFunc popperToDiffList
+  result = liftM (foldr ($) []) $ selectAllStream conf queryFunc popperToDiffList
   popperToDiffList pop = go where
     go = pop >>= maybe (return id) (\a -> liftM ((a:) .) go)
 
