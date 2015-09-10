@@ -51,7 +51,7 @@ gCond = NameField G.==. ("abc" :: String) G.&&. AgeField G.==. (40 :: Int) G.&&.
 pPerson = PPerson "John Doe" 23 180
 pCond = [PPersonName P.==. "abc", PPersonAge P.==. 40, PPersonHeight P.==. 160]
 
-gMigrate :: (G.PersistBackend (G.DbPersist conn m), MonadIO m) => G.DbPersist conn m () -> G.DbPersist conn m (G.Key GPerson G.BackendSpecific)
+gMigrate :: (G.PersistBackend m, MonadIO m) => m () -> m (G.Key GPerson G.BackendSpecific)
 gMigrate truncate = G.runMigration migrateG >> truncate >> G.insert gPerson
 pMigrate :: P.SqlPersistT (NoLoggingT (ResourceT IO)) () -> P.SqlPersistT (NoLoggingT (ResourceT IO)) (P.Key PPerson)
 pMigrate truncate = P.runMigration migrateP >> truncate >> P.insert pPerson
@@ -61,23 +61,21 @@ instance MonadLogger IO where
 
 -- open transaction to reduce execution time on the DB side
 eachStatementInTransaction :: Bool
-eachStatementInTransaction = False
+eachStatementInTransaction = True
 
 -- operatons are replicated to reduce influence of running a monad on the actual library and database performance measurements
 numberOfOperations :: Int
-numberOfOperations = 10
+numberOfOperations = 1
 
 main = 
-  G.withSqliteConn ":memory:" $ \gConn -> 
-  P.withSqliteConn ":memory:" $ \pConn -> do
-    gKey <- G.runDbConn (gMigrate $ return ()) gConn
-    pKey <- runResourceT $ runNoLoggingT $ P.runSqlConn (pMigrate $ return ()) pConn
-{-
+--  G.withSqliteConn ":memory:" $ \gConn ->
+--  P.withSqliteConn ":memory:" $ \pConn -> do
+--    gKey <- G.runDbConn (gMigrate $ return ()) gConn
+--    pKey <- runResourceT $ runNoLoggingT $ P.runSqlConn (pMigrate $ return ()) pConn
   G.withPostgresqlConn "dbname=test user=test password=test host=localhost" $ \gConn ->
   P.withPostgresqlConn "dbname=test user=test password=test host=localhost" $ \pConn -> do
     gKey <- G.runDbConn (gMigrate $ G.executeRaw False "truncate table \"GPerson\"" []) gConn
     pKey <- runResourceT $ runNoLoggingT $ P.runSqlConn (pMigrate $ P.rawExecute "truncate table \"PPerson\"" []) pConn
--}
     unless eachStatementInTransaction $ do
       runNoLoggingT $ G.runDbPersist (G.executeRaw False "BEGIN" []) gConn
       runResourceT $ runNoLoggingT $ runReaderT (P.rawExecute "BEGIN" []) pConn
@@ -86,7 +84,7 @@ main =
         mkBench gm pm = [bench "groundhog" $ whnfIO $ runSqlite gm, bench "persistent" $ whnfIO $ runPersistent pm] where
           (runSqlite, runPersistent) = if eachStatementInTransaction
             then (\gm -> G.runDbConn (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ P.runSqlConn (replicateM_ numberOfOperations pm) pConn)
-            else (\gm -> G.runDbConnNoTransaction (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
+            else (\gm -> G.runDbConn' (replicateM_ numberOfOperations gm) gConn, \pm -> runResourceT $ runNoLoggingT $ runReaderT (replicateM_ numberOfOperations pm) pConn)
     defaultMainWith myConfig
       [ bgroup "get" $ mkBench (G.get gKey) (P.get pKey)
 --      , bgroup "get" [bench "esqueleto" $ whnfIO $  runPers (E.select $ E.from $ \p -> E.where_ (p ^. PPersonId ==. val pKey) >> return p)]

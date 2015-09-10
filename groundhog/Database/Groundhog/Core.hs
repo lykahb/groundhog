@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds, CPP #-}
+{-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds, CPP, LiberalTypeSynonyms #-}
 {-# LANGUAGE UndecidableInstances #-} -- Required for Projection'
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
@@ -73,31 +73,30 @@ module Database.Groundhog.Core
   , Migration
   -- * Database
   , PersistBackend(..)
+  , PersistBackendConn(..)
+  , Action
+  , RowStream
   , DbDescriptor(..)
-  , RowPopper
-  , DbPersist(..)
+  , DbPersist
   , runDbPersist
   -- * Connections and transactions
+  , ExtractConnection(..)
   , ConnectionManager(..)
-  , SingleConnectionManager
   , Savepoint(..)
+  , withSavepoint
+  , runDb
+  , runDbConn
+  , runDb'
+  , runDbConn'
   ) where
 
 import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
 import Control.Applicative (Applicative)
-import Control.Monad.Base (MonadBase (liftBase))
-import Control.Monad.Logger (MonadLogger(..))
-import Control.Monad.Trans.Class (MonadTrans(..))
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Control (MonadBaseControl (..), ComposeSt, defaultLiftBaseWith, defaultRestoreM, MonadTransControl (..))
-import Control.Monad.Trans.Reader (ReaderT(..), runReaderT, mapReaderT)
-import Control.Monad.Trans.State (StateT)
+import Control.Monad.Trans.Control (MonadBaseControl (..))
+import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
+import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Reader (MonadReader(..))
-import Control.Monad (liftM)
-import qualified Control.Monad.Cont.Class as Mtl
-import qualified Control.Monad.Error.Class as Mtl
-import qualified Control.Monad.State.Class as Mtl
-import qualified Control.Monad.Writer.Class as Mtl
 import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
@@ -255,63 +254,11 @@ orderBy opts ord = (getSelectOptions opts) {orderOptions = ord}
 distinct :: (HasSelectOptions a db r, HasDistinct a ~ HFalse) => a -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a) HTrue
 distinct opts = (getSelectOptions opts) {distinctOptions = True}
 
-newtype DbPersist conn m a = DbPersist { unDbPersist :: ReaderT conn m a }
-  deriving (Monad, MonadIO, Functor, Applicative, MonadTrans, MonadReader conn)
-
-instance MonadBase IO m => MonadBase IO (DbPersist conn m) where
-  liftBase = lift . liftBase
-
-instance MonadTransControl (DbPersist conn) where
-#if MIN_VERSION_monad_control(1, 0, 0)
-  type StT (DbPersist conn) a = StT (ReaderT conn) a
-  liftWith f = DbPersist $ ReaderT $ \r -> f $ \t -> runReaderT (unDbPersist t) r
-  restoreT = DbPersist . ReaderT . const
-#else
-  newtype StT (DbPersist conn) a = StReader {unStReader :: a}
-  liftWith f = DbPersist $ ReaderT $ \r -> f $ \t -> liftM StReader $ runReaderT (unDbPersist t) r
-  restoreT = DbPersist . ReaderT . const . liftM unStReader
-#endif
-
-instance MonadBaseControl IO m => MonadBaseControl IO (DbPersist conn m) where
-#if MIN_VERSION_monad_control(1, 0, 0)
-  type StM (DbPersist conn m) a = ComposeSt (DbPersist conn) m a
-  liftBaseWith = defaultLiftBaseWith
-  restoreM     = defaultRestoreM
-#else
-  newtype StM (DbPersist conn m) a = StMSP {unStMSP :: ComposeSt (DbPersist conn) m a}
-  liftBaseWith = defaultLiftBaseWith StMSP
-  restoreM     = defaultRestoreM   unStMSP
-#endif
-
-instance MonadLogger m => MonadLogger (DbPersist conn m) where
-  monadLoggerLog a b c = lift . monadLoggerLog a b c
+{-# DEPRECATED DbPersist, runDbPersist "Use `PersistBackend` constraint instead. If you need to specify a backend, add (PersistBackend m, Conn m ~ Postgresql) " #-}
+type DbPersist = ReaderT
 
 runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
-runDbPersist = runReaderT . unDbPersist
-
-mapDbPersist :: (m a -> n b) -> DbPersist conn m a -> DbPersist conn n b
-mapDbPersist f m = DbPersist $ mapReaderT f $ unDbPersist m
-
-instance Mtl.MonadWriter w m => Mtl.MonadWriter w (DbPersist conn m) where
-  writer = lift . Mtl.writer
-  tell = lift . Mtl.tell
-  listen = mapDbPersist Mtl.listen
-  pass = mapDbPersist Mtl.pass
-
-instance Mtl.MonadError e m => Mtl.MonadError e (DbPersist conn m) where
-  throwError = lift . Mtl.throwError
-  catchError m h = DbPersist $ Mtl.catchError (unDbPersist m) (unDbPersist . h)
-
-instance Mtl.MonadCont m => Mtl.MonadCont (DbPersist conn m) where
-  callCC = liftCallCC Mtl.callCC where
-    liftCallCC callCC f = DbPersist $ ReaderT $ \ r ->
-      callCC $ \ c ->
-      runDbPersist (f (DbPersist . ReaderT . const . c)) r
-
-instance Mtl.MonadState s m => Mtl.MonadState s (DbPersist conn m) where
-  get = lift Mtl.get
-  put = lift . Mtl.put
-  state = lift . Mtl.state
+runDbPersist = runReaderT
 
 class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   -- | Type of the database default autoincremented key. For example, Sqlite has Int64
@@ -321,79 +268,73 @@ class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   -- | Name of backend
   backendName :: proxy db -> String
 
-class (Monad m, DbDescriptor (PhantomDb m)) => PersistBackend m where
-  -- | A token which defines the DB type. For example, different monads working with Sqlite, return may Sqlite type.
-  type PhantomDb m
+class (DbDescriptor conn, ConnectionManager conn) => PersistBackendConn conn where
   -- | Insert a new record to a database and return its autogenerated key or ()
-  insert        :: PersistEntity v => v -> m (AutoKey v)
+  insert        :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> m (AutoKey v)
   -- | Insert a new record to a database. For some backends it may be faster than 'insert'.
-  insert_       :: PersistEntity v => v -> m ()
+  insert_       :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> m ()
   -- | Try to insert a record and return Right newkey. If there is a constraint violation for the given constraint, Left oldkey is returned
   -- , where oldkey is an identifier of the record with the matching values.
-  insertBy      :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => u (UniqueMarker v) -> v -> m (Either (AutoKey v) (AutoKey v))
+  insertBy      :: (PersistEntity v, IsUniqueKey (Key v (Unique u)), PersistBackend m, Conn m ~ conn) => u (UniqueMarker v) -> v -> m (Either (AutoKey v) (AutoKey v))
   -- | Try to insert a record and return Right newkey. If there is a constraint violation for any constraint, Left oldkey is returned
   -- , where oldkey is an identifier of the record with the matching values. Note that if several constraints are violated, a key of an arbitrary matching record is returned.
-  insertByAll   :: PersistEntity v => v -> m (Either (AutoKey v) (AutoKey v))
+  insertByAll   :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> m (Either (AutoKey v) (AutoKey v))
   -- | Replace a record with the given autogenerated key. Result is undefined if the record does not exist.
-  replace       :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> v -> m ()
+  replace       :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific), PersistBackend m, Conn m ~ conn) => Key v BackendSpecific -> v -> m ()
   -- | Replace a record. The unique key marker defines what unique key of the entity is used.
-  replaceBy     :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => u (UniqueMarker v) -> v -> m ()
+  replaceBy     :: (PersistEntity v, IsUniqueKey (Key v (Unique u)), PersistBackend m, Conn m ~ conn) => u (UniqueMarker v) -> v -> m ()
   -- | Return a list of the records satisfying the condition. Example: @select $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`limitTo\` 100@
-  select        :: (PersistEntity v, EntityConstr v c, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
-                => opts -> m [v]
+  select        :: (PersistEntity v, EntityConstr v c, HasSelectOptions opts conn (RestrictionHolder v c), PersistBackend m, Conn m ~ conn)
+                  => opts -> m [v]
   -- | Return a list of the records satisfying the condition. Example: @select $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`limitTo\` 100@
-  selectStream  :: (PersistEntity v, EntityConstr v c, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
-                => opts
-                -> (m (Maybe v) -> m r) -- ^ results processing function
-                -> m r
+  selectStream  :: (PersistEntity v, EntityConstr v c, HasSelectOptions opts conn (RestrictionHolder v c), PersistBackend m, Conn m ~ conn)
+                => opts -> m (RowStream v)
   -- | Return a list of all records. Order is undefined. It can be useful for datatypes with multiple constructors.
-  selectAll     :: PersistEntity v => m [(AutoKey v, v)]
+  selectAll     :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => m [(AutoKey v, v)]
   -- | Return a list of all records. Order is undefined. It can be useful for datatypes with multiple constructors.
-  selectAllStream :: PersistEntity v => (m (Maybe (AutoKey v, v)) -> m r) -- ^ results processing function
-                -> m [r]
+  selectAllStream :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => m (RowStream (AutoKey v, v))
   -- | Fetch an entity from a database
-  get           :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m (Maybe v)
+  get           :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific), PersistBackend m, Conn m ~ conn) => Key v BackendSpecific -> m (Maybe v)
   -- | Fetch an entity from a database by its unique key
-  getBy         :: (PersistEntity v, IsUniqueKey (Key v (Unique u))) => Key v (Unique u) -> m (Maybe v)
+  getBy         :: (PersistEntity v, IsUniqueKey (Key v (Unique u)), PersistBackend m, Conn m ~ conn) => Key v (Unique u) -> m (Maybe v)
   -- | Update the records satisfying the condition. Example: @update [FirstField =. \"abc\"] $ FirstField ==. \"def\"@
-  update        :: (PersistEntity v, EntityConstr v c) => [Update (PhantomDb m) (RestrictionHolder v c)] -> Cond (PhantomDb m) (RestrictionHolder v c) -> m ()
+  update        :: (PersistEntity v, EntityConstr v c, PersistBackend m, Conn m ~ conn) => [Update conn (RestrictionHolder v c)] -> Cond conn (RestrictionHolder v c) -> m ()
   -- | Remove the records satisfying the condition
-  delete        :: (PersistEntity v, EntityConstr v c) => Cond (PhantomDb m) (RestrictionHolder v c) -> m ()
+  delete        :: (PersistEntity v, EntityConstr v c, PersistBackend m, Conn m ~ conn) => Cond conn (RestrictionHolder v c) -> m ()
   -- | Remove the record with given key. No-op if the record does not exist
-  deleteBy      :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m ()
+  deleteBy      :: (PersistEntity v, PrimitivePersistField (Key v BackendSpecific), PersistBackend m, Conn m ~ conn) => Key v BackendSpecific -> m ()
   -- | Remove all records. The entity parameter is used only for type inference.
-  deleteAll     :: PersistEntity v => v -> m ()
+  deleteAll     :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> m ()
   -- | Count total number of records satisfying the condition
-  count         :: (PersistEntity v, EntityConstr v c) => Cond (PhantomDb m) (RestrictionHolder v c) -> m Int
+  count         :: (PersistEntity v, EntityConstr v c, PersistBackend m, Conn m ~ conn) => Cond conn (RestrictionHolder v c) -> m Int
   -- | Count total number of records with all constructors. The entity parameter is used only for type inference
-  countAll      :: PersistEntity v => v -> m Int
+  countAll      :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> m Int
   -- | Fetch projection of some fields. Example: @project (SecondField, ThirdField) $ (FirstField ==. \"abc\" &&. SecondField >. \"def\") \`orderBy\` [Asc ThirdField] \`offsetBy\` 100@
-  project       :: (PersistEntity v, EntityConstr v c, Projection' p (PhantomDb m) (RestrictionHolder v c) a, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
+  project       :: (PersistEntity v, EntityConstr v c, Projection' p conn (RestrictionHolder v c) a, HasSelectOptions opts conn (RestrictionHolder v c), PersistBackend m, Conn m ~ conn)
                 => p
                 -> opts
                 -> m [a]
-  projectStream :: (PersistEntity v, EntityConstr v c, Projection' p (PhantomDb m) (RestrictionHolder v c) a, HasSelectOptions opts (PhantomDb m) (RestrictionHolder v c))
+  projectStream :: (PersistEntity v, EntityConstr v c, Projection' p conn (RestrictionHolder v c) a, HasSelectOptions opts conn (RestrictionHolder v c), PersistBackend m, Conn m ~ conn)
                 => p
                 -> opts
-                -> (m (Maybe a) -> m r) -- ^ results processing function
-                -> m r
+                -> m (RowStream a)
   -- | Check database schema and create migrations for the entity and the entities it contains
-  migrate       :: PersistEntity v => v -> Migration m
+  migrate       :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> Migration (m)
   -- | Execute raw query
-  executeRaw    :: Bool           -- ^ keep in cache
+  executeRaw    :: (PersistBackend m, Conn m ~ conn) => Bool           -- ^ keep in cache
                 -> String         -- ^ query
                 -> [PersistValue] -- ^ positional parameters
                 -> m ()
   -- | Execute raw query with results
-  queryRaw      :: Bool           -- ^ keep in cache
+  queryRaw      :: (PersistBackend m, Conn m ~ conn) => Bool           -- ^ keep in cache
                 -> String         -- ^ query
                 -> [PersistValue] -- ^ positional parameters
-                -> (RowPopper m -> m a) -- ^ results processing function
-                -> m a
-  insertList    :: PersistField a => [a] -> m Int64
-  getList       :: PersistField a => Int64 -> m [a]
+                -> m (RowStream [PersistValue])
+  insertList    :: (PersistField a, PersistBackend m, Conn m ~ conn) => [a] -> m Int64
+  getList       :: (PersistField a, PersistBackend m, Conn m ~ conn) => Int64 -> m [a]
 
-type RowPopper m = m (Maybe [PersistValue])
+type Action conn = ReaderT conn IO
+type RowStream a = (IO (Maybe a), Maybe (IO ()))
 
 type Migration m = StateT NamedMigrations m ()
 
@@ -605,16 +546,54 @@ class PersistField a => PrimitivePersistField a where
 delim :: Char
 delim = '#'
 
--- | Connection manager provides connection to the passed function handles transations. Manager can be a connection itself, a pool, Snaplet in Snap, foundation datatype in Yesod, etc.
-class ConnectionManager cm conn | cm -> conn where
-  -- | Extracts the connection from manager and opens the transaction.
-  withConn :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> cm -> m a
-  -- | Extracts the connection.
-  withConnNoTransaction :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> cm -> m a
+class ExtractConnection cm conn | cm -> conn where
+  -- | Extracts the connection. The connection manager can be a pool or the connection itself
+  extractConn :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> cm -> m a
 
--- | This connection manager always returns the same connection. This constraint is useful when performing operations which make sense only within one connection, for example, nested savepoints..
-class ConnectionManager cm conn => SingleConnectionManager cm conn
+-- | Connection manager provides connection to the passed function handles transations. Manager can be a connection itself, a pool, Snaplet in Snap, foundation datatype in Yesod, etc.
+class ConnectionManager conn where
+  -- | Opens the transaction.
+  withConn :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> conn -> m a
 
 class Savepoint conn where
   -- | Wraps the passed action into a named savepoint
   withConnSavepoint :: (MonadBaseControl IO m, MonadIO m) => String -> m a -> conn -> m a
+
+-- | This class helps to shorten the type signatures of user monadic code.
+-- If your monad has several connections, e.g., for main and audit databases, create run*Db function
+-- runAuditDb :: Action conn a -> m a
+
+class (Monad m, MonadIO m, ConnectionManager (Conn m), PersistBackendConn (Conn m)) => PersistBackend m where
+  type Conn m
+  getConnection :: m (Conn m)
+
+instance (Monad m, MonadIO m, PersistBackendConn conn) => PersistBackend (ReaderT conn m) where
+  type Conn (ReaderT conn m) = conn
+  getConnection = ask
+
+-- | It helps to run database operations within an application monad.
+runDb :: PersistBackend m => Action (Conn m) a -> m a
+runDb f = getConnection >>= liftIO . withConn (runReaderT f)
+
+-- | Runs action within connection. It can handle a simple connection, a pool of them, etc.
+runDbConn :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
+runDbConn f cm = extractConn (liftIO . withConn (runReaderT f)) cm
+
+-- | It helps to run database operations within an application monad. Unlike `runDb` it does not wrap action in transaction
+runDb' :: PersistBackend m => Action (Conn m) a -> m a
+runDb' f = getConnection >>= liftIO . runReaderT f
+
+-- | It is similar to `runDbConn` but runs action without transaction.
+--
+-- @
+-- flip withConn conn $ \\conn -> liftIO $ do
+--   -- transaction is already opened by withConn at this point
+--   someIOAction
+--   runDbConn' (insert_ value) conn
+-- @
+runDbConn' :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
+runDbConn' f cm = extractConn (liftIO . runReaderT f) cm
+
+-- | It helps to run 'withConnSavepoint' within a monad. Make sure that transaction is open
+withSavepoint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, Savepoint (Conn m)) => String -> m a -> m a
+withSavepoint name m = getConnection >>= withConnSavepoint name m

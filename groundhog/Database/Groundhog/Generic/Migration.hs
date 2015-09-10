@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, TypeFamilies #-}
 -- | This helper module is intended for use by the backend creators
 module Database.Groundhog.Generic.Migration
   ( Column(..)
@@ -91,14 +91,14 @@ data AlterDB = AddTable String
              | CreateSchema String Bool
   deriving Show
 
-data MigrationPack m = MigrationPack {
+data MigrationPack conn = MigrationPack {
     compareTypes :: DbTypePrimitive -> DbTypePrimitive -> Bool
   , compareRefs :: (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
   , compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
   , compareDefaults :: String -> String -> Bool
-  , migTriggerOnDelete :: QualifiedName -> [(String, String)] -> m (Bool, [AlterDB])
-  , migTriggerOnUpdate :: QualifiedName -> [(String, String)] -> m [(Bool, [AlterDB])]
-  , migConstr :: MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
+  , migTriggerOnDelete :: QualifiedName -> [(String, String)] -> Action conn (Bool, [AlterDB])
+  , migTriggerOnUpdate :: QualifiedName -> [(String, String)] -> Action conn [(Bool, [AlterDB])]
+  , migConstr :: EntityDef -> ConstructorDef -> Action conn (Bool, SingleMigration)
   , escape :: String -> String
   , autoincrementedKeyTypeName :: String
   , mainTableId :: String
@@ -165,7 +165,7 @@ migrateRecursively :: (PersistBackend m, PersistEntity v) =>
   -> Migration m
 migrateRecursively migS migE migL v = result where
   result = migEntity $ entityDef proxy v
-  proxy = (undefined :: t m a -> proxy (PhantomDb m)) result
+  proxy = (undefined :: t m a -> proxy (Conn m)) result
   go l@(DbList lName t) = f ("list " ++ lName) (migL l) (go t)
   go (DbEmbedded (EmbeddedDef _ ts) ref) = mapM_ (go . snd) ts >> migRef ref
   go (DbTypePrimitive _ _ _ ref) = migRef ref
@@ -183,14 +183,14 @@ migrateRecursively migS migE migL v = result where
     when (a == Nothing) $
       lift mig >>= modify . Map.insert name >> cont
 
-migrateSchema :: SchemaAnalyzer m => MigrationPack m -> String -> m SingleMigration
+migrateSchema :: SchemaAnalyzer conn => MigrationPack conn -> String -> Action conn SingleMigration
 migrateSchema MigrationPack{..} schema = do
   x <- schemaExists schema
   return $ if x
     then Right []
     else showAlterDb $ CreateSchema schema False
 
-migrateEntity :: (SchemaAnalyzer m, PersistBackend m) => MigrationPack m -> EntityDef -> m SingleMigration
+migrateEntity :: (SchemaAnalyzer conn, PersistBackendConn conn) => MigrationPack conn -> EntityDef -> Action conn SingleMigration
 migrateEntity m@MigrationPack{..} e = do
   autoKeyType <- fmap getAutoKeyType phantomDb
   let name = entityName e
@@ -205,11 +205,11 @@ migrateEntity m@MigrationPack{..} e = do
       case x of
         Just old | null $ getAlters m old expectedMainStructure -> return $ Left
           ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
-        _ -> liftM snd $ migConstr m e $ head constrs
+        _ -> liftM snd $ migConstr e $ head constrs
     else do
       mainStructure <- analyzeTable (entitySchema e, name)
       let constrTable c = name ++ [delim] ++ constrName c
-      res <- mapM (migConstr m e) constrs
+      res <- mapM (migConstr e) constrs
       return $ case mainStructure of
         Nothing -> 
           -- no constructor tables can exist if there is no main data table
@@ -228,7 +228,7 @@ migrateEntity m@MigrationPack{..} e = do
                in mergeMigrations $ Right updateDiscriminators: map snd res
           else Left ["Unexpected structure of main table for Datatype: " ++ name ++ ". Table info: " ++ show mainStructure']
 
-migrateList :: (SchemaAnalyzer m, PersistBackend m) => MigrationPack m -> DbType -> m SingleMigration
+migrateList :: (SchemaAnalyzer conn, PersistBackendConn conn) => MigrationPack conn -> DbType -> Action conn SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
   autoKeyType <- fmap getAutoKeyType phantomDb
   let valuesName = mainName ++ delim : "values"
@@ -310,7 +310,7 @@ dropUnique (UniqueDef name typ _) = (case typ of
   UniquePrimary _ -> DropConstraint name') where
   name' = fromMaybe (error $ "dropUnique: constraint which should be dropped does not have a name") name
   
-defaultMigConstr :: (SchemaAnalyzer m, PersistBackend m) => MigrationPack m -> EntityDef -> ConstructorDef -> m (Bool, SingleMigration)
+defaultMigConstr :: (SchemaAnalyzer conn, PersistBackendConn conn) => MigrationPack conn -> EntityDef -> ConstructorDef -> Action conn (Bool, SingleMigration)
 defaultMigConstr m@MigrationPack{..} e constr = do
   let simple = isSimple $ constructors e
       name = entityName e
@@ -380,18 +380,18 @@ readReferenceAction c = case c of
   "SET DEFAULT" -> Just SetDefault
   _ -> Nothing
 
-class (Applicative m, Monad m) => SchemaAnalyzer m where
-  schemaExists :: String -- ^ Schema name
+class PersistBackendConn conn => SchemaAnalyzer conn where
+  schemaExists :: (PersistBackend m, Conn m ~ conn) => String -- ^ Schema name
                -> m Bool
-  getCurrentSchema :: m (Maybe String)
-  listTables :: Maybe String -- ^ Schema name
+  getCurrentSchema :: (PersistBackend m, Conn m ~ conn) => m (Maybe String)
+  listTables :: (PersistBackend m, Conn m ~ conn) => Maybe String -- ^ Schema name
              -> m [String]
-  listTableTriggers :: QualifiedName -- ^ Qualified table name
+  listTableTriggers :: (PersistBackend m, Conn m ~ conn) => QualifiedName -- ^ Qualified table name
                     -> m [String]
-  analyzeTable :: QualifiedName -- ^ Qualified table name
+  analyzeTable :: (PersistBackend m, Conn m ~ conn) => QualifiedName -- ^ Qualified table name
                -> m (Maybe TableInfo)
-  analyzeTrigger :: QualifiedName -- ^ Qualified trigger name
+  analyzeTrigger :: (PersistBackend m, Conn m ~ conn) =>  QualifiedName -- ^ Qualified trigger name
                  -> m (Maybe String)
-  analyzeFunction :: QualifiedName -- ^ Qualified function name
+  analyzeFunction :: (PersistBackend m, Conn m ~ conn) => QualifiedName -- ^ Qualified function name
                   -> m (Maybe (Maybe [DbTypePrimitive], Maybe DbTypePrimitive, String)) -- ^ Argument types, return type, and body
-  getMigrationPack :: m (MigrationPack m)
+  getMigrationPack :: (PersistBackend m, Conn m ~ conn) => m (MigrationPack conn)

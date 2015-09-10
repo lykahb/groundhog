@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, DeriveDataTypeable, RecordWildCards #-}
+{-# LANGUAGE CPP, DeriveDataTypeable, RecordWildCards, FlexibleContexts #-}
 
 module Main where
 
@@ -44,7 +44,7 @@ sample = cmdArgsMode $ Args { database = def &= argPos 0 &= typ (show databases)
          &= details ["Pass a name of a database. The connection string is an argument to with*Conn. "
            , "MySQL connection string is \"ConnectInfo {...}\""]
 
-analyze :: (PersistBackend m, SchemaAnalyzer m, MonadIO m) => Maybe String -> m ()
+analyze :: (PersistBackend m, SchemaAnalyzer (Conn m), MonadIO m) => Maybe String -> m ()
 analyze schema = do
   tables <- collectTables (const True) schema
   -- Analyze tables

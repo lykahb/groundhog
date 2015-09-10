@@ -24,10 +24,10 @@ import qualified Database.SQLite3.Direct as SD
 
 import Control.Arrow ((***))
 import Control.Monad (liftM, forM)
-import Control.Monad.Logger (MonadLogger, NoLoggingT, logDebugS)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Reader (ask)
+import Control.Monad.Trans.State (mapStateT)
 import qualified Data.ByteString.Char8 as BS
 import Data.Char (toUpper)
 import Data.Function (on)
@@ -57,49 +57,47 @@ instance SqlDb Sqlite where
   equalsOperator a b = a <> " IS " <> b
   notEqualsOperator a b = a <> " IS NOT " <> b
 
-instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => PersistBackend (DbPersist Sqlite m) where
-  {-# SPECIALIZE instance PersistBackend (DbPersist Sqlite (NoLoggingT IO)) #-}
-  type PhantomDb (DbPersist Sqlite m) = Sqlite
-  insert v = insert' v
-  insert_ v = insert_' v
-  insertBy u v = H.insertBy renderConfig queryRawCached' True u v
-  insertByAll v = H.insertByAll renderConfig queryRawCached' True v
-  replace k v = H.replace renderConfig queryRawCached' executeRawCached' insertIntoConstructorTable k v
-  replaceBy k v = H.replaceBy renderConfig executeRawCached' k v
-  select options = H.select renderConfig queryRawCached' preColumns "LIMIT -1"  options
-  selectStream options = H.selectStream renderConfig queryRawCached' preColumns "LIMIT -1"  options
-  selectAll = H.selectAll renderConfig queryRawCached'
-  selectAllStream = H.selectAllStream renderConfig queryRawCached'
-  get k = H.get renderConfig queryRawCached' k
-  getBy k = H.getBy renderConfig queryRawCached' k
-  update upds cond = H.update renderConfig executeRawCached' upds cond
-  delete cond = H.delete renderConfig executeRawCached' cond
-  deleteBy k = H.deleteBy renderConfig executeRawCached' k
-  deleteAll v = H.deleteAll renderConfig executeRawCached' v
-  count cond = H.count renderConfig queryRawCached' cond
-  countAll fakeV = H.countAll renderConfig queryRawCached' fakeV
-  project p options = H.project renderConfig queryRawCached' preColumns "LIMIT -1" p options
-  projectStream p options = H.projectStream renderConfig queryRawCached' preColumns "LIMIT -1" p options
-  migrate fakeV = migrate' fakeV
+instance PersistBackendConn Sqlite where
+  insert v = runDb' $ insert' v
+  insert_ v = runDb' $ insert_' v
+  insertBy u v = runDb' $ H.insertBy renderConfig queryRawCached' True u v
+  insertByAll v = runDb' $ H.insertByAll renderConfig queryRawCached' True v
+  replace k v = runDb' $ H.replace renderConfig queryRawCached' executeRawCached' insertIntoConstructorTable k v
+  replaceBy k v = runDb' $ H.replaceBy renderConfig executeRawCached' k v
+  select options = runDb' $ H.select renderConfig queryRawCached' preColumns "LIMIT -1"  options
+  selectStream options = runDb' $ H.selectStream renderConfig queryRawCached' preColumns "LIMIT -1"  options
+  selectAll = runDb' $ H.selectAll renderConfig queryRawCached'
+  selectAllStream = runDb' $ H.selectAllStream renderConfig queryRawCached'
+  get k = runDb' $ H.get renderConfig queryRawCached' k
+  getBy k = runDb' $ H.getBy renderConfig queryRawCached' k
+  update upds cond = runDb' $ H.update renderConfig executeRawCached' upds cond
+  delete cond = runDb' $ H.delete renderConfig executeRawCached' cond
+  deleteBy k = runDb' $ H.deleteBy renderConfig executeRawCached' k
+  deleteAll v = runDb' $ H.deleteAll renderConfig executeRawCached' v
+  count cond = runDb' $ H.count renderConfig queryRawCached' cond
+  countAll fakeV = runDb' $ H.countAll renderConfig queryRawCached' fakeV
+  project p options = runDb' $ H.project renderConfig queryRawCached' preColumns "LIMIT -1" p options
+  projectStream p options = runDb' $ H.projectStream renderConfig queryRawCached' preColumns "LIMIT -1" p options
+  migrate fakeV = mapStateT runDb' $ migrate' fakeV
 
-  executeRaw False query ps = executeRaw' (fromString query) ps
-  executeRaw True query ps = executeRawCached' (fromString query) ps
-  queryRaw False query ps f = queryRaw' (fromString query) ps f
-  queryRaw True query ps f = queryRawCached' (fromString query) ps f
+  executeRaw False query ps = runDb' $ executeRaw' (fromString query) ps
+  executeRaw True query ps = runDb' $ executeRawCached' (fromString query) ps
+  queryRaw False query ps = runDb' $ queryRaw' (fromString query) ps
+  queryRaw True query ps = runDb' $ queryRawCached' (fromString query) ps
 
-  insertList l = insertList' l
-  getList k = getList' k
+  insertList l = runDb' $ insertList' l
+  getList k = runDb' $ getList' k
 
-instance (MonadBaseControl IO m, MonadIO m, MonadLogger m) => SchemaAnalyzer (DbPersist Sqlite m) where
+instance SchemaAnalyzer Sqlite where
   schemaExists = fail "schemaExists: is not supported by Sqlite"
   getCurrentSchema = return Nothing
-  listTables Nothing = queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
   listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
-  listTableTriggers (Nothing, name) = queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] (mapAllRows $ return . fst . fromPurePersistValues proxy)
+  listTableTriggers (Nothing, name) = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
   listTableTriggers (sch, _) = fail $ "listTableTriggers: schemas are not supported by Sqlite: " ++ show sch
-  analyzeTable = analyzeTable'
-  analyzeTrigger (Nothing, name) = do
-    x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue proxy name] id
+  analyzeTable = runDb' . analyzeTable'
+  analyzeTrigger (Nothing, name) = runDb' $ do
+    x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue proxy name] >>= firstRow
     case x of
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues proxy src)
@@ -134,19 +132,18 @@ instance Savepoint Sqlite where
     liftIO $ S.exec c $ "RELEASE " <> name'
     return x
 
-instance ConnectionManager Sqlite Sqlite where
+instance ConnectionManager Sqlite where
   withConn f conn@(Sqlite c _) = do
     liftIO $ S.exec c "BEGIN"
     x <- onException (f conn) (liftIO $ S.exec c "ROLLBACK")
     liftIO $ S.exec c "COMMIT"
     return x
-  withConnNoTransaction f conn = f conn
 
-instance ConnectionManager (Pool Sqlite) Sqlite where
-  withConn f pconn = withResource pconn (withConn f)
-  withConnNoTransaction f pconn = withResource pconn (withConnNoTransaction f)
+instance ExtractConnection Sqlite Sqlite where
+  extractConn f conn = f conn
 
-instance SingleConnectionManager Sqlite Sqlite
+instance ExtractConnection (Pool Sqlite) Sqlite where
+  extractConn f pconn = withResource pconn f
 
 open' :: String -> IO Sqlite
 open' s = do
@@ -160,10 +157,10 @@ close' (Sqlite conn smap) = do
   readIORef smap >>= mapM_ S.finalize . Map.elems
   S.close conn
 
-migrate' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> Migration (DbPersist Sqlite m)
+migrate' :: PersistEntity v => v -> Migration (Action Sqlite)
 migrate' = migrateRecursively (const $ return $ Right []) (migrateEntity migrationPack) (migrateList migrationPack)
 
-migrationPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => GM.MigrationPack (DbPersist Sqlite m)
+migrationPack :: GM.MigrationPack Sqlite
 migrationPack = GM.MigrationPack
   compareTypes
   compareRefs
@@ -171,7 +168,7 @@ migrationPack = GM.MigrationPack
   compareDefaults
   migTriggerOnDelete
   migTriggerOnUpdate
-  GM.defaultMigConstr
+  (GM.defaultMigConstr migrationPack)
   escape
   "INTEGER PRIMARY KEY NOT NULL"
   mainTableId
@@ -187,7 +184,7 @@ addUniquesReferences :: [UniqueDefInfo] -> [Reference] -> ([String], [AlterTable
 addUniquesReferences uniques refs = (map sqlUnique constraints ++ map sqlReference refs, map AddUnique indexes) where
   (constraints, indexes) = partition ((/= UniqueIndex) . uniqueDefType) uniques
 
-migTriggerOnDelete :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => QualifiedName -> [(String, String)] -> DbPersist Sqlite m (Bool, [AlterDB])
+migTriggerOnDelete :: QualifiedName -> [(String, String)] -> Action Sqlite (Bool, [AlterDB])
 migTriggerOnDelete qualifiedName deletes = do
   let addTrigger = AddTriggerOnDelete qualifiedName qualifiedName (concatMap snd deletes)
   x <- analyzeTrigger qualifiedName
@@ -203,7 +200,7 @@ migTriggerOnDelete qualifiedName deletes = do
         
 -- | Schema name, table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
-migTriggerOnUpdate :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => QualifiedName -> [(String, String)] -> DbPersist Sqlite m [(Bool, [AlterDB])]
+migTriggerOnUpdate :: QualifiedName -> [(String, String)] -> Action Sqlite [(Bool, [AlterDB])]
 migTriggerOnUpdate name dels = forM dels $ \(fieldName, del) -> do
   let trigName = (Nothing, snd name ++ delim : fieldName)
   let addTrigger = AddTriggerOnUpdate trigName name (Just fieldName) del
@@ -214,10 +211,10 @@ migTriggerOnUpdate name dels = forM dels $ \(fieldName, del) -> do
         then []
         else [DropTrigger trigName name, addTrigger])
 
-analyzeTable' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => QualifiedName -> DbPersist Sqlite m (Maybe TableInfo)
+analyzeTable' :: QualifiedName -> Action Sqlite (Maybe TableInfo)
 analyzeTable' (Nothing, tName) = do
   let fromName = escapeS . fromString
-  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
   case tableInfo of
     [] -> return Nothing
     rawColumns -> do
@@ -225,17 +222,17 @@ analyzeTable' (Nothing, tName) = do
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
           primaryKeyColumnNames = foldr (\(_ , (name, _, _, _, primaryIndex)) xs -> if primaryIndex > 0 then name:xs else xs) [] rawColumns
           columns = map mkColumn rawColumns
-      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
-        uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
-        sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue proxy name] id
+        uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+        sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue proxy name] >>= firstRow
         let columnNames = map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
             uType = if sql == Just [PersistNull]
               then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary False else UniqueConstraint
               else UniqueIndex
         return $ UniqueDef (Just name) uType (map Left columnNames)
-      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
       (foreigns :: [(Maybe String, Reference)]) <- do
           let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
               foreigns = groupBy ((==) `on` fst) . sort $ foreignKeyList -- sort by foreign key number and column number inside key (first and second integers)
@@ -260,18 +257,18 @@ analyzeTable' (Nothing, tName) = do
       return $ Just $ TableInfo columns uniques' foreigns
 analyzeTable' (sch, _) = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
 
-analyzePrimaryKey :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => String -> DbPersist Sqlite m (Maybe [String])
+analyzePrimaryKey :: String -> Action Sqlite (Maybe [String])
 analyzePrimaryKey tName = do
-  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] $ mapAllRows (return . fst . fromPurePersistValues proxy)
+  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
   let cols = map (\(_ , (name, _, _, _, primaryIndex)) -> (primaryIndex, name)) (tableInfo ::  [(Int, (String, String, Int, Maybe String, Int))])
       cols' = map snd $ sort $ filter ((> 0) . fst) cols
   return $ if null cols'
     then Nothing
     else Just cols'
 
-getStatementCached :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> DbPersist Sqlite m S.Statement
+getStatementCached :: Utf8 -> Action Sqlite S.Statement
 getStatementCached sql = do
-  Sqlite conn smap <- DbPersist ask
+  Sqlite conn smap <- ask
   liftIO $ do
     smap' <- readIORef smap
     let sql' = fromUtf8 sql
@@ -282,9 +279,9 @@ getStatementCached sql = do
         return stmt
       Just stmt -> return stmt
 
-getStatement :: (MonadBaseControl IO m, MonadIO m) => Utf8 -> DbPersist Sqlite m S.Statement
+getStatement :: Utf8 -> Action Sqlite S.Statement
 getStatement sql = do
-  Sqlite conn _ <- DbPersist ask
+  Sqlite conn _ <- ask
   liftIO $ S.prepareUtf8 conn $ SD.Utf8 $ fromUtf8 sql
 
 showSqlType :: DbTypePrimitive -> String
@@ -354,7 +351,7 @@ sqlUnique (UniqueDef name typ cols) = concat [
       UniqueConstraint -> "UNIQUE("
       UniqueIndex -> error "sqlUnique: does not handle indexes"
 
-insert' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Sqlite m (AutoKey v)
+insert' :: PersistEntity v => v -> Action Sqlite (AutoKey v)
 insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -378,7 +375,7 @@ insert' v = do
       executeRawCached' cQuery (vals' [])
       pureFromPersistValue [rowid]
 
-insert_' :: (PersistEntity v, MonadBaseControl IO m, MonadIO m, MonadLogger m) => v -> DbPersist Sqlite m ()
+insert_' :: PersistEntity v => v -> Action Sqlite ()
 insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
@@ -410,7 +407,7 @@ insertIntoConstructorTable withId tName c vals = RenderS query vals' where
     xs -> "(" <> commasJoin xs <> ") VALUES(" <> placeholders <> ")"
   RenderS placeholders vals' = commasJoin $ map renderPersistValue vals
 
-insertList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => [a] -> DbPersist Sqlite m Int64
+insertList' :: forall a . PersistField a => [a] -> Action Sqlite Int64
 insertList' l = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
   executeRawCached' ("INSERT INTO " <> escapeS mainName <> " DEFAULT VALUES") []
@@ -418,7 +415,7 @@ insertList' l = do
   let valuesName = mainName <> delim' <> "values"
   let fields = [("ord", dbType proxy (0 :: Int)), ("value", dbType proxy (undefined :: a))]
   let query = "INSERT INTO " <> escapeS valuesName <> "(id," <> renderFields escapeS fields <> ")VALUES(?," <> renderFields (const $ fromChar '?') fields <> ")"
-  let go :: Int -> [a] -> DbPersist Sqlite m ()
+  let go :: Int -> [a] -> Action Sqlite ()
       go n (x:xs) = do
        x' <- toPersistValues x
        executeRawCached' query $ (k:) . (toPrimitivePersistValue proxy n:) . x' $ []
@@ -427,17 +424,17 @@ insertList' l = do
   go 0 l
   return $ fromPrimitivePersistValue proxy k
   
-getList' :: forall m a.(MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistField a) => Int64 -> DbPersist Sqlite m [a]
+getList' :: forall a . PersistField a => Int64 -> Action Sqlite [a]
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
       valuesName = mainName <> delim' <> "values"
       value = ("value", dbType proxy (undefined :: a))
       query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRawCached' query [toPrimitivePersistValue proxy k] $ mapAllRows (liftM fst . fromPersistValues)
+  queryRawCached' query [toPrimitivePersistValue proxy k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
     
-getLastInsertRowId :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Sqlite m PersistValue
+getLastInsertRowId :: Action Sqlite PersistValue
 getLastInsertRowId = do
-  Sqlite conn _ <- DbPersist ask
+  Sqlite conn _ <- ask
   liftIO (SD.lastInsertRowId conn) >>= toSinglePersistValue
 
 ----------
@@ -460,47 +457,38 @@ bind stmt = go 1 where
       PersistCustom _ _       -> error "bind: unexpected PersistCustom"
     go (i + 1) xs
 
-executeRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
+executeRaw' :: Utf8 -> [PersistValue] -> Action Sqlite ()
 executeRaw' query vals = do
-  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
+--  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatement query
   liftIO $ flip finally (S.finalize stmt) $ do
     bind stmt vals
     S.Done <- S.step stmt
     return ()
 
-executeRawCached' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> DbPersist Sqlite m ()
+executeRawCached' :: Utf8 -> [PersistValue] -> Action Sqlite ()
 executeRawCached' query vals = do
-  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
+--  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
   stmt <- getStatementCached query
   liftIO $ flip finally (S.reset stmt) $ do
     bind stmt vals
     S.Done <- S.step stmt
     return ()
 
-queryRaw' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
-queryRaw' query vals f = do
-  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
-  stmt <- getStatement query
-  flip finally (liftIO $ S.finalize stmt) $ do
-    liftIO $ bind stmt vals
-    f $ liftIO $ do
-      x <- S.step stmt
-      case x of
-        S.Done -> return Nothing
-        S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
+queryStmt :: S.Statement -> [PersistValue] -> (S.Statement -> IO ()) -> Action Sqlite (RowStream [PersistValue])
+queryStmt stmt vals close = do
+  --  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
+  liftIO $ bind stmt vals
+  let next = do
+        x <- S.step stmt
+        case x of
+          S.Done -> return Nothing
+          S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
+  return (next, Just $ close stmt)
 
-queryRawCached' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => Utf8 -> [PersistValue] -> (RowPopper (DbPersist Sqlite m) -> DbPersist Sqlite m a) -> DbPersist Sqlite m a
-queryRawCached' query vals f = do
-  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
-  stmt <- getStatementCached query
-  flip finally (liftIO $ S.reset stmt) $ do
-    liftIO $ bind stmt vals
-    f $ liftIO $ do
-      x <- S.step stmt
-      case x of
-        S.Done -> return Nothing
-        S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
+queryRaw', queryRawCached' :: Utf8 -> [PersistValue] -> Action Sqlite (RowStream [PersistValue])
+queryRaw' query vals = getStatement query >>= \stmt -> queryStmt stmt vals S.finalize
+queryRawCached' query vals = getStatementCached query >>= \stmt -> queryStmt stmt vals S.reset
 
 pFromSql :: S.SQLData -> PersistValue
 pFromSql (S.SQLInteger i) = PersistInt64 i
@@ -531,7 +519,7 @@ proxy = error "proxy Sqlite"
 delim' :: Utf8
 delim' = fromChar delim
 
-toEntityPersistValues' :: (MonadBaseControl IO m, MonadIO m, MonadLogger m, PersistEntity v) => v -> DbPersist Sqlite m [PersistValue]
+toEntityPersistValues' :: PersistEntity v => v -> Action Sqlite [PersistValue]
 toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
 
 compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool

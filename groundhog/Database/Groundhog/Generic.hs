@@ -14,12 +14,6 @@ module Database.Groundhog.Generic
   , getQueries
   , printMigration
   , mergeMigrations
-  -- * Helpers for running Groundhog actions
-  , HasConn
-  , runDb
-  , runDbConn
-  , runDbConnNoTransaction
-  , withSavepoint
   -- * Helper functions for defining *PersistValue instances
   , primToPersistValue
   , primFromPersistValue
@@ -49,27 +43,31 @@ module Database.Groundhog.Generic
   , replaceOne
   , matchElements
   , haveSameElems
-  , mapAllRows
   , phantomDb
   , getAutoKeyType
   , getUniqueFields
   , isSimple
+  , firstRow
+  , streamToList
+  , mapStream
+  , joinStreams
   , deleteByKey
   ) where
 
 import Database.Groundhog.Core
 
 import Control.Applicative ((<|>))
-import Control.Monad (liftM, forM_, unless, (>=>))
-import Control.Monad.Logger (MonadLogger, NoLoggingT(..))
+import Control.Monad (liftM, forM_, unless)
+import Control.Monad.Trans.Reader (ReaderT(..), runReaderT, ask)
 import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
 import qualified Control.Exception as E
 import Control.Monad.IO.Class (MonadIO (..))
-import Control.Monad.Reader.Class (MonadReader(..))
 import Data.Either (partitionEithers)
 import Data.Function (on)
+import Data.IORef
 import Data.List (partition, sortBy)
+import Data.Maybe (fromMaybe)
 import qualified Data.Map as Map
 import System.IO (hPutStrLn, stderr)
 
@@ -287,11 +285,7 @@ haveSameElems p xs ys = case matchElements p xs ys of
   ([], [], _) -> True
   _           -> False
 
-mapAllRows :: Monad m => ([PersistValue] -> m a) -> RowPopper m -> m [a]
-mapAllRows f pop = go where
-  go = pop >>= maybe (return []) (f >=> \a -> liftM (a:) go)
-
-phantomDb :: PersistBackend m => m (proxy (PhantomDb m))
+phantomDb :: PersistBackend m => m (proxy (Conn m))
 phantomDb = return $ error "phantomDb"
 
 getAutoKeyType :: DbDescriptor db => proxy db -> DbTypePrimitive
@@ -299,39 +293,43 @@ getAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoKeyType 
   DbTypePrimitive t _ _ _ -> t
   t -> error $ "autoKeyType: unexpected key type " ++ show t
 
+firstRow :: MonadIO m => RowStream a -> m (Maybe a)
+firstRow (next, close) = liftIO $ maybe next (next `E.finally`) close
+
+streamToList :: MonadIO m => RowStream a -> m [a]
+streamToList (next, close) = liftIO $ maybe go (go `E.finally`) close where
+  go = next >>= maybe (return []) (\a -> liftM (a:) go)
+
+mapStream :: PersistBackendConn conn => (a -> Action conn b) -> RowStream a -> Action conn (RowStream b)
+mapStream f (next, close) = do
+  conn <- ask
+  let next' = next >>= \a -> case a of
+        Nothing -> return Nothing
+        Just a' -> liftM Just $ runReaderT (f a') conn
+  return (next', close)
+
+joinStreams :: [Action conn (RowStream a)] -> Action conn (RowStream a)
+joinStreams streams = do
+  conn <- ask
+  var <- liftIO $ newIORef $ ((return Nothing, Nothing), streams)
+  let joinedNext = do
+        ((next, _), queue) <- readIORef var
+        val <- next
+        case val of
+          Nothing -> case queue of
+            [] -> return Nothing
+            (makeStream:ss) -> runReaderT makeStream conn >>= \stream -> writeIORef var (stream, ss) >> joinedNext
+          Just a -> return $ Just a
+      joinedClose = readIORef var >>= \((_, close),_) -> fromMaybe (return ()) close
+  return (joinedNext, Just joinedClose)
+
+
 getUniqueFields :: UniqueDef' str (Either field str) -> [field]
 getUniqueFields (UniqueDef _ _ uFields) = map (either id (error "A unique key may not contain expressions")) uFields
 
 isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True
 isSimple _   = False
-
--- | This class helps to shorten the type signatures of user monadic code.
-class (MonadIO m, MonadLogger m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
-instance (MonadIO m, MonadLogger m, MonadBaseControl IO m, MonadReader cm m, ConnectionManager cm conn) => HasConn m cm conn
-
--- | It helps to run database operations within an application monad.
-runDb :: HasConn m cm conn => DbPersist conn m a -> m a
-runDb f = ask >>= withConn (runDbPersist f)
-
--- | Runs action within connection. It can handle a simple connection, a pool of them, etc.
-runDbConn :: (MonadBaseControl IO m, MonadIO m, ConnectionManager cm conn) => DbPersist conn (NoLoggingT m) a -> cm -> m a
-runDbConn f cm = runNoLoggingT (withConn (runDbPersist f) cm)
-
--- | It is similar to `runDbConn` but runs action without transaction. It can be useful if you use Groundhog within IO monad or in other cases when you cannot put `PersistBackend` instance into your monad stack.
---
--- @
--- flip withConn cm $ \\conn -> liftIO $ do
---   -- transaction is already opened by withConn at this point
---   someIOAction
---   getValuesFromIO $ \\value -> runDbConnNoTransaction (insert_ value) conn
--- @
-runDbConnNoTransaction :: (MonadBaseControl IO m, MonadIO m, ConnectionManager cm conn) => DbPersist conn (NoLoggingT m) a -> cm -> m a
-runDbConnNoTransaction f cm = runNoLoggingT (withConnNoTransaction (runDbPersist f) cm)
-
--- | It helps to run 'withConnSavepoint' within a monad.
-withSavepoint :: (HasConn m cm conn, SingleConnectionManager cm conn, Savepoint conn) => String -> m a -> m a
-withSavepoint name m = ask >>= withConnNoTransaction (withConnSavepoint name m)
 
 {-# DEPRECATED deleteByKey "Use deleteBy instead" #-}
 deleteByKey :: (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m ()

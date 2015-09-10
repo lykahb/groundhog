@@ -5,7 +5,7 @@
 module Database.Groundhog (
   -- * Core datatypes and functions
     PersistBackend(..)
-  , DbPersist(..)
+  , PersistBackendConn(..)
   , Key
   , DefaultKey
   , AutoKey
@@ -38,7 +38,7 @@ module Database.Groundhog (
   , printMigration
 ) where
 
-import Database.Groundhog.Core
+import Database.Groundhog.Core hiding (selectStream, selectAllStream, projectStream)
 import Database.Groundhog.Expression
 import Database.Groundhog.Generic
 import Database.Groundhog.Instances

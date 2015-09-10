@@ -168,7 +168,7 @@ defaultReverseNamingStyle = ReverseNamingStyle {
 -- | It looks for the references to the tables not contained in the passed map.
 -- If there are such references and the reference filter function returns True, the corresponding TableInfo is fetched and included into the map.
 -- The references for the newly added tables are processed in the same way. This function can be useful if your set of tables is created not by 'collectTables'.
-followReferencedTables :: SchemaAnalyzer m
+followReferencedTables :: (PersistBackend m, SchemaAnalyzer (Conn m))
                     => (QualifiedName -> Bool) -- ^ Decides if we follow reference to this table. It can be used to prevent mapping of the referenced audit or system tables
                     -> Map QualifiedName TableInfo
                     -> m (Map QualifiedName TableInfo)
@@ -196,7 +196,7 @@ followReferencedTables p = go mempty where
 -- > publicTables  <- collectTables filterRefs (Just "public")
 -- > websiteTables <- collectTables filterRefs (Just "website")
 -- > let allTables = publicTables <> websiteTables
-collectTables :: SchemaAnalyzer m
+collectTables :: (PersistBackend m, SchemaAnalyzer (Conn m))
               => (QualifiedName -> Bool) -- ^ Decides if we follow the reference to a table. It can be used to prevent mapping of the referenced audit or system tables
               -> Maybe String -- ^ Schema name
               -> m (Map QualifiedName TableInfo)
@@ -292,15 +292,15 @@ equalP' t1 t2 =
 #endif
 
 
-generateMapping :: (PersistBackend m, SchemaAnalyzer m) => ReverseNamingStyle -> Map QualifiedName TableInfo -> m (Map QualifiedName PSEntityDef)
+generateMapping :: (PersistBackend m, SchemaAnalyzer (Conn m)) => ReverseNamingStyle -> Map QualifiedName TableInfo -> m (Map QualifiedName PSEntityDef)
 generateMapping style tables = do
   m <- getMigrationPack
   return $ generateMappingPure style m tables
 
-generateMappingPure :: DbDescriptor (PhantomDb m) => ReverseNamingStyle -> MigrationPack m -> Map QualifiedName TableInfo -> Map QualifiedName PSEntityDef
+generateMappingPure :: DbDescriptor conn => ReverseNamingStyle -> MigrationPack conn -> Map QualifiedName TableInfo -> Map QualifiedName PSEntityDef
 generateMappingPure style m tables = Map.mapWithKey (generateMapping' style m tables) tables
 
-generateMapping' :: DbDescriptor (PhantomDb m) => ReverseNamingStyle -> MigrationPack m -> Map QualifiedName TableInfo -> QualifiedName -> TableInfo -> PSEntityDef
+generateMapping' :: DbDescriptor conn => ReverseNamingStyle -> MigrationPack conn -> Map QualifiedName TableInfo -> QualifiedName -> TableInfo -> PSEntityDef
 generateMapping' ReverseNamingStyle{..} m@MigrationPack{..} tables tName tInfo = entity where
   entity = PSEntityDef (mkEntityName tName) (Just $ snd tName) (fst tName) autoKey (Just uniqueKeyDefs) (Just [constr])
   idColumns = (filter ((== UniquePrimary True) . uniqueDefType) $ tableUniques tInfo) >>= uniqueDefFields
@@ -363,7 +363,7 @@ generateMapping' ReverseNamingStyle{..} m@MigrationPack{..} tables tName tInfo =
           mappedEmbeddedRef parentCols = PSFieldDef (mkKeyFieldName tName ref) Nothing Nothing Nothing (Just embeddeds) Nothing (Just (Nothing, refOnDelete, refOnUpdate)) where
             embeddeds = zipWith (\c1 c2 -> PSFieldDef (colName c2) (Just $ colName c1) (showSqlType <$> mfilter (/= colType c2) (Just $ colType c1)) Nothing Nothing (colDefault c1) Nothing) childCols parentCols
           autoKeyRef = PSFieldDef (mkKeyFieldName tName ref) (Just $ colName c) (showSqlType <$> mfilter (/= autoKeyType) (Just $ colType c)) Nothing Nothing (colDefault c) (Just (Nothing, refOnDelete, refOnUpdate)) where
-            autoKeyType = getAutoKeyType $ (undefined :: MigrationPack m -> p (PhantomDb m)) m
+            autoKeyType = getAutoKeyType $ (undefined :: MigrationPack conn -> p conn) m
           refOnDelete = mfilter (/= defaultReferenceOnDelete) $ referenceOnDelete ref
           refOnUpdate = mfilter (/= defaultReferenceOnUpdate) $ referenceOnUpdate ref
           

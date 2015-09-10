@@ -32,7 +32,7 @@ main = do
 #endif
 #if WITH_SQLITE
   let sqlite = [testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite)  [mkTestSuite, mkSqlTestSuite, sqliteTestSuite]]
-      runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
+      runSqlite m = print "hi" >> (withSqliteConn ":memory:" . runDbConn $ m)
 #else
   let sqlite = []
 #endif
@@ -51,7 +51,7 @@ main = do
   defaultMain $ mysql ++ sqlite ++ postgresql
 
 #if WITH_POSTGRESQL
-cleanPostgresql :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist Postgresql m ()
+cleanPostgresql :: (PersistBackend m, Conn m ~ Postgresql) => m ()
 cleanPostgresql = do
   executeRaw True "rollback" []
   executeRaw True "begin" []
@@ -59,7 +59,7 @@ cleanPostgresql = do
 
 #if WITH_MYSQL
 -- DDL statements are committed automatically so we cannot rollback them.
-cleanMySQL :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => DbPersist MySQL m ()
+cleanMySQL :: (PersistBackend m, Conn m ~ MySQL) => m ()
 cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 0" []
   forM_ ["test", "myschema"] $ \schema -> do
@@ -69,7 +69,7 @@ cleanMySQL = do
   executeRaw True "SET FOREIGN_KEY_CHECKS = 1" []
 #endif
 
-mkSqlTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, db ~ PhantomDb m, SqlDb db) => (m () -> IO ()) -> [Test]
+mkSqlTestSuite :: (PersistBackend m, SqlDb (Conn m)) => (m () -> IO ()) -> [Test]
 mkSqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testSelect", testSelect)
   , ("testCond", testCond)
@@ -77,7 +77,7 @@ mkSqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   , ("testProjectionSql", testProjectionSql)
   ]
 
-mkTestSuite :: (PersistBackend m, MonadBaseControl IO m, MonadIO m) => (m () -> IO ()) -> [Test]
+mkTestSuite :: (PersistBackend m, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
 mkTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testNumber", testNumber)
   , ("testPersistSettings", testPersistSettings)
@@ -121,7 +121,7 @@ mkTestSuite run = map (\(name, func) -> testCase name $ run func)
   ]
 
 #if WITH_SQLITE
-sqliteTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist Sqlite m () -> IO ()) -> [Test]
+sqliteTestSuite :: (PersistBackend m, Conn m ~ Sqlite, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
 sqliteTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testMigrateOrphanConstructors", testMigrateOrphanConstructors)
   , ("testSchemaAnalysis", testSchemaAnalysis)
@@ -132,7 +132,7 @@ sqliteTestSuite run = map (\(name, func) -> testCase name $ run func)
 #endif
 
 #if WITH_POSTGRESQL
-postgresqlTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist Postgresql m () -> IO ()) -> [Test]
+postgresqlTestSuite :: (PersistBackend m, Conn m ~ Postgresql, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
 postgresqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testGeometry", testGeometry)
   , ("testArrays", testArrays)
@@ -148,7 +148,7 @@ postgresqlTestSuite run = map (\(name, func) -> testCase name $ run func)
 #endif
 
 #if WITH_MYSQL
-mysqlTestSuite :: (MonadBaseControl IO m, MonadIO m, MonadLogger m) => (DbPersist MySQL m () -> IO ()) -> [Test]
+mysqlTestSuite :: (PersistBackend m, Conn m ~ MySQL) => (m () -> IO ()) -> [Test]
 mysqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   [ ("testSchemas", testSchemas)
   , ("testSchemaAnalysis", testSchemaAnalysis)
