@@ -1,0 +1,30 @@
+name:            groundhog-pipes
+version:         0.7.1.2
+license:         BSD3
+license-file:    LICENSE
+author:          Boris Lykah <lykahb@gmail.com>
+maintainer:      Boris Lykah <lykahb@gmail.com>
+synopsis:        Type-safe datatype-database mapping library.
+description:     Streaming Pipes interface for Groundhog
+category:        Database
+stability:       Experimental
+cabal-version:   >= 1.8
+build-type:      Simple
+homepage:        http://github.com/lykahb/groundhog
+
+extra-source-files:
+    changelog
+
+library
+    build-depends:   base                     >= 4       && < 5
+                   , groundhog                >= 0.7     && < 0.8
+                   , pipes                    >= 4.0     && < 4.2
+                   , pipes-safe               >= 2.0     && < 2.3
+                   , containers               >= 0.2
+                   , transformers             >= 0.2     && < 0.5
+    exposed-modules: Database.Groundhog.Pipes
+    ghc-options:     -Wall
+    
+source-repository head
+  type:     git
+  location: git://github.com/lykahb/groundhog.git
