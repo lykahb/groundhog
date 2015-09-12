@@ -126,7 +126,7 @@ instance SchemaAnalyzer Postgresql where
       []  -> Nothing
       ((_, (ret, src)):_) -> Just $ (Just $ map read' args, Just $ read' ret, src) where
         args = mapMaybe (\(typ, arr) -> fmap (\typ' -> (typ', arr)) typ) $ map fst result
-  getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
+  getMigrationPack = liftM (migrationPack . fromJust) getCurrentSchema
 
 withPostgresqlPool :: (MonadBaseControl IO m, MonadIO m)
                    => String -- ^ connection string in keyword\/value format like "host=localhost port=5432 dbname=mydb". For more details and options see http://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-PARAMKEYWORDS

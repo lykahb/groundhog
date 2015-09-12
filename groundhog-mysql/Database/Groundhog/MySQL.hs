@@ -115,7 +115,7 @@ instance SchemaAnalyzer MySQL where
       -- TODO: parse param_list
       Just result' -> Just (Just [DbOther (OtherTypeDef [Left param_list])], if ret == "" then Nothing else Just $ read' ret, src) where
         (param_list, ret, src) = fst . fromPurePersistValues proxy $ result'
-  getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
+  getMigrationPack = liftM (migrationPack . fromJust) getCurrentSchema
 
 withMySQLPool :: (MonadBaseControl IO m, MonadIO m)
               => MySQL.ConnectInfo
