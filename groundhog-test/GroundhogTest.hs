@@ -800,7 +800,7 @@ testNoColumns = do
 testNoKeys :: PersistBackend m => m ()
 testNoKeys = do
   let val = NoKeys 1 2
-  m <- fmap Map.elems $ createMigration $ migrate val
+  m <- liftM Map.elems $ createMigration $ migrate val
   let queries = concat $ map (either (const "") (concat . map (\(_, _, q) -> q))) m
   if " KEY " `isInfixOf` queries
     then fail $ "Unexpected migration result: " ++ show m
@@ -829,7 +829,7 @@ testFloating = do
   migr val
   k <- insert val
   let expected @=??~ expr = do
-        actual <- fmap head $ project expr $ AutoKeyField ==. k
+        actual <- liftM head $ project expr $ AutoKeyField ==. k
         liftIO $ unless (abs (expected - actual) < 0.0001) $ expected @=? actual
   180 @=??~ degrees SingleField
   pi  @=??~ radians (degrees SingleField)
