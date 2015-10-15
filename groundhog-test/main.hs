@@ -32,7 +32,7 @@ main = do
 #endif
 #if WITH_SQLITE
   let sqlite = [testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite)  [mkTestSuite, mkSqlTestSuite, sqliteTestSuite]]
-      runSqlite m = print "hi" >> (withSqliteConn ":memory:" . runDbConn $ m)
+      runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
 #else
   let sqlite = []
 #endif
