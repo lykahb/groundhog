@@ -38,7 +38,9 @@ fromStream stream = do
         case a of
           Just a' -> yield a' >> go
           Nothing -> return ()
-  go `finally` (maybe (return ()) liftIO close)
+  case close of
+    Nothing -> go
+    Just close' -> go `finally` liftIO close'
 
 selectStream :: (PersistBackend m, MonadSafe m, PersistEntity v, EntityConstr v c, HasSelectOptions opts (Conn m) (RestrictionHolder v c))
              => opts
