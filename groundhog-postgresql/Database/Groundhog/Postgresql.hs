@@ -744,6 +744,7 @@ newtype P = P PersistValue
 
 instance PGTF.ToField P where
   toField (P (PersistString t))         = PGTF.toField t
+  toField (P (PersistText t))           = PGTF.toField t
   toField (P (PersistByteString bs))    = PGTF.toField (PG.Binary bs)
   toField (P (PersistInt64 i))          = PGTF.toField i
   toField (P (PersistDouble d))         = PGTF.toField d
@@ -764,19 +765,19 @@ getGetter :: PG.Oid -> Getter PersistValue
 getGetter (PG.Oid oid) = case oid of
   16   -> convertPV PersistBool
   17   -> convertPV (PersistByteString . unBinary)
-  18   -> convertPV PersistString
-  19   -> convertPV PersistString
+  18   -> convertPV PersistText
+  19   -> convertPV PersistText
   20   -> convertPV PersistInt64
   21   -> convertPV PersistInt64
   23   -> convertPV PersistInt64
-  25   -> convertPV PersistString
-  142  -> convertPV PersistString
+  25   -> convertPV PersistText
+  142  -> convertPV PersistText
   700  -> convertPV PersistDouble
   701  -> convertPV PersistDouble
   702  -> convertPV PersistUTCTime
   703  -> convertPV PersistUTCTime
-  1042 -> convertPV PersistString
-  1043 -> convertPV PersistString
+  1042 -> convertPV PersistText
+  1043 -> convertPV PersistText
   1082 -> convertPV PersistDay
   1083 -> convertPV PersistTimeOfDay
   1114 -> convertPV (PersistUTCTime . localTimeToUTC utc)

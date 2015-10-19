@@ -7,6 +7,7 @@ import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, pri
 
 import qualified Data.Aeson as A
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 #if MIN_VERSION_base(4, 7, 0)
@@ -106,8 +107,9 @@ instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersis
     in ((a, b, c, d, e), rest4)
 
 instance PrimitivePersistField String where
-  toPrimitivePersistValue _ s = PersistString s
+  toPrimitivePersistValue _ s = PersistText (T.pack s)
   fromPrimitivePersistValue _ (PersistString s) = s
+  fromPrimitivePersistValue _ (PersistText s) = T.unpack s
   fromPrimitivePersistValue _ (PersistByteString bs) = T.unpack $ T.decodeUtf8With T.lenientDecode bs
   fromPrimitivePersistValue _ (PersistInt64 i) = show i
   fromPrimitivePersistValue _ (PersistDouble d) = show d
@@ -120,9 +122,14 @@ instance PrimitivePersistField String where
   fromPrimitivePersistValue _ (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 instance PrimitivePersistField T.Text where
-  toPrimitivePersistValue _ a = PersistString (T.unpack a)
+  toPrimitivePersistValue _ s = PersistText s
+  fromPrimitivePersistValue _ (PersistText s) = s
   fromPrimitivePersistValue _ (PersistByteString bs) = T.decodeUtf8With T.lenientDecode bs
   fromPrimitivePersistValue p x = T.pack $ fromPrimitivePersistValue p x
+
+instance PrimitivePersistField TL.Text where
+  toPrimitivePersistValue p s = toPrimitivePersistValue p (TL.toStrict s)
+  fromPrimitivePersistValue p x = TL.fromStrict $ fromPrimitivePersistValue p x
 
 instance PrimitivePersistField ByteString where
   toPrimitivePersistValue _ s = PersistByteString s
@@ -241,6 +248,7 @@ instance PrimitivePersistField a => SinglePersistField a where
 
 instance NeverNull String
 instance NeverNull T.Text
+instance NeverNull TL.Text
 instance NeverNull ByteString
 instance NeverNull Lazy.ByteString
 instance NeverNull Int
@@ -264,6 +272,7 @@ instance NeverNull (KeyForBackend db v)
 readHelper :: Read a => PersistValue -> String -> a
 readHelper s errMessage = case s of
   PersistString str -> readHelper' str
+  PersistText str -> readHelper' (T.unpack str)
   PersistByteString str -> readHelper' (unpack str)
   _ -> error $ "readHelper: " ++ errMessage
   where
@@ -290,6 +299,12 @@ instance PersistField String where
   dbType _ _ = DbTypePrimitive DbString False Nothing Nothing
 
 instance PersistField T.Text where
+  persistName _ = "Text"
+  toPersistValues = primToPersistValue
+  fromPersistValues = primFromPersistValue
+  dbType _ _ = DbTypePrimitive DbString False Nothing Nothing
+
+instance PersistField TL.Text where
   persistName _ = "Text"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
@@ -625,7 +640,7 @@ instance Constructor c => EntityConstr' HTrue c where
   entityConstrNum' _ = phantomConstrNum
 
 instance A.FromJSON PersistValue where
-  parseJSON (A.String t) = return $ PersistString $ T.unpack t
+  parseJSON (A.String t) = return $ PersistText t
 #if MIN_VERSION_aeson(0, 7, 0)
   parseJSON (A.Number n) = return $
     if fromInteger (floor n) == n
@@ -641,6 +656,7 @@ instance A.FromJSON PersistValue where
 
 instance A.ToJSON PersistValue where
   toJSON (PersistString t) = A.String $ T.pack t
+  toJSON (PersistText t) = A.String t
   toJSON (PersistByteString b) = A.String $ T.decodeUtf8 $ B64.encode b
   toJSON (PersistInt64 i) = A.Number $ fromIntegral i
   toJSON (PersistDouble d) = A.Number $

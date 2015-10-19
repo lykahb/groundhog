@@ -10,9 +10,9 @@ data Point = Point { pointX :: Int, pointY :: Int } deriving Show
 
 -- PostgreSQL keeps point in format "(x,y)". This instance relies on the correspondence between Haskell tuple format and PostgreSQL point format.
 instance PrimitivePersistField Point where
-  toPrimitivePersistValue _ (Point x y) = PersistString $ show (x, y)
-  fromPrimitivePersistValue _ (PersistString a) = let (x, y) = read a in Point x y
-  fromPrimitivePersistValue _ (PersistByteString a) = let (x, y) = read (unpack a) in Point x y
+  toPrimitivePersistValue p (Point x y) = toPrimitivePersistValue p $ show (x, y)
+  fromPrimitivePersistValue p a = Point x y where
+    (x, y) = read $ fromPrimitivePersistValue p a
 
 instance PersistField Point where
   persistName _ = "Point"

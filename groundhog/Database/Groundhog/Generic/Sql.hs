@@ -238,6 +238,7 @@ renderChain RenderConfig{..} (f, prefix) acc = (case prefix of
 
 defaultShowPrim :: PersistValue -> String
 defaultShowPrim (PersistString x) = "'" ++ x ++ "'"
+defaultShowPrim (PersistText x) = "'" ++ show x ++ "'"
 defaultShowPrim (PersistByteString x) = "'" ++ show x ++ "'"
 defaultShowPrim (PersistInt64 x) = show x
 defaultShowPrim (PersistDouble x) = show x
