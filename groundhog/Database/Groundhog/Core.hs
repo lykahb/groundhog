@@ -100,6 +100,7 @@ import Control.Monad.Reader (MonadReader(..))
 import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
+import Data.Text (Text)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, zonedTimeToLocalTime, zonedTimeZone)
 import GHC.Exts (Constraint)
@@ -476,6 +477,7 @@ fromUtf8 (Utf8 a) = toByteString a
 -- | A raw value which can be stored in any backend and can be marshalled to
 -- and from a 'PersistField'.
 data PersistValue = PersistString String
+                  | PersistText Text
                   | PersistByteString ByteString
                   | PersistInt64 Int64
                   | PersistDouble Double

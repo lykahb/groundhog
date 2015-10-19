@@ -607,6 +607,7 @@ newtype P = P PersistValue
 
 instance MySQL.Param P where
   render (P (PersistString t))      = MySQL.render t
+  render (P (PersistText t))        = MySQL.render t
   render (P (PersistByteString bs)) = MySQL.render bs
   render (P (PersistInt64 i))       = MySQL.render i
   render (P (PersistDouble d))      = MySQL.render d
@@ -654,8 +655,8 @@ getGetter MySQLBase.Year       = convertPV PersistDay
 -- Null
 getGetter MySQLBase.Null       = \_ _ -> PersistNull
 -- Controversial conversions
-getGetter MySQLBase.Set        = convertPV PersistString
-getGetter MySQLBase.Enum       = convertPV PersistString
+getGetter MySQLBase.Set        = convertPV PersistText
+getGetter MySQLBase.Enum       = convertPV PersistText
 -- Unsupported
 getGetter other = error $ "MySQL.getGetter: type " ++
                   show other ++ " not supported."

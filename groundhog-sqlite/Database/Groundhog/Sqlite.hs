@@ -445,6 +445,7 @@ bind stmt = go 1 where
   go i (x:xs) = do
     case x of
       PersistInt64 int64      -> S.bindInt64 stmt i int64
+      PersistText text        -> S.bindText stmt i $ text
       PersistString text      -> S.bindText stmt i $ T.pack text
       PersistDouble double    -> S.bindDouble stmt i double
       PersistBool b           -> S.bindInt64 stmt i $ if b then 1 else 0
@@ -493,7 +494,7 @@ queryRawCached' query vals = getStatementCached query >>= \stmt -> queryStmt stm
 pFromSql :: S.SQLData -> PersistValue
 pFromSql (S.SQLInteger i) = PersistInt64 i
 pFromSql (S.SQLFloat i)   = PersistDouble i
-pFromSql (S.SQLText s)    = PersistString (T.unpack s)
+pFromSql (S.SQLText s)    = PersistText s
 pFromSql (S.SQLBlob bs)   = PersistByteString bs
 pFromSql (S.SQLNull)      = PersistNull
 
