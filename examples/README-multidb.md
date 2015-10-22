@@ -1,11 +1,11 @@
-# Groundhog basic example
+# Groundhog multidb example
 
 This code is a simple, commented example of the
 use of the
 `[groundhog](https://github.com/lykahb/groundhog)`
 Record-Relational Model (RRM) database interface for
-Haskell.  The example creates a couple of customers and has
-them purchase products from a notional store.
+Haskell.  The example shows the use of any one of a number
+of database backends.
 
 By default, data is "persisted" in an in-memory SQLite3
 database that disappears on program exit. You may choose one
