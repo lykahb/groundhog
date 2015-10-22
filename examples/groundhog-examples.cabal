@@ -23,6 +23,8 @@ executable basic
                      , transformers
                      , groundhog-th
                      , groundhog-sqlite
+                     , groundhog-mysql
+                     , groundhog-postgresql
 
   default-language:    Haskell2010
 
