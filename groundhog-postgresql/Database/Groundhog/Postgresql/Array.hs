@@ -32,6 +32,8 @@ import Database.Groundhog.Postgresql hiding (append)
 import Blaze.ByteString.Builder (fromByteString, toByteString)
 import Blaze.ByteString.Builder.Word (fromWord8)
 import Control.Applicative
+import Control.Monad (mzero)
+import qualified Data.Aeson as A
 import Data.Attoparsec.ByteString.Char8
 import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Zepto as Z
@@ -40,10 +42,19 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as B
 import Data.Monoid
 import Data.Word
+import qualified Data.Vector as V
+import Data.Traversable (traverse)
 import Prelude hiding (all, any)
 
 -- | Represents PostgreSQL arrays
 newtype Array a = Array [a] deriving (Eq, Show)
+
+instance A.ToJSON a => A.ToJSON (Array a) where
+  toJSON (Array xs) = A.toJSON xs
+
+instance A.FromJSON a => A.FromJSON (Array a) where
+  parseJSON (A.Array xs) = fmap (Array . V.toList) (traverse A.parseJSON xs)
+  parseJSON _            = mzero
 
 instance (ArrayElem a, PrimitivePersistField a) => PersistField (Array a) where
   persistName a = "Array" ++ delim : persistName ((undefined :: Array a -> a) a)

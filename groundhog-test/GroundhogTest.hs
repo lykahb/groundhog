@@ -941,6 +941,7 @@ testArrays = do
   let val2 = Single (Array[myString], Array[Array[myString]])
   migr val2
   Just val2 @=?? (insert val2 >>= get)
+  Just (Array [2, 3, 20]) @=?? return (A.decode (A.encode (Array [(2::Int),3,20])) :: Maybe (Array Int))
 
 testSchemaAnalysisPostgresql :: (PersistBackend m, Conn m ~ Postgresql) => m ()
 testSchemaAnalysisPostgresql = do
