@@ -40,6 +40,7 @@ module GroundhogTest (
     , testProjection
     , testKeyNormalization
     , testAutoKeyField
+    , testStringAutoKey
     , testTime
     , testPrimitiveData
     , testNoColumns
@@ -378,7 +379,7 @@ testCond = do
                "mysql" -> "<=>"
                _ -> "="
             query' = Utils.replace "=" equals query
-         in (query', map (toPrimitivePersistValue proxy) vals) @=? (unpack $ fromUtf8 $ q, v [])
+         in (query', map toPrimitivePersistValue vals) @=? (unpack $ fromUtf8 $ q, v [])
 
   let intField f = f `asTypeOf` (undefined :: Field (Single (Int, Int)) c a)
       intNum = fromInteger :: Integer -> Expr db r Int
@@ -485,7 +486,7 @@ testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
   proxy <- phantomDb
   k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
-  Just [listKey] <- queryRaw' "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrimitivePersistValue proxy k] >>= firstRow
+  Just [listKey] <- queryRaw' "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
   listsInsideListKeys <- queryRaw' "select value from \"List##List##String#values\" where id=?" [listKey] >>= streamToList
   deleteBy k
   -- test if the main list table and the associated values were deleted
@@ -504,7 +505,7 @@ testListTriggersOnUpdate = do
   migr val
   proxy <- phantomDb
   k <- insert val
-  Just [listKey] <- queryRaw' "select \"single\" from \"Single#List##List##String\" where id=?" [toPrimitivePersistValue proxy k] >>= firstRow
+  Just [listKey] <- queryRaw' "select \"single\" from \"Single#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
   listsInsideListKeys <- queryRaw' "select value from \"List##List##String#values\" where id=?" [listKey] >>= streamToList
   replace k (Single [] :: Single [[String]])
   -- test if the main list table and the associated values were deleted
@@ -523,8 +524,8 @@ testDelete = do
   proxy <- phantomDb
   k <- insert $ Second "abc"
   delete $ SecondField ==. "abc"
-  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue proxy k] >>= firstRow)
-  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue proxy k] >>= firstRow)
+  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow)
+  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow)
 
 testDeleteBy :: PersistBackend m => m ()
 testDeleteBy = do
@@ -532,8 +533,8 @@ testDeleteBy = do
   proxy <- phantomDb
   k <- insert $ Second "abc"
   deleteBy k
-  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue proxy k] >>= firstRow)
-  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue proxy k] >>= firstRow)
+  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow)
+  Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow)
 
 testDeleteAll :: PersistBackend m => m ()
 testDeleteAll = do
@@ -551,8 +552,8 @@ testReplaceMulti = do
   proxy <- phantomDb
   -- we need Single to test that referenced value can be replaced
   k <- insert $ Single (Second "abc")
-  Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrimitivePersistValue proxy k] >>= firstRow
-  let valueKey = fromPrimitivePersistValue proxy valueKey'
+  Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
+  let valueKey = fromPrimitivePersistValue valueKey'
 
   replace valueKey (Second "def")
   replaced <- get valueKey
@@ -561,7 +562,7 @@ testReplaceMulti = do
   replace valueKey (First 5)
   replaced <- get valueKey
   Just (First 5) @=? replaced
-  oldConstructor <- queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue proxy valueKey] >>= firstRow
+  oldConstructor <- queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue valueKey] >>= firstRow
   Nothing @=? oldConstructor
 
 testReplaceSingle :: PersistBackend m => m ()
@@ -571,8 +572,8 @@ testReplaceSingle = do
   migr val
   proxy <- phantomDb
   k <- insert val
-  Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrimitivePersistValue proxy k] >>= firstRow
-  let valueKey = fromPrimitivePersistValue proxy valueKey'
+  Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
+  let valueKey = fromPrimitivePersistValue valueKey'
   replace valueKey (Single "def")
   replaced <- get valueKey
   Just (Single "def") @=? replaced
@@ -757,6 +758,15 @@ testAutoKeyField = do
   k <- insert val
   result <- select $ AutoKeyField ==. k
   [val] @=? result
+
+testStringAutoKey :: PersistBackend m => m ()
+testStringAutoKey = do
+  let val = Single "abc"
+  migr val
+  k <- insert val
+  let stringKey = fromPrimitivePersistValue $ toPrimitivePersistValue k :: String
+  result <- get $ fromPrimitivePersistValue $ toPrimitivePersistValue stringKey
+  Just val @=? result
 
 -- This test must just compile
 testKeys :: PersistBackend m => m ()

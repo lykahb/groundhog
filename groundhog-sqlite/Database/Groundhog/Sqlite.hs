@@ -91,16 +91,16 @@ instance PersistBackendConn Sqlite where
 instance SchemaAnalyzer Sqlite where
   schemaExists = fail "schemaExists: is not supported by Sqlite"
   getCurrentSchema = return Nothing
-  listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+  listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
-  listTableTriggers (Nothing, name) = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue proxy name] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+  listTableTriggers (Nothing, name) = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue name] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   listTableTriggers (sch, _) = fail $ "listTableTriggers: schemas are not supported by Sqlite: " ++ show sch
   analyzeTable = runDb' . analyzeTable'
   analyzeTrigger (Nothing, name) = runDb' $ do
-    x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue proxy name] >>= firstRow
+    x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue name] >>= firstRow
     case x of
       Nothing  -> return Nothing
-      Just src -> return (fst $ fromPurePersistValues proxy src)
+      Just src -> return (fst $ fromPurePersistValues src)
   analyzeTrigger (sch, _) = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
   analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
   getMigrationPack = return migrationPack
@@ -214,7 +214,7 @@ migTriggerOnUpdate name dels = forM dels $ \(fieldName, del) -> do
 analyzeTable' :: QualifiedName -> Action Sqlite (Maybe TableInfo)
 analyzeTable' (Nothing, tName) = do
   let fromName = escapeS . fromString
-  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   case tableInfo of
     [] -> return Nothing
     rawColumns -> do
@@ -222,17 +222,17 @@ analyzeTable' (Nothing, tName) = do
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
           primaryKeyColumnNames = foldr (\(_ , (name, _, _, _, primaryIndex)) xs -> if primaryIndex > 0 then name:xs else xs) [] rawColumns
           columns = map mkColumn rawColumns
-      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
-        uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
-        sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue proxy name] >>= firstRow
+        uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+        sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue name] >>= firstRow
         let columnNames = map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
             uType = if sql == Just [PersistNull]
               then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary False else UniqueConstraint
               else UniqueIndex
         return $ UniqueDef (Just name) uType (map Left columnNames)
-      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
       (foreigns :: [(Maybe String, Reference)]) <- do
           let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
               foreigns = groupBy ((==) `on` fst) . sort $ foreignKeyList -- sort by foreign key number and column number inside key (first and second integers)
@@ -259,7 +259,7 @@ analyzeTable' (sch, _) = fail $ "analyzeTable: schemas are not supported by Sqli
 
 analyzePrimaryKey :: String -> Action Sqlite (Maybe [String])
 analyzePrimaryKey tName = do
-  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   let cols = map (\(_ , (name, _, _, _, primaryIndex)) -> (primaryIndex, name)) (tableInfo ::  [(Int, (String, String, Int, Maybe String, Int))])
       cols' = map snd $ sort $ filter ((> 0) . fst) cols
   return $ if null cols'
@@ -356,7 +356,7 @@ insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
   let e = entityDef proxy v
-  let constructorNum = fromPrimitivePersistValue proxy (head vals)
+  let constructorNum = fromPrimitivePersistValue (head vals)
 
   liftM fst $ if isSimple (constructors e)
     then do
@@ -380,7 +380,7 @@ insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
   let e = entityDef proxy v
-  let constructorNum = fromPrimitivePersistValue proxy (head vals)
+  let constructorNum = fromPrimitivePersistValue (head vals)
 
   if isSimple (constructors e)
     then do
@@ -418,11 +418,11 @@ insertList' l = do
   let go :: Int -> [a] -> Action Sqlite ()
       go n (x:xs) = do
        x' <- toPersistValues x
-       executeRawCached' query $ (k:) . (toPrimitivePersistValue proxy n:) . x' $ []
+       executeRawCached' query $ (k:) . (toPrimitivePersistValue n:) . x' $ []
        go (n + 1) xs
       go _ [] = return ()
   go 0 l
-  return $ fromPrimitivePersistValue proxy k
+  return $ fromPrimitivePersistValue k
   
 getList' :: forall a . PersistField a => Int64 -> Action Sqlite [a]
 getList' k = do
@@ -430,7 +430,7 @@ getList' k = do
       valuesName = mainName <> delim' <> "values"
       value = ("value", dbType proxy (undefined :: a))
       query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRawCached' query [toPrimitivePersistValue proxy k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
+  queryRawCached' query [toPrimitivePersistValue k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
     
 getLastInsertRowId :: Action Sqlite PersistValue
 getLastInsertRowId = do

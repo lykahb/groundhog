@@ -44,7 +44,7 @@ module Database.Groundhog.Generic
   , matchElements
   , haveSameElems
   , phantomDb
-  , getAutoKeyType
+  , getDefaultAutoKeyType
   , getUniqueFields
   , isSimple
   , firstRow
@@ -203,30 +203,30 @@ applyReferencesSettings (Just (Just parent, onDel, onUpd)) Nothing = Just (Right
 applyReferencesSettings _ Nothing = error $ "applyReferencesSettings: expected type with reference, got Nothing"
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
-primToPersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a:)
+primToPersistValue a = return (toPrimitivePersistValue a:)
 
 primFromPersistValue :: (PersistBackend m, PrimitivePersistField a) => [PersistValue] -> m (a, [PersistValue])
-primFromPersistValue (x:xs) = phantomDb >>= \p -> return (fromPrimitivePersistValue p x, xs)
+primFromPersistValue (x:xs) = return (fromPrimitivePersistValue x, xs)
 primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
 
-primToPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => proxy db -> a -> ([PersistValue] -> [PersistValue])
-primToPurePersistValues p a = (toPrimitivePersistValue p a:)
+primToPurePersistValues :: PrimitivePersistField a => a -> ([PersistValue] -> [PersistValue])
+primToPurePersistValues a = (toPrimitivePersistValue a:)
 
-primFromPurePersistValues :: (DbDescriptor db, PrimitivePersistField a) => proxy db -> [PersistValue] -> (a, [PersistValue])
-primFromPurePersistValues p (x:xs) = (fromPrimitivePersistValue p x, xs)
-primFromPurePersistValues _ xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
+primFromPurePersistValues :: PrimitivePersistField a => [PersistValue] -> (a, [PersistValue])
+primFromPurePersistValues (x:xs) = (fromPrimitivePersistValue x, xs)
+primFromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
 
 primToSinglePersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m PersistValue
-primToSinglePersistValue a = phantomDb >>= \p -> return (toPrimitivePersistValue p a)
+primToSinglePersistValue a = return (toPrimitivePersistValue a)
 
 primFromSinglePersistValue :: (PersistBackend m, PrimitivePersistField a) => PersistValue -> m a
-primFromSinglePersistValue a = phantomDb >>= \p -> return (fromPrimitivePersistValue p a)
+primFromSinglePersistValue a = return (fromPrimitivePersistValue a)
 
 pureToPersistValue :: (PersistBackend m, PurePersistField a) => a -> m ([PersistValue] -> [PersistValue])
-pureToPersistValue a = phantomDb >>= \p -> return (toPurePersistValues p a)
+pureToPersistValue a = return (toPurePersistValues a)
 
 pureFromPersistValue :: (PersistBackend m, PurePersistField a) => [PersistValue] -> m (a, [PersistValue])
-pureFromPersistValue xs = phantomDb >>= \p -> return (fromPurePersistValues p xs)
+pureFromPersistValue xs = return (fromPurePersistValues xs)
 
 singleToPersistValue :: (PersistBackend m, SinglePersistField a) => a -> m ([PersistValue] -> [PersistValue])
 singleToPersistValue a = toSinglePersistValue a >>= \x -> return (x:)
@@ -241,7 +241,7 @@ toSinglePersistValueUnique u v = insertBy u v >> primToSinglePersistValue (extra
 
 fromSinglePersistValueUnique :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)), PrimitivePersistField (Key v (Unique u)))
                              => u (UniqueMarker v) -> PersistValue -> m v
-fromSinglePersistValueUnique _ x = phantomDb >>= \proxy -> getBy (fromPrimitivePersistValue proxy x :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show x) return
+fromSinglePersistValueUnique _ x = getBy (fromPrimitivePersistValue x :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show x) return
 
 toPersistValuesUnique :: forall m v u . (PersistBackend m, PersistEntity v, IsUniqueKey (Key v (Unique u)))
                       => u (UniqueMarker v) -> v -> m ([PersistValue] -> [PersistValue])
@@ -257,7 +257,7 @@ toSinglePersistValueAutoKey a = insertByAll a >>= primToSinglePersistValue . eit
 
 fromSinglePersistValueAutoKey :: forall m v . (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
                               => PersistValue -> m v
-fromSinglePersistValueAutoKey x = phantomDb >>= \p -> get (fromPrimitivePersistValue p x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) return
+fromSinglePersistValueAutoKey x = get (fromPrimitivePersistValue x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) return
 
 replaceOne :: (Eq x, Show x) => String -> (a -> x) -> (b -> x) -> (a -> b -> b) -> a -> [b] -> [b]
 replaceOne what getter1 getter2 apply a bs = case filter ((getter1 a ==) . getter2) bs of
@@ -288,10 +288,10 @@ haveSameElems p xs ys = case matchElements p xs ys of
 phantomDb :: PersistBackend m => m (proxy (Conn m))
 phantomDb = return $ error "phantomDb"
 
-getAutoKeyType :: DbDescriptor db => proxy db -> DbTypePrimitive
-getAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoKeyType db) proxy) of
+getDefaultAutoKeyType :: DbDescriptor db => proxy db -> DbTypePrimitive
+getDefaultAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoKeyType db) proxy) of
   DbTypePrimitive t _ _ _ -> t
-  t -> error $ "autoKeyType: unexpected key type " ++ show t
+  t -> error $ "getDefaultAutoKeyType: unexpected key type " ++ show t
 
 firstRow :: MonadIO m => RowStream a -> m (Maybe a)
 firstRow (next, close) = liftIO $ maybe next (next `E.finally`) close

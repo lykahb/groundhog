@@ -44,20 +44,20 @@ get RenderConfig{..} queryFunc (k :: Key v BackendSpecific) = do
       let constr = head $ constructors e
       let fields = renderFields esc (constrParams constr)
       let query = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> " WHERE " <> fromJust (constrId esc constr) <> "=?"
-      x <- queryFunc query [toPrimitivePersistValue proxy k] >>= firstRow
+      x <- queryFunc query [toPrimitivePersistValue k] >>= firstRow
       case x of
         Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0:xs
         Nothing -> return Nothing
     else do
       let query = "SELECT discr FROM " <> mainTableName esc e <> " WHERE id=?"
-      x <- queryFunc query [toPrimitivePersistValue proxy k] >>= firstRow
+      x <- queryFunc query [toPrimitivePersistValue k] >>= firstRow
       case x of
         Just [discr] -> do
-          let constructorNum = fromPrimitivePersistValue proxy discr
+          let constructorNum = fromPrimitivePersistValue discr
               constr = constructors e !! constructorNum
               fields = renderFields esc (constrParams constr)
               cQuery = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> " WHERE " <> fromJust (constrId esc constr) <> "=?"
-          x2 <- queryFunc cQuery [toPrimitivePersistValue proxy k] >>= firstRow
+          x2 <- queryFunc cQuery [toPrimitivePersistValue k] >>= firstRow
           case x2 of
             Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ discr:xs
             Nothing -> fail "Missing entry in constructor table"
@@ -78,15 +78,15 @@ selectStream conf@RenderConfig{..} queryFunc preColumns noLimit options = doSele
   orders = renderOrders conf ords
   lim = case (limit, offset) of
           (Nothing, Nothing) -> mempty
-          (Nothing, o) -> RenderS (" " <> noLimit <> " OFFSET ?") (toPurePersistValues proxy o)
-          (l, Nothing) -> RenderS " LIMIT ?" (toPurePersistValues proxy l)
-          (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues proxy (l, o))
+          (Nothing, o) -> RenderS (" " <> noLimit <> " OFFSET ?") (toPurePersistValues o)
+          (l, Nothing) -> RenderS " LIMIT ?" (toPurePersistValues l)
+          (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues (l, o))
   cond' = renderCond conf cond
   fields = RenderS (renderFields esc (constrParams constr)) id
   distinctClause = if dist then "DISTINCT " else mempty
   RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
   whereClause = maybe "" (" WHERE " <>) cond'
-  doSelectQuery = queryFunc query (binds []) >>= mapStream (\xs -> liftM fst $ fromEntityPersistValues $ (toPrimitivePersistValue proxy cNum):xs)
+  doSelectQuery = queryFunc query (binds []) >>= mapStream (\xs -> liftM fst $ fromEntityPersistValues $ (toPrimitivePersistValue cNum):xs)
   cNum = entityConstrNum (undefined :: proxy v) (undefined :: c a)
   constr = constructors e !! cNum
 
@@ -105,8 +105,8 @@ selectAllStream RenderConfig{..} queryFunc = start where
   e = entityDef proxy (undefined :: v)
   proxy = undefined :: proxy conn
   mkEntity cNum xs = do
-    let (k, xs') = fromPurePersistValues proxy xs
-    (v, _) <- fromEntityPersistValues (toPrimitivePersistValue proxy (cNum :: Int):xs')
+    let (k, xs') = fromPurePersistValues xs
+    (v, _) <- fromEntityPersistValues (toPrimitivePersistValue (cNum :: Int):xs')
     return (k, v)
 
 getBy :: forall conn v u . (PersistBackendConn conn, PersistEntity v, IsUniqueKey (Key v (Unique u)))
@@ -142,9 +142,9 @@ projectStream conf@RenderConfig{..} queryFunc preColumns noLimit p options = doS
   orders = renderOrders conf ords
   lim = case (limit, offset) of
           (Nothing, Nothing) -> mempty
-          (Nothing, o) -> RenderS (" " <> noLimit <> " OFFSET ?") (toPurePersistValues proxy o)
-          (l, Nothing) -> RenderS " LIMIT ?" (toPurePersistValues proxy l)
-          (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues proxy (l, o))
+          (Nothing, o) -> RenderS (" " <> noLimit <> " OFFSET ?") (toPurePersistValues o)
+          (l, Nothing) -> RenderS " LIMIT ?" (toPurePersistValues l)
+          (l, o) -> RenderS " LIMIT ? OFFSET ?" (toPurePersistValues (l, o))
   cond' = renderCond conf cond
   chains = projectionExprs p []
   fields = commasJoin $ concatMap (renderExprExtended conf 0) chains
@@ -165,7 +165,7 @@ count conf@RenderConfig{..} queryFunc cond = do
       whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   x <- queryFunc query (maybe [] (flip getValues []) cond') >>= firstRow
   case x of
-    Just [num] -> return $ fromPrimitivePersistValue proxy num
+    Just [num] -> return $ fromPrimitivePersistValue num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
@@ -178,9 +178,9 @@ replace RenderConfig{..} queryFunc execFunc insertIntoConstructorTable k v = do
   vals <- toEntityPersistValues' v
   let e = entityDef proxy v
       proxy = undefined :: proxy conn
-      constructorNum = fromPrimitivePersistValue proxy (head vals)
+      constructorNum = fromPrimitivePersistValue (head vals)
       constr = constructors e !! constructorNum
-      k' = toPrimitivePersistValue proxy k
+      k' = toPrimitivePersistValue k
       RenderS upds updsVals = commasJoin $ zipWith f fields $ tail vals where
         fields = foldr (flatten esc) [] $ constrParams constr
         f f1 f2 = RenderS f1 id <> fromChar '=' <> renderPersistValue f2
@@ -190,7 +190,7 @@ replace RenderConfig{..} queryFunc execFunc insertIntoConstructorTable k v = do
     then execFunc updateQuery (updsVals [k'])
     else do
       let query = "SELECT discr FROM " <> mainTableName esc e <> " WHERE id=?"
-      x <- queryFunc query [k'] >>= liftM (fmap $ fromPrimitivePersistValue proxy . head) . firstRow
+      x <- queryFunc query [k'] >>= liftM (fmap $ fromPrimitivePersistValue . head) . firstRow
       case x of
         Just discr -> do
           let cName = tableName esc e constr
@@ -264,7 +264,7 @@ insertByAll :: forall conn v . (PersistBackendConn conn, PersistEntity v)
 insertByAll RenderConfig{..} queryFunc manyNulls v = do
   let e = entityDef proxy v
       proxy = undefined :: proxy conn
-      (constructorNum, uniques) = getUniques proxy v
+      (constructorNum, uniques) = getUniques v
       constr = constructors e !! constructorNum
       uniqueDefs = constrUniques constr
 
@@ -282,11 +282,11 @@ insertByAll RenderConfig{..} queryFunc manyNulls v = do
       x <- queryFunc query (vals []) >>= firstRow
       case x of
         Nothing -> liftM Right $ Core.insert v
-        Just xs -> return $ Left $ fst $ fromPurePersistValues proxy xs
+        Just xs -> return $ Left $ fst $ fromPurePersistValues xs
 
 deleteBy :: forall conn v . (PersistBackendConn conn, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
             => RenderConfig -> (Utf8 -> [PersistValue] -> Action conn ()) -> Key v BackendSpecific -> Action conn ()
-deleteBy RenderConfig{..} execFunc k = execFunc query [toPrimitivePersistValue proxy k] where
+deleteBy RenderConfig{..} execFunc k = execFunc query [toPrimitivePersistValue k] where
   e = entityDef proxy ((undefined :: Key v u -> v) k)
   proxy = undefined :: proxy conn
   constr = head $ constructors e
@@ -311,7 +311,7 @@ countAll RenderConfig{..} queryFunc (_ :: v) = do
       query = "SELECT COUNT(*) FROM " <> mainTableName esc e
   x <- queryFunc query [] >>= firstRow
   case x of
-    Just [num] -> return $ fromPrimitivePersistValue proxy num
+    Just [num] -> return $ fromPrimitivePersistValue num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail $ "COUNT returned no rows"
 
@@ -337,7 +337,7 @@ insertBy conf@RenderConfig{..} queryFunc manyNulls u v = do
       x <- queryFunc query (vals []) >>= firstRow
       case x of
         Nothing  -> liftM Right $ Core.insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues proxy [k]
+        Just [k] -> return $ Left $ fst $ fromPurePersistValues [k]
         Just xs  -> fail $ "unexpected query result: " ++ show xs
 
 constrId :: (Utf8 -> Utf8) -> ConstructorDef -> Maybe Utf8

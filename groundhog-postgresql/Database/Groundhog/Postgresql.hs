@@ -100,16 +100,16 @@ instance PersistBackendConn Postgresql where
   getList k = runDb' $ getList' k
 
 instance SchemaAnalyzer Postgresql where
-  schemaExists schema = runDb' $ queryRaw' "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=?" [toPrimitivePersistValue proxy schema] >>= firstRow >>= return . isJust
-  getCurrentSchema = runDb' $ queryRaw' "SELECT current_schema()" [] >>= firstRow >>= return . (>>= fst . fromPurePersistValues proxy)
-  listTables schema = runDb' $ queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue proxy schema] >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
-  listTableTriggers name = runDb' $ queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" (toPurePersistValues proxy name []) >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+  schemaExists schema = runDb' $ queryRaw' "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=?" [toPrimitivePersistValue schema] >>= firstRow >>= return . isJust
+  getCurrentSchema = runDb' $ queryRaw' "SELECT current_schema()" [] >>= firstRow >>= return . (>>= fst . fromPurePersistValues)
+  listTables schema = runDb' $ queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue schema] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  listTableTriggers name = runDb' $ queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   analyzeTable = runDb' . analyzeTable'
   analyzeTrigger name = runDb' $ do
-    x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,current_schema()) AND trigger_name=?" (toPurePersistValues proxy name []) >>= firstRow
+    x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,current_schema()) AND trigger_name=?" (toPurePersistValues name []) >>= firstRow
     return $ case x of
       Nothing  -> Nothing
-      Just src -> fst $ fromPurePersistValues proxy src
+      Just src -> fst $ fromPurePersistValues src
   analyzeFunction name = runDb' $ do
     let query = "SELECT arg_types.typname, arg_types.typndims, arg_types_te.typname, ret.typname, ret.typndims, ret_te.typname, p.prosrc\
 \     FROM pg_catalog.pg_namespace n\
@@ -120,7 +120,7 @@ instance SchemaAnalyzer Postgresql where
 \     INNER JOIN pg_type ret ON p.prorettype = ret.oid\
 \     LEFT JOIN pg_type ret_te ON ret_te.oid = ret.typelem\
 \     WHERE n.nspname = coalesce(?,current_schema()) AND p.proname = ?"
-    result <- queryRaw' query (toPurePersistValues proxy name []) >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+    result <- queryRaw' query (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
     let read' (typ, arr) = readSqlType typ (Nothing, Nothing, Nothing, Nothing, Nothing) arr
     return $ case result of
       []  -> Nothing
@@ -182,7 +182,7 @@ insert' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
   let e = entityDef proxy v
-  let constructorNum = fromPrimitivePersistValue proxy (head vals)
+  let constructorNum = fromPrimitivePersistValue (head vals)
 
   liftM fst $ if isSimple (constructors e)
     then do
@@ -208,7 +208,7 @@ insert_' v = do
   -- constructor number and the rest of the field values
   vals <- toEntityPersistValues' v
   let e = entityDef proxy v
-  let constructorNum = fromPrimitivePersistValue proxy (head vals)
+  let constructorNum = fromPrimitivePersistValue (head vals)
 
   if isSimple (constructors e)
     then do
@@ -245,11 +245,11 @@ insertList' (l :: [a]) = do
   let go :: Int -> [a] -> Action Postgresql ()
       go n (x:xs) = do
        x' <- toPersistValues x
-       executeRaw' query $ (k:) . (toPrimitivePersistValue proxy n:) . x' $ []
+       executeRaw' query $ (k:) . (toPrimitivePersistValue n:) . x' $ []
        go (n + 1) xs
       go _ [] = return ()
   go 0 l
-  return $ fromPrimitivePersistValue proxy k
+  return $ fromPrimitivePersistValue k
   
 getList' :: forall a . PersistField a => Int64 -> Action Postgresql [a]
 getList' k = do
@@ -257,7 +257,7 @@ getList' k = do
   let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType proxy (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRaw' query [toPrimitivePersistValue proxy k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
+  queryRaw' query [toPrimitivePersistValue k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
 
 --TODO: consider removal
 getKey :: RowStream [PersistValue] -> Action Postgresql PersistValue
@@ -390,7 +390,7 @@ migTriggerOnUpdate tName dels = forM dels $ \(fieldName, del) -> do
   
 analyzeTable' :: QualifiedName -> Action Postgresql (Maybe TableInfo)
 analyzeTable' name = do
-  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" (toPurePersistValues proxy name []) >>= firstRow
+  table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" (toPurePersistValues name []) >>= firstRow
   case table of
     Just _ -> do
       let colQuery = "SELECT c.column_name, c.is_nullable, c.udt_name, c.column_default, c.character_maximum_length, c.numeric_precision, c.numeric_scale, c.datetime_precision, c.interval_type, a.attndims AS array_dims, te.typname AS array_elem\
@@ -403,11 +403,11 @@ analyzeTable' name = do
 \  WHERE c.table_schema = coalesce(?, current_schema()) AND c.table_name=?\
 \  ORDER BY c.ordinal_position"
 
-      cols <- queryRaw' colQuery (toPurePersistValues proxy name []) >>= mapStream (return . getColumn . fst . fromPurePersistValues proxy) >>= streamToList
+      cols <- queryRaw' colQuery (toPurePersistValues name []) >>= mapStream (return . getColumn . fst . fromPurePersistValues) >>= streamToList
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,current_schema()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
       
-      uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues proxy ("UNIQUE" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
-      uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues proxy ("PRIMARY KEY" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+      uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues ("UNIQUE" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+      uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues ("PRIMARY KEY" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
       -- indexes with system columns like oid are omitted
       let indexQuery = "WITH indexes as (\
 \SELECT ic.oid, ic.relname,\
@@ -429,7 +429,7 @@ analyzeTable' name = do
 \  INNER JOIN (SELECT oid FROM indexes\
 \    GROUP BY oid\
 \    HAVING every(attnum > 0 OR attnum IS NULL)) non_system ON i.oid = non_system.oid"
-      uniqIndexes <- queryRaw' indexQuery (toPurePersistValues proxy name []) >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+      uniqIndexes <- queryRaw' indexQuery (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
       let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
                                 [c] -> colType c `elem` [DbInt32, DbInt64] && maybe False ("nextval" `isPrefixOf`) (colDefault c)
@@ -459,7 +459,7 @@ analyzeTableReferences tName = do
 \  INNER JOIN pg_namespace sch_child ON sch_child.oid = cl_child.relnamespace\
 \  WHERE sch_child.nspname = coalesce(?, current_schema()) AND cl_child.relname = ?\
 \  ORDER BY c.conname"
-  x <- queryRaw' sql (toPurePersistValues proxy tName []) >>= mapStream (return . fst . fromPurePersistValues proxy) >>= streamToList
+  x <- queryRaw' sql (toPurePersistValues tName []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   -- (refName, ((parentTableSchema, parentTable, onDelete, onUpdate), (childColumn, parentColumn)))
   let mkReference xs = (Just refName, Reference parentTable pairs (mkAction onDelete) (mkAction onUpdate)) where
         pairs = map (snd . snd) xs

@@ -19,7 +19,7 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
   
   -- PersistField instance for PersistEntity expects to receive its id, not values contained in data.
   -- So here we cannot use fromPersistValues to get data.
-  xs1 <- queryRaw False "SELECT \"SomeData0\", \"someData1#val0\", \"someData1#val1\" FROM \"SomeData\" WHERE \"id\" = ? OR \"id\" = ?" [toPrimitivePersistValue proxy k1, toPrimitivePersistValue proxy k2] $ mapAllRows (fmap fst . fromPersistValues)
+  xs1 <- queryRaw False "SELECT \"SomeData0\", \"someData1#val0\", \"someData1#val1\" FROM \"SomeData\" WHERE \"id\" = ? OR \"id\" = ?" [toPrimitivePersistValue k1, toPrimitivePersistValue k2] $ mapAllRows (fmap fst . fromPersistValues)
   liftIO $ print (xs1 :: [(Int, Int, String)])
   
   -- it will run 1 + N select queries to get data by id.
@@ -27,7 +27,7 @@ main = withSqliteConn ":memory:" $ runDbConn $ do
   liftIO $ print (xs2 :: [SomeData])
   
   -- function fromEntityPersistValues from PersistEntity expects constructor number (they start from 0) and the data contained in it.
-  xs3 <- queryRaw False "SELECT \"SomeData0\", \"someData1#val0\", \"someData1#val1\" FROM \"SomeData\" WHERE \"id\" = ? OR \"id\" = ?" [toPrimitivePersistValue proxy k1, toPrimitivePersistValue proxy k2] $ mapAllRows (fmap fst . fromEntityPersistValues . (toPrimitivePersistValue proxy (0 :: Int):))
+  xs3 <- queryRaw False "SELECT \"SomeData0\", \"someData1#val0\", \"someData1#val1\" FROM \"SomeData\" WHERE \"id\" = ? OR \"id\" = ?" [toPrimitivePersistValue k1, toPrimitivePersistValue k2] $ mapAllRows (fmap fst . fromEntityPersistValues . (toPrimitivePersistValue (0 :: Int):))
   liftIO $ print (xs3 :: [SomeData])
   
   -- the queries not supported by groundhog API may be run via raw SQL. If number of columns is too big (there are no instances PersistFields for tuples with more than 5 elements) you can nest tuples

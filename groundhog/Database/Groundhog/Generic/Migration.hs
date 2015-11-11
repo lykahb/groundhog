@@ -113,10 +113,10 @@ data MigrationPack conn = MigrationPack {
 }
 
 mkColumns :: DbTypePrimitive -> (String, DbType) -> ([Column] -> [Column])
-mkColumns autoKeyType field = go "" field where
+mkColumns listAutoKeyType field = go "" field where
   go prefix (fname, typ) acc = (case typ of
     DbEmbedded (EmbeddedDef flag ts) _ -> foldr (go prefix') acc ts where prefix' = if flag then "" else prefix ++ fname ++ [delim]
-    DbList _ _ -> Column fullName False autoKeyType Nothing : acc
+    DbList _ _ -> Column fullName False listAutoKeyType Nothing : acc
     DbTypePrimitive t nullable def _ -> Column fullName nullable t def : acc) where
       fullName = prefix ++ fname
 
@@ -192,7 +192,7 @@ migrateSchema MigrationPack{..} schema = do
 
 migrateEntity :: (SchemaAnalyzer conn, PersistBackendConn conn) => MigrationPack conn -> EntityDef -> Action conn SingleMigration
 migrateEntity m@MigrationPack{..} e = do
-  autoKeyType <- fmap getAutoKeyType phantomDb
+  autoKeyType <- fmap getDefaultAutoKeyType phantomDb
   let name = entityName e
       constrs = constructors e
       mainTableQuery = "CREATE TABLE " ++ escape name ++ " (" ++ mainTableId ++ " " ++ autoincrementedKeyTypeName ++ ", discr INTEGER NOT NULL)"
@@ -230,7 +230,7 @@ migrateEntity m@MigrationPack{..} e = do
 
 migrateList :: (SchemaAnalyzer conn, PersistBackendConn conn) => MigrationPack conn -> DbType -> Action conn SingleMigration
 migrateList m@MigrationPack{..} (DbList mainName t) = do
-  autoKeyType <- fmap getAutoKeyType phantomDb
+  autoKeyType <- fmap getDefaultAutoKeyType phantomDb
   let valuesName = mainName ++ delim : "values"
       (valueCols, valueRefs) = (($ []) . mkColumns autoKeyType) &&& mkReferences autoKeyType $ ("value", t)
       refs' = Reference (Nothing, mainName) [("id", "id")] (Just Cascade) Nothing : valueRefs
@@ -315,12 +315,12 @@ defaultMigConstr m@MigrationPack{..} e constr = do
   let simple = isSimple $ constructors e
       name = entityName e
       qualifiedCName = (entitySchema e, if simple then name else name ++ [delim] ++ constrName constr)
-  autoKeyType <- fmap getAutoKeyType phantomDb
+  autoKeyType <- fmap getDefaultAutoKeyType phantomDb
   tableStructure <- analyzeTable qualifiedCName
   let dels = concatMap (mkDeletes escape) $ constrParams constr
   (triggerExisted, delTrigger) <- migTriggerOnDelete qualifiedCName dels
   updTriggers <- liftM (concatMap snd) $ migTriggerOnUpdate qualifiedCName dels
-  
+
   let (expectedTableStructure, (addTable, addInAlters)) = (case constrAutoKeyName constr of
         Nothing -> (TableInfo columns uniques (mkRefs refs), f [] columns uniques refs)
         Just keyName -> let keyColumn = Column keyName False autoKeyType Nothing 

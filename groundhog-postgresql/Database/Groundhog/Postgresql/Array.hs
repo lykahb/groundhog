@@ -69,22 +69,22 @@ arrayType p a = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"] where
     t -> error $ "arrayType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
 
 class ArrayElem a where
-  parseElem :: DbDescriptor db => proxy db -> Parser a
+  parseElem :: Parser a
 
 instance ArrayElem a => ArrayElem (Array a) where
   parseElem = parseArr
 
 instance PrimitivePersistField a => ArrayElem a where
-  parseElem p = fmap (fromPrimitivePersistValue p . PersistByteString) parseString
+  parseElem = fmap (fromPrimitivePersistValue . PersistByteString) parseString
 
 instance (ArrayElem a, PrimitivePersistField a) => PrimitivePersistField (Array a) where
-  toPrimitivePersistValue p (Array xs) = PersistCustom arr (vals []) where
+  toPrimitivePersistValue (Array xs) = PersistCustom arr (vals []) where
     arr = "ARRAY[" <> query <> "]::" <> fromString typ
-    RenderS query vals = commasJoin $ map (renderPersistValue . toPrimitivePersistValue p) xs
-    typ = showSqlType $ arrayType p $ Array xs
-  fromPrimitivePersistValue p a = parseHelper parser a where
+    RenderS query vals = commasJoin $ map (renderPersistValue . toPrimitivePersistValue) xs
+    typ = showSqlType $ arrayType (undefined :: p Postgresql) $ Array xs
+  fromPrimitivePersistValue a = parseHelper parser a where
     dimensions = char '[' *> takeWhile1 (/= '=') *> char '='
-    parser = optional dimensions *> parseArr p
+    parser = optional dimensions *> parseArr
 
 parseString :: Parser ByteString
 parseString = (char '"' *> jstring_)
@@ -132,8 +132,8 @@ doubleQuote, backslash :: Word8
 doubleQuote = 34
 backslash = 92
   
-parseArr :: (DbDescriptor db, ArrayElem a) => proxy db -> Parser (Array a)
-parseArr p = Array <$> (char '{' *> parseElem p `sepBy` char ',' <* char '}')
+parseArr :: ArrayElem a => Parser (Array a)
+parseArr = Array <$> (char '{' *> parseElem `sepBy` char ',' <* char '}')
 
 (!) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b Int) => a -> b -> Expr Postgresql r elem
 (!) arr i = mkExpr $ Snippet $ \conf _ -> [renderExpr conf (toExpr arr) <> "[" <> renderExpr conf (toExpr i) <> "]"]

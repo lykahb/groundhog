@@ -126,7 +126,7 @@ class (PurePersistField (AutoKey v), PurePersistField (DefaultKey v)) => Persist
   -- | Constructs the value from the list of 'PersistValue'
   fromEntityPersistValues :: PersistBackend m => [PersistValue] -> m (v, [PersistValue])
   -- | Returns constructor number and a list of uniques names and corresponding field values
-  getUniques :: DbDescriptor db => proxy db -> v -> (Int, [(String, [PersistValue] -> [PersistValue])])
+  getUniques :: v -> (Int, [(String, [PersistValue] -> [PersistValue])])
   -- | Is internally used by FieldLike Field instance
   -- We could avoid this function if class FieldLike allowed FieldLike Fields Data or FieldLike (Fields Data). However that would require additional extensions in user-space code
   entityFieldChain :: DbDescriptor db => proxy db -> Field v c a -> FieldChain
@@ -537,13 +537,13 @@ class PersistField a => SinglePersistField a where
 
 -- | Represents all datatypes that map into several columns. Getting values for those columns is pure.
 class PersistField a => PurePersistField a where
-  toPurePersistValues :: DbDescriptor db => proxy db -> a -> ([PersistValue] -> [PersistValue])
-  fromPurePersistValues :: DbDescriptor db => proxy db -> [PersistValue] -> (a, [PersistValue])
+  toPurePersistValues :: a -> ([PersistValue] -> [PersistValue])
+  fromPurePersistValues :: [PersistValue] -> (a, [PersistValue])
 
--- | Datatypes which can be converted directly to 'PersistValue'. The no-value parameter @DbDescriptor db => proxy db@ allows conversion depend the database details while keeping it pure. A type which has an instance of 'PrimitivePersistField' should be an instance of superclasses 'SinglePersistField' and 'PurePersistField' as well.
+-- | Datatypes which can be converted directly to 'PersistValue'
 class PersistField a => PrimitivePersistField a where
-  toPrimitivePersistValue :: DbDescriptor db => proxy db -> a -> PersistValue
-  fromPrimitivePersistValue :: DbDescriptor db => proxy db -> PersistValue -> a
+  toPrimitivePersistValue :: a -> PersistValue
+  fromPrimitivePersistValue :: PersistValue -> a
 
 delim :: Char
 delim = '#'
