@@ -26,6 +26,28 @@ executable basic
 
   default-language:    Haskell2010
 
+executable tables
+  main-is:             tables.hs
+  build-depends:       base >=4 && <5
+                     , groundhog
+                     , transformers
+                     , groundhog-th
+                     , groundhog-sqlite
+
+  default-language:    Haskell2010
+
+executable multidb
+  main-is:             multidb.hs
+  build-depends:       base >=4 && <5
+                     , groundhog
+                     , transformers
+                     , groundhog-th
+                     , groundhog-sqlite
+                     , groundhog-mysql
+                     , groundhog-postgresql
+
+  default-language:    Haskell2010
+
 --executable db-specific-types
   --main-is:             dbSpecificTypes.hs
   --build-depends:       base >=4.6 && <4.7
