@@ -77,14 +77,15 @@ data THConstructorDef = THConstructorDef {
 } deriving (Eq, Show)
 
 data THFieldDef = THFieldDef {
-    thFieldName :: String -- bar
-  , thDbFieldName :: String -- SQLbar
-  , thDbTypeName :: Maybe String -- inet, NUMERIC(5, 2), VARCHAR(50)
-  , thExprName :: String -- BarField
+    thFieldName :: String -- ^ name in the record, bar
+  , thDbFieldName :: String -- ^ column name, SQLbar
+  , thDbTypeName :: Maybe String -- ^ column type, inet, NUMERIC(5, 2), VARCHAR(50), etc.
+  , thExprName :: String -- ^ name of constructor in the Field GADT, BarField
   , thFieldType :: Type
   , thEmbeddedDef :: Maybe [PSFieldDef String]
-  , thDefaultValue :: Maybe String
+  , thDefaultValue :: Maybe String -- ^ default value in the database
   , thReferenceParent :: Maybe (Maybe ((Maybe String, String), [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
+  , thFieldConverter :: Maybe String -- ^ name of a pair of functions
 } deriving (Eq, Show)
 
 data THUniqueDef = THUniqueDef {
@@ -186,7 +187,7 @@ instance Lift ReferenceActionType where
   lift SetDefault = [| SetDefault |]
 
 instance Lift (PSFieldDef String) where
-  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) |]
+  lift (PSFieldDef {..}) = [| PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) $(lift psFieldConverter) |]
 
 instance Lift PSUniqueKeyDef where
   lift (PSUniqueKeyDef {..}) = [| PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef) |]
@@ -268,7 +269,7 @@ instance FromJSON ReferenceActionType where
 
 instance FromJSON (PSFieldDef String) where
   parseJSON = withObject "field" $ \v ->
-    PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> mkRefSettings v where
+    PSFieldDef <$> v .: "name" <*> v .:? "dbName" <*> v .:? "type" <*> v .:? "exprName" <*> v .:? "embeddedType" <*> v .:? "default" <*> mkRefSettings v <*> v .:? "converter" where
     mkRefSettings v = do
       ref <- v .:? "reference"
       (parent, onDel, onUpd) <- case ref of

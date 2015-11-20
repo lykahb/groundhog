@@ -169,21 +169,22 @@ onException :: MonadBaseControl IO m
 onException io what = control $ \runInIO -> E.onException (runInIO io) (runInIO what)
 
 data PSFieldDef str = PSFieldDef {
-    psFieldName :: str -- bar
-  , psDbFieldName :: Maybe str -- SQLbar
-  , psDbTypeName :: Maybe str -- inet, NUMERIC(5,2), VARCHAR(50)
-  , psExprName :: Maybe str -- BarField
+    psFieldName :: str  -- ^ name in the record, bar
+  , psDbFieldName :: Maybe str -- ^ column name, SQLbar
+  , psDbTypeName :: Maybe str -- ^ column type, inet, NUMERIC(5, 2), VARCHAR(50), etc.
+  , psExprName :: Maybe str -- ^ name of constructor in the Field GADT, BarField
   , psEmbeddedDef :: Maybe [PSFieldDef str]
-  , psDefaultValue :: Maybe str
+  , psDefaultValue :: Maybe str -- ^ default value in the database
   , psReferenceParent :: Maybe (Maybe ((Maybe str, str), [str]), Maybe ReferenceActionType, Maybe ReferenceActionType)
+  , psFieldConverter :: Maybe str -- ^ name of a pair of functions
 } deriving (Eq, Show)
 
 applyDbTypeSettings :: PSFieldDef String -> DbType -> DbType
-applyDbTypeSettings (PSFieldDef _ _ dbTypeName _ Nothing def psRef) typ = case typ of
+applyDbTypeSettings (PSFieldDef _ _ dbTypeName _ Nothing def psRef _) typ = case typ of
   DbTypePrimitive t nullable def' ref -> DbTypePrimitive (maybe t (\typeName -> DbOther $ OtherTypeDef [Left typeName]) dbTypeName) nullable (def <|> def') (applyReferencesSettings psRef ref)
   DbEmbedded emb ref -> DbEmbedded emb (applyReferencesSettings psRef ref)
   t -> t
-applyDbTypeSettings (PSFieldDef _ _ _ _ (Just subs) _ psRef) typ = (case typ of
+applyDbTypeSettings (PSFieldDef _ _ _ _ (Just subs) _ psRef _) typ = (case typ of
   DbEmbedded (EmbeddedDef _ fields) ref -> DbEmbedded (uncurry EmbeddedDef $ go subs fields) (applyReferencesSettings psRef ref)
   t -> error $ "applyDbTypeSettings: expected DbEmbedded, got " ++ show t) where
   go [] fs = (False, fs)

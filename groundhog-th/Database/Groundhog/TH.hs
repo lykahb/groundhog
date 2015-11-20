@@ -270,6 +270,7 @@ applyFieldSettings PSFieldDef{..} def@(THFieldDef{..}) =
       , thEmbeddedDef = psEmbeddedDef
       , thDefaultValue = psDefaultValue
       , thReferenceParent = psReferenceParent
+      , thFieldConverter = psFieldConverter
       }
 
 applyEmbeddedSettings :: PSEmbeddedDef -> THEmbeddedDef -> THEmbeddedDef
@@ -373,10 +374,10 @@ mkTHEntityDef NamingStyle{..} (DataD _ dName typeVars cons _) =
       apply f = f dName' (nameBase name) cNum
 
     mkField :: String -> StrictType -> Int -> THFieldDef
-    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (apply mkNormalExprFieldName) t Nothing Nothing Nothing where
+    mkField cName (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (apply mkNormalExprFieldName) t Nothing Nothing Nothing Nothing where
       apply f = f dName' cName cNum fNum
     mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (apply mkExprFieldName) t Nothing Nothing Nothing where
+    mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (apply mkExprFieldName) t Nothing Nothing Nothing Nothing where
       apply f = f dName' cName cNum fName' fNum
       fName' = nameBase fName
 mkTHEntityDef _ _ = error "Only datatypes can be processed"
@@ -395,10 +396,10 @@ mkTHEmbeddedDef (NamingStyle{..}) (DataD _ dName typeVars cons _) =
     _ -> error $ "An embedded datatype must have exactly one constructor: " ++ show dName
   
   mkField :: String -> StrictType -> Int -> THFieldDef
-  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (mkNormalExprSelectorName dName' cName' fNum) t Nothing Nothing Nothing where
+  mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (mkNormalExprSelectorName dName' cName' fNum) t Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fNum
   mkVarField :: String -> VarStrictType -> Int -> THFieldDef
-  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing Nothing Nothing where
+  mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fName' fNum
     fName' = nameBase fName
 mkTHEmbeddedDef _ _ = error "Only datatypes can be processed"
