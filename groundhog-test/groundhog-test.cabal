@@ -91,6 +91,7 @@ library
                      Database.Groundhog.Postgresql
                    , Database.Groundhog.Postgresql.Array
                    , Database.Groundhog.Postgresql.Geometry
+                   , Database.Groundhog.Postgresql.HStore
 
      cpp-options: -DWITH_POSTGRESQL
 
@@ -114,6 +115,7 @@ test-suite test
                    , bytestring               >= 0.9
                    , transformers             >= 0.2.1 && < 0.5
                    , aeson                    >= 0.5
+                   , text                     >= 0.8
                    , groundhog-test
                    , test-framework-hunit     >= 0.3
                    , test-framework           >= 0.2

@@ -61,6 +61,7 @@ module GroundhogTest (
     , testArrays
     , testSelectDistinctOn
     , testExpressionIndex
+    , testHStore
 #endif
 #if WITH_MYSQL
     , testSchemaAnalysisMySQL
@@ -89,6 +90,7 @@ import Database.Groundhog.Postgresql.Array hiding (all, any, append)
 import qualified Database.Groundhog.Postgresql.Array as Arr
 import Database.Groundhog.Postgresql.Geometry hiding ((>>), (&&))
 import qualified Database.Groundhog.Postgresql.Geometry as Geo
+import qualified Database.Groundhog.Postgresql.HStore as HStore
 #endif
 #if WITH_MYSQL
 import Database.Groundhog.MySQL
@@ -101,6 +103,7 @@ import Data.List (intercalate, isInfixOf, sort)
 import Data.Maybe (fromMaybe)
 import qualified Data.Map as Map
 import qualified Data.String.Utils as Utils
+import qualified Data.Text as Text
 import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.Traversable as T
@@ -987,6 +990,14 @@ testExpressionIndex = do
   migr val
   Just val @=?? (insert val >>= get)
   assertExc "expression index should fail on duplicates" $ insert $ ExpressionIndex (-1)
+
+testHStore :: (PersistBackend m, Conn m ~ Postgresql, MonadBaseControl IO m) => m ()
+testHStore = do
+  let val = Single (HStore.HStoreList [(Text.pack "k", Text.pack "v")])
+  migr val
+  k <- insert val
+  show (Just val) @=?? (liftM show $ get k) -- HStore does not have Eq, compare by show
+  [True] @=?? project (HStore.exist SingleField "k") (AutoKeyField ==. k)
 #endif
 
 #if WITH_MYSQL

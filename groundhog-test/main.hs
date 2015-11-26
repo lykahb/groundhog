@@ -145,6 +145,7 @@ postgresqlTestSuite run = map (\(name, func) -> testCase name $ run func)
   , ("testListTriggersOnUpdate", testListTriggersOnUpdate)
   , ("testSelectDistinctOn", testSelectDistinctOn)
   , ("testExpressionIndex", testExpressionIndex)
+  , ("testHStore", testHStore)
   ]
 #endif
 
