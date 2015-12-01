@@ -787,13 +787,14 @@ spanM p = go  where
       else return ([], x:xs)
 
 mkType :: THFieldDef -> Name -> ExpQ -> ExpQ
-mkType THFieldDef{..} proxy nvar = t2 where
+mkType THFieldDef{..} proxy nvar = t3 where
   psField = PSFieldDef thFieldName (Just thDbFieldName) thDbTypeName (Just thExprName) thEmbeddedDef thDefaultValue thReferenceParent thFieldConverter
-  t1 = [| dbType $(varE proxy) $nvar |]
+  t1 = maybe id (\convName x -> [| snd $(varE $ mkName convName) $ $x |]) thFieldConverter nvar
+  t2 = [| dbType $(varE proxy) $t1 |]
   -- if there are any type settings, apply them in runtime
-  t2 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent) of
-    (Nothing, Nothing, Nothing, Nothing) -> t1
-    _ -> [| applyDbTypeSettings $(lift psField) $t1 |]
+  t3 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent) of
+    (Nothing, Nothing, Nothing, Nothing) -> t2
+    _ -> [| applyDbTypeSettings $(lift psField) $t2 |]
 
 mkTySynInstD :: Name -> [Type] -> Type -> Dec
 mkTySynInstD name ts t =
