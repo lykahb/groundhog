@@ -14,10 +14,10 @@ data Alarm = Alarm {weekDay :: WeekDay, time :: Time}
 
 mkPersist defaultCodegenConfig [groundhog|
 - entity: Alarm                  # Name of the datatype
-- primitive: WeekDay            # For WeekDay PrimitivePersistField instance will be created
-  representation: enum           # It will be stored as an integer column. Conversion between WeekDay and PersistValue will use Enum instance.
+- primitive: WeekDay             # For WeekDay PrimitivePersistField instance will be created
+  converter: enumConverter       # It will be stored as an integer column. Conversion between WeekDay and PersistValue will use Enum instance.
 - primitive: Time
-  representation: showread       # It will be stored as a string column. Conversion between Time and PersistValue will use Show and Read instances.
+  converter: showReadConverter   # It will be stored as a string column. Conversion between Time and PersistValue will use Show and Read instances.
 |]
 
 main = withSqliteConn ":memory:" $ runDbConn $ do

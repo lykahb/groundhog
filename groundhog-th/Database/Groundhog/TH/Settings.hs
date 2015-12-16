@@ -26,7 +26,7 @@ import Database.Groundhog.Generic (PSFieldDef(..))
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift(..))
 import Control.Applicative
-import Control.Monad (forM, mzero)
+import Control.Monad (forM, mzero, when)
 import Data.Aeson
 import Data.Aeson.Types (Pair)
 import qualified Data.Foldable as Fold
@@ -64,7 +64,7 @@ data THEmbeddedDef = THEmbeddedDef {
 data THPrimitiveDef = THPrimitiveDef {
     thPrimitiveName :: Name
   , thPrimitiveDbName :: String -- ^ It is used only to set polymorphic part of name of its container
-  , thPrimitiveStringEnumRepresentation :: Bool -- ^ Store in database as string using Show/Read instances (True) or as integer using Enum instance (False).
+  , thPrimitiveConverter :: Name -- ^ Name of a pair of functions converting the value to and from a type that is an instance of `PrimitivePersistField`
 } deriving (Eq, Show)
 
 data THConstructorDef = THConstructorDef {
@@ -85,7 +85,7 @@ data THFieldDef = THFieldDef {
   , thEmbeddedDef :: Maybe [PSFieldDef String]
   , thDefaultValue :: Maybe String -- ^ default value in the database
   , thReferenceParent :: Maybe (Maybe ((Maybe String, String), [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
-  , thFieldConverter :: Maybe String -- ^ name of a pair of functions
+  , thFieldConverter :: Maybe Name -- ^ name of a pair of functions
 } deriving (Eq, Show)
 
 data THUniqueDef = THUniqueDef {
@@ -123,7 +123,7 @@ data PSEmbeddedDef = PSEmbeddedDef {
 data PSPrimitiveDef = PSPrimitiveDef {
     psPrimitiveName :: String
   , psPrimitiveDbName :: Maybe String -- ^ It is used only to set polymorphic part of name of its container
-  , psPrimitiveStringEnumRepresentation :: Maybe Bool -- ^ Store in database as string using Show/Read instances (True) or as integer using Enum instance (False).
+  , psPrimitiveConverter :: String -- ^ Name of a pair of functions converting the value to and from a type that is an instance of `PrimitivePersistField`
 } deriving (Eq, Show)
 
 data PSConstructorDef = PSConstructorDef {
@@ -157,7 +157,7 @@ data PSAutoKeyDef = PSAutoKeyDef {
 } deriving (Eq, Show)
 
 instance Lift PSPrimitiveDef where
-  lift (PSPrimitiveDef {..}) = [| PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveStringEnumRepresentation) |]
+  lift (PSPrimitiveDef {..}) = [| PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveConverter) |]
 
 instance Lift PersistDefinitions where
   lift (PersistDefinitions {..}) = [| PersistDefinitions $(lift psEntities) $(lift psEmbeddeds) $(lift psPrimitives) |]
@@ -231,13 +231,8 @@ instance FromJSON PSEmbeddedDef where
 
 instance FromJSON PSPrimitiveDef where
   parseJSON = withObject "primitive" $ \v -> do
-    x <- v .:? "representation"
-    let representation = case x of
-          Nothing -> pure True
-          Just "showread" -> pure True
-          Just "enum" -> pure False
-          Just r -> fail $ "parseJSON: representation expected [\"showread\",\"enum\"], but got " ++ r
-    PSPrimitiveDef <$> v .: "primitive" <*> v .:? "dbName" <*> pure representation
+    when (H.member "representation" v) $ fail $ "parseJSON: field 'representation' is deprecated. Use 'converter' instead: " ++ show v
+    PSPrimitiveDef <$> v .: "primitive" <*> v .:? "dbName" <*> v .: "converter"
 
 instance FromJSON PSConstructorDef where
   parseJSON = withObject "constructor" $ \v ->

@@ -90,7 +90,7 @@ mkToPersistValues constrName fieldDefs processResult = do
   patVars <- mapM (const $ newName "x") fieldDefs
   let processField fName fDef = do
         isP <- isPrim (thFieldType fDef)
-        let field = maybe id (\convName x -> [| snd $(varE $ mkName convName) $ $x |]) (thFieldConverter fDef) (varE fName)
+        let field = maybe id (\convName x -> [| snd $(varE convName) $ $x |]) (thFieldConverter fDef) (varE fName)
         if isP
           then return (Nothing, [| (toPrimitivePersistValue $field:) |])
           else newName "x" >>= \x -> return (Just $ bindS (varP x) [| toPersistValues $field |], varE x)
@@ -109,7 +109,7 @@ mkFromPersistValues failureName values constrName fieldDefs = do
         let x = if isP
                   then [| fromPrimitivePersistValue $(varE fName) |]
                   else varE fName
-        maybe x (\convName -> [| fst $(varE $ mkName convName) $ $x |]) $ thFieldConverter fDef
+        maybe x (\convName -> [| fst $(varE convName) $ $x |]) $ thFieldConverter fDef
       result = foldl (\func f -> appE func $ mkArg f) (conE constrName) $ zip patVars fieldDefs
       goField xs vars = do
         (fields, rest) <- spanM (liftM not . isPrim . thFieldType . snd) vars
@@ -163,7 +163,7 @@ mkPurePersistFieldInstance dataType cName fieldDefs context = do
       let x = if isP
                 then [| fromPrimitivePersistValue $(varE fName) |]
                 else varE fName
-      maybe x (\convName -> [| fst $(varE $ mkName convName) $ $x |]) $ thFieldConverter fDef
+      maybe x (\convName -> [| fst $(varE convName) $ $x |]) $ thFieldConverter fDef
     in do
       xs <- newName "xs"
       let failureBody = normalB [| (\a -> error (failMessage a $(varE xs)) `asTypeOf` (a, [])) undefined |]
@@ -561,7 +561,7 @@ mkToPurePersistValues :: [(Name, THFieldDef)] -> Q Exp
 mkToPurePersistValues vars = do
   let processField (fName, fDef) = do
         isP <- isPrim (thFieldType fDef)
-        let field = maybe id (\convName x -> [| snd $(varE $ mkName convName) $ $x |]) (thFieldConverter fDef) (varE fName)
+        let field = maybe id (\convName x -> [| snd $(varE convName) $ $x |]) (thFieldConverter fDef) (varE fName)
         if isP
           then return (Nothing, [| (toPrimitivePersistValue $field:) |])
           else newName "x" >>= \x -> return (Just $ valD (varP x) (normalB [| toPurePersistValues $(varE fName) |]) [], varE x)
@@ -653,10 +653,10 @@ mkPrimitivePersistFieldInstance def = do
   fromPersistValues' <- funD 'fromPersistValues [clause [] (normalB [| primFromPersistValue |]) []]
   toPersistValues' <- funD 'toPersistValues [clause [] (normalB [| primToPersistValue |]) []]
   dbType' <- do
-    let typ = if thPrimitiveStringEnumRepresentation def
-          then [| DbTypePrimitive DbString False Nothing Nothing |]
-          else [| DbTypePrimitive DbInt32  False Nothing Nothing |]
-    funD 'dbType $ [ clause [wildP, wildP] (normalB typ) [] ]
+    proxy <- newName "p"
+    x <- newName "x"
+    let body = [| dbType $(varE proxy) $ fst $(varE $ thPrimitiveConverter def) $ $(varE x) |]
+    funD 'dbType $ [ clause [varP proxy, varP x] (normalB body) [] ]
   let decs = [persistName', toPersistValues', fromPersistValues', dbType']
   return [ InstanceD [] (AppT (ConT ''PersistField) primitive) decs
          , InstanceD [] (AppT (ConT ''NeverNull) primitive) []
@@ -666,19 +666,11 @@ mkPrimitivePrimitivePersistFieldInstance :: THPrimitiveDef -> Q [Dec]
 mkPrimitivePrimitivePersistFieldInstance def = do
   let primitive = ConT (thPrimitiveName def)
   toPrim' <- do
-    x <- newName "x"
-    let value = if thPrimitiveStringEnumRepresentation def
-          then [| show $(varE x) |]
-          else [| fromEnum $(varE x) |]
-        body = [| toPrimitivePersistValue $value |]
-    funD 'toPrimitivePersistValue [clause [varP x] (normalB body) []]
+    let body = [| toPrimitivePersistValue . fst $(varE $ thPrimitiveConverter def) |]
+    funD 'toPrimitivePersistValue [clause [] (normalB body) []]
   fromPrim' <- do
-    x <- newName "x"
-    let value = [| fromPrimitivePersistValue $(varE x) |]
-        body = if thPrimitiveStringEnumRepresentation def
-          then [| read $value |]
-          else [| toEnum $value |]
-    funD 'fromPrimitivePersistValue [clause [varP x] (normalB body) []]
+    let body = [| snd $(varE $ thPrimitiveConverter def) . fromPrimitivePersistValue |]
+    funD 'fromPrimitivePersistValue [clause [] (normalB body) []]
   let context = []
   let decs = [toPrim', fromPrim']
   sequence $ [return $ InstanceD context (AppT (ConT ''PrimitivePersistField) primitive) decs
@@ -788,8 +780,8 @@ spanM p = go  where
 
 mkType :: THFieldDef -> Name -> ExpQ -> ExpQ
 mkType THFieldDef{..} proxy nvar = t3 where
-  psField = PSFieldDef thFieldName (Just thDbFieldName) thDbTypeName (Just thExprName) thEmbeddedDef thDefaultValue thReferenceParent thFieldConverter
-  t1 = maybe id (\convName x -> [| snd $(varE $ mkName convName) $ $x |]) thFieldConverter nvar
+  psField = PSFieldDef thFieldName (Just thDbFieldName) thDbTypeName (Just thExprName) thEmbeddedDef thDefaultValue thReferenceParent (fmap show thFieldConverter)
+  t1 = maybe id (\convName x -> [| snd $(varE convName) $ $x |]) thFieldConverter nvar
   t2 = [| dbType $(varE proxy) $t1 |]
   -- if there are any type settings, apply them in runtime
   t3 = case (thDbTypeName, thEmbeddedDef, thDefaultValue, thReferenceParent) of

@@ -29,6 +29,9 @@ module Database.Groundhog.TH
   , applyEntitySettings
   , applyEmbeddedSettings
   , applyPrimitiveSettings
+  -- * Helpers
+  , showReadConverter
+  , enumConverter
   ) where
 
 import Database.Groundhog.Core (delim, UniqueType(..))
@@ -270,7 +273,7 @@ applyFieldSettings PSFieldDef{..} def@(THFieldDef{..}) =
       , thEmbeddedDef = psEmbeddedDef
       , thDefaultValue = psDefaultValue
       , thReferenceParent = psReferenceParent
-      , thFieldConverter = psFieldConverter
+      , thFieldConverter = fmap mkName psFieldConverter
       }
 
 applyEmbeddedSettings :: PSEmbeddedDef -> THEmbeddedDef -> THEmbeddedDef
@@ -283,7 +286,7 @@ applyEmbeddedSettings PSEmbeddedDef{..} def@(THEmbeddedDef{..}) =
 applyPrimitiveSettings :: PSPrimitiveDef -> THPrimitiveDef -> THPrimitiveDef
 applyPrimitiveSettings PSPrimitiveDef{..} def@(THPrimitiveDef{..}) =
   def { thPrimitiveDbName = fromMaybe thPrimitiveDbName psPrimitiveDbName
-      , thPrimitiveStringEnumRepresentation = fromMaybe thPrimitiveStringEnumRepresentation psPrimitiveStringEnumRepresentation
+      , thPrimitiveConverter = mkName psPrimitiveConverter
       }
 
 mkFieldsForUniqueKey :: NamingStyle -> String -> THUniqueKeyDef -> THConstructorDef -> [THFieldDef]
@@ -402,13 +405,21 @@ mkTHEmbeddedDef (NamingStyle{..}) (DataD _ dName typeVars cons _) =
   mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fName' fNum
     fName' = nameBase fName
-mkTHEmbeddedDef _ _ = error "Only datatypes can be processed"
+mkTHEmbeddedDef _ dec = error $ "Only datatypes can be declared as embedded: " ++ show dec
 
 mkTHPrimitiveDef :: NamingStyle -> Dec -> THPrimitiveDef
-mkTHPrimitiveDef (NamingStyle{..}) (DataD _ dName _ _ _) =
-  THPrimitiveDef dName (mkDbEntityName dName') True where
-  dName' = nameBase dName
-mkTHPrimitiveDef _ _ = error "Only datatypes can be processed"
+mkTHPrimitiveDef (NamingStyle{..}) dec =
+  THPrimitiveDef dName' (mkDbEntityName $ nameBase dName') 'showReadConverter where
+  dName' = case dec of
+    DataD _ dName _ _ _ -> dName
+    NewtypeD _ dName _ _ _ -> dName
+    _ -> error $ "Only datatypes and newtypes can be declared as primitive: " ++ show dec
+
+showReadConverter :: (Show a, Read a) => (a -> String, String -> a)
+showReadConverter = (show, read)
+
+enumConverter :: Enum a => (a -> Int, Int -> a)
+enumConverter = (fromEnum, toEnum)
 
 firstChar :: (Char -> Char) -> String -> String
 firstChar f s = f (head s):tail s

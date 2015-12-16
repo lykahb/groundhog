@@ -204,9 +204,9 @@ mkPersist defaultCodegenConfig [groundhog|
 - entity: InAnotherSchema
   schema: myschema
 - primitive: EnumTest
-  representation: enum
+  converter: enumConverter
 - primitive: ShowRead
-  representation: showread # by default
+  converter: showReadConverter
 - entity: NoColumns
 - entity: NoKeys
   autoKey: null
