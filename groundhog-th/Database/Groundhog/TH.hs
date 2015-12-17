@@ -205,7 +205,7 @@ mkPersist CodegenConfig{..} PersistDefinitions{..} = do
         return $ case info of
           TyConI x -> case x of
             d@DataD{}  -> d
-            NewtypeD{} -> error "Newtypes are not supported"
+            d@NewtypeD{} -> d
             _ -> error $ "Unknown declaration type: " ++ name ++ " " ++ show x
           _        -> error $ "Only datatypes can be processed: " ++ name
       
