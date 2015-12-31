@@ -993,7 +993,7 @@ testExpressionIndex = do
 
 testHStore :: (PersistBackend m, Conn m ~ Postgresql, MonadBaseControl IO m) => m ()
 testHStore = do
-  let val = Single (HStore.HStoreList [(Text.pack "k", Text.pack "v")])
+  let val = Single (HStore.HStore $ Map.fromList [(Text.pack "k", Text.pack "v")])
   migr val
   k <- insert val
   show (Just val) @=?? (liftM show $ get k) -- HStore does not have Eq, compare by show

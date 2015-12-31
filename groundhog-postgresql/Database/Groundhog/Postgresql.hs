@@ -689,8 +689,10 @@ getStatement sql = PG.Query $ fromUtf8 sql
 queryRaw' :: Utf8 -> [PersistValue] -> Action Postgresql (RowStream [PersistValue])
 queryRaw' query vals = do
 --  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
+  liftIO $ putStrLn $ show (fromUtf8 query) ++ " " ++ show vals
   Postgresql conn <- ask
   rawquery <- liftIO $ PG.formatQuery conn (getStatement query) (map P vals)
+  liftIO $ print rawquery
   -- Take raw connection
   (ret, rowRef, rowCount, getters) <- liftIO $ PG.withConnection conn $ \rawconn -> do
     -- Execute query
