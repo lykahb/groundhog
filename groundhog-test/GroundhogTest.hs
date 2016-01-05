@@ -43,6 +43,7 @@ module GroundhogTest (
     , testStringAutoKey
     , testTime
     , testPrimitiveData
+    , testConverter
     , testNoColumns
     , testNoKeys
     , testJSON
@@ -127,6 +128,8 @@ data InCurrentSchema = InCurrentSchema { inCurrentSchema :: Maybe (Key InAnother
 data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific) }
 data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
 data ShowRead = ShowRead String Int deriving (Eq, Show, Read)
+newtype NotFieldInstance = NotFieldInstance String deriving (Eq, Show, Read)
+data ConverterTest = ConverterTest { convertedField :: NotFieldInstance} deriving (Eq, Show, Read)
 data NoColumns = NoColumns deriving (Eq, Show)
 data NoKeys = NoKeys Int Int deriving (Eq, Show)
 data ExpressionIndex = ExpressionIndex { expressionIndex :: Int } deriving (Eq, Show)
@@ -140,6 +143,9 @@ deriving instance Eq InCurrentSchema
 deriving instance Show InCurrentSchema
 deriving instance Eq InAnotherSchema
 deriving instance Show InAnotherSchema
+
+notFieldInstanceConverter :: (NotFieldInstance -> String, String -> NotFieldInstance)
+notFieldInstanceConverter = (\(NotFieldInstance s) -> s, NotFieldInstance)
 
 mkPersist defaultCodegenConfig [groundhog|
 - entity: Number
@@ -207,9 +213,15 @@ mkPersist defaultCodegenConfig [groundhog|
 - entity: InAnotherSchema
   schema: myschema
 - primitive: EnumTest
-  representation: enum
+  converter: enumConverter
 - primitive: ShowRead
-  representation: showread # by default
+  converter: showReadConverter
+- entity: ConverterTest
+  constructors:
+    - name: ConverterTest
+      fields:
+        - name: convertedField
+          converter: notFieldInstanceConverter
 - entity: NoColumns
 - entity: NoKeys
   autoKey: null
@@ -799,6 +811,12 @@ testTime = do
 testPrimitiveData :: PersistBackend m => m ()
 testPrimitiveData = do
   let val = Single (Enum2, ShowRead "abc" 42)
+  migr val
+  Just val @=?? (insert val >>= get)
+
+testConverter :: PersistBackend m => m ()
+testConverter = do
+  let val = ConverterTest $ NotFieldInstance "abc"
   migr val
   Just val @=?? (insert val >>= get)
 
