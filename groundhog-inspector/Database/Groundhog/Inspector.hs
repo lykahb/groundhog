@@ -25,7 +25,7 @@ module Database.Groundhog.Inspector
   ) where
 
 import Database.Groundhog.Core
-import Database.Groundhog.Generic (haveSameElems, findOne, getAutoKeyType)
+import Database.Groundhog.Generic (haveSameElems, findOne, getDefaultAutoKeyType)
 import Database.Groundhog.Generic.Migration
 import Database.Groundhog.TH (NamingStyle, firstChar, mkTHEntityDef)
 import Database.Groundhog.TH.Settings
@@ -357,19 +357,19 @@ generateMapping' ReverseNamingStyle{..} m@MigrationPack{..} tables tName tInfo =
 
           parentName = referencedTableName ref
 
-          notMappedRef = PSFieldDef (mkKeyFieldName tName ref) (Just $ colName c) (case colType c of DbOther t -> Just $ showOther t; _ -> Nothing) Nothing Nothing (colDefault c) (Just (Just (referencedTableName ref, map snd $ referencedColumns ref), refOnDelete, refOnUpdate))
-          notMappedEmbeddedRef = PSFieldDef (mkKeyFieldName tName ref) Nothing Nothing Nothing (Just embeddeds) Nothing (Just (Just (referencedTableName ref, map snd $ referencedColumns ref), refOnDelete, refOnUpdate)) where
-            embeddeds = zipWith (\c1 i -> PSFieldDef ("val" ++ show i) (Just $ colName c1) (case colType c1 of DbOther t -> Just $ showOther t; _ -> Nothing) Nothing Nothing (colDefault c1) Nothing) childCols [0 :: Int ..]
-          mappedEmbeddedRef parentCols = PSFieldDef (mkKeyFieldName tName ref) Nothing Nothing Nothing (Just embeddeds) Nothing (Just (Nothing, refOnDelete, refOnUpdate)) where
-            embeddeds = zipWith (\c1 c2 -> PSFieldDef (colName c2) (Just $ colName c1) (showSqlType <$> mfilter (/= colType c2) (Just $ colType c1)) Nothing Nothing (colDefault c1) Nothing) childCols parentCols
-          autoKeyRef = PSFieldDef (mkKeyFieldName tName ref) (Just $ colName c) (showSqlType <$> mfilter (/= autoKeyType) (Just $ colType c)) Nothing Nothing (colDefault c) (Just (Nothing, refOnDelete, refOnUpdate)) where
-            autoKeyType = getAutoKeyType $ (undefined :: MigrationPack conn -> p conn) m
+          notMappedRef = PSFieldDef (mkKeyFieldName tName ref) (Just $ colName c) (case colType c of DbOther t -> Just $ showOther t; _ -> Nothing) Nothing Nothing (colDefault c) (Just (Just (referencedTableName ref, map snd $ referencedColumns ref), refOnDelete, refOnUpdate)) Nothing
+          notMappedEmbeddedRef = PSFieldDef (mkKeyFieldName tName ref) Nothing Nothing Nothing (Just embeddeds) Nothing (Just (Just (referencedTableName ref, map snd $ referencedColumns ref), refOnDelete, refOnUpdate)) Nothing where
+            embeddeds = zipWith (\c1 i -> PSFieldDef ("val" ++ show i) (Just $ colName c1) (case colType c1 of DbOther t -> Just $ showOther t; _ -> Nothing) Nothing Nothing (colDefault c1) Nothing Nothing) childCols [0 :: Int ..]
+          mappedEmbeddedRef parentCols = PSFieldDef (mkKeyFieldName tName ref) Nothing Nothing Nothing (Just embeddeds) Nothing (Just (Nothing, refOnDelete, refOnUpdate)) Nothing where
+            embeddeds = zipWith (\c1 c2 -> PSFieldDef (colName c2) (Just $ colName c1) (showSqlType <$> mfilter (/= colType c2) (Just $ colType c1)) Nothing Nothing (colDefault c1) Nothing Nothing) childCols parentCols
+          autoKeyRef = PSFieldDef (mkKeyFieldName tName ref) (Just $ colName c) (showSqlType <$> mfilter (/= autoKeyType) (Just $ colType c)) Nothing Nothing (colDefault c) (Just (Nothing, refOnDelete, refOnUpdate)) Nothing where
+            autoKeyType = getDefaultAutoKeyType $ (undefined :: MigrationPack conn -> p conn) m
           refOnDelete = mfilter (/= defaultReferenceOnDelete) $ referenceOnDelete ref
           refOnUpdate = mfilter (/= defaultReferenceOnUpdate) $ referenceOnUpdate ref
           
           getCols info cols = map (\cName -> findOne "column" colName cName $ tableColumns info) cols
           childCols = getCols tInfo $ map fst $ referencedColumns ref
-      Nothing -> PSFieldDef (mkFieldName tName $ colName c) (Just $ colName c) (case colType c of DbOther t -> Just $ showOther t; _ -> Nothing) Nothing Nothing (colDefault c) Nothing:go cs
+      Nothing -> PSFieldDef (mkFieldName tName $ colName c) (Just $ colName c) (case colType c of DbOther t -> Just $ showOther t; _ -> Nothing) Nothing Nothing (colDefault c) Nothing Nothing:go cs
 
 subtractSame :: THEntityDef -> PSEntityDef -> PSEntityDef
 subtractSame = subtractEntity where
