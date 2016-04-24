@@ -63,11 +63,12 @@ import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
 import qualified Control.Exception as E
 import Control.Monad.IO.Class (MonadIO (..))
+import Data.Acquire (with)
+import Data.Acquire.Internal (Acquire(..), Allocated(..), ReleaseType(..))
 import Data.Either (partitionEithers)
 import Data.Function (on)
 import Data.IORef
 import Data.List (partition, sortBy)
-import Data.Maybe (fromMaybe)
 import qualified Data.Map as Map
 import System.IO (hPutStrLn, stderr)
 
@@ -295,35 +296,40 @@ getDefaultAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoK
   t -> error $ "getDefaultAutoKeyType: unexpected key type " ++ show t
 
 firstRow :: MonadIO m => RowStream a -> m (Maybe a)
-firstRow (next, close) = liftIO $ maybe next (next `E.finally`) close
+firstRow s = liftIO $ with s id
 
 streamToList :: MonadIO m => RowStream a -> m [a]
-streamToList (next, close) = liftIO $ maybe go (go `E.finally`) close where
-  go = next >>= maybe (return []) (\a -> liftM (a:) go)
+streamToList s = liftIO $ with s go where
+  go next = next >>= maybe (return []) (\a -> liftM (a:) (go next))
 
 mapStream :: PersistBackendConn conn => (a -> Action conn b) -> RowStream a -> Action conn (RowStream b)
-mapStream f (next, close) = do
+mapStream f s = do
   conn <- ask
-  let next' = next >>= \a -> case a of
+  let apply next = next >>= \a -> case a of
         Nothing -> return Nothing
         Just a' -> liftM Just $ runReaderT (f a') conn
-  return (next', close)
+  return $ fmap apply s
 
 joinStreams :: [Action conn (RowStream a)] -> Action conn (RowStream a)
 joinStreams streams = do
   conn <- ask
-  var <- liftIO $ newIORef $ ((return Nothing, Nothing), streams)
-  let joinedNext = do
-        ((next, _), queue) <- readIORef var
-        val <- next
-        case val of
-          Nothing -> case queue of
-            [] -> return Nothing
-            (makeStream:ss) -> runReaderT makeStream conn >>= \stream -> writeIORef var (stream, ss) >> joinedNext
-          Just a -> return $ Just a
-      joinedClose = readIORef var >>= \((_, close),_) -> fromMaybe (return ()) close
-  return (joinedNext, Just joinedClose)
-
+  var <- liftIO $ newIORef $ ((return Nothing, const $ return ()), streams)
+  return $ Acquire $ \restore -> do
+    let joinedNext = do
+          ((next, close), queue) <- readIORef var
+          val <- next
+          case val of
+            Nothing -> case queue of
+              [] -> return Nothing
+              (makeStream:queue') -> do
+                close ReleaseNormal
+                Acquire f <- runReaderT makeStream conn
+                Allocated next' close' <- f restore
+                writeIORef var ((next', close'), queue')
+                joinedNext
+            Just a -> return $ Just a
+        joinedClose typ = readIORef var >>= \((_, close),_) -> close typ
+    return $ Allocated joinedNext joinedClose
 
 getUniqueFields :: UniqueDef' str (Either field str) -> [field]
 getUniqueFields (UniqueDef _ _ uFields) = map (either id (error "A unique key may not contain expressions")) uFields

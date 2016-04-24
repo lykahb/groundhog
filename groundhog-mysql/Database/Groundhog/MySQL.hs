@@ -39,6 +39,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Control.Monad.Trans.State (mapStateT)
+import Data.Acquire (mkAcquire)
 import Data.ByteString.Char8 (ByteString)
 import Data.Char (toUpper)
 import Data.Function (on)
@@ -575,32 +576,33 @@ queryRaw' :: Utf8 -> [PersistValue] -> Action MySQL (RowStream [PersistValue])
 queryRaw' query vals = do
 --  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
   MySQL conn <- ask
-  liftIO $ MySQL.formatQuery conn (getStatement query) (map P vals) >>= MySQLBase.query conn
-  result <- liftIO $ MySQLBase.storeResult conn
-  -- Find out the type of the columns
-  fields <- liftIO $ MySQLBase.fetchFields result
-  let getters = [maybe PersistNull (getGetter (MySQLBase.fieldType f) f . Just) | f <- fields]
-      convert = use getters where
-        use (g:gs) (col:cols) = v `seq` vs `seq` (v:vs) where
-          v  = g col
-          vs = use gs cols
-        use _ _ = []
-  let go acc = do
-        row <- MySQLBase.fetchRow result
-        case row of
-          [] -> return (acc [])
-          _  -> let converted = convert row
-                in converted `seq` go (acc . (converted:))
-  -- TODO: this variable is ugly. Switching to pipes or conduit might help
-  rowsVar <- liftIO $ flip finally (MySQLBase.freeResult result) (go id) >>= newIORef
-  let next = do
-        rows <- liftIO $ readIORef rowsVar
+  let open = do
+      MySQL.formatQuery conn (getStatement query) (map P vals) >>= MySQLBase.query conn
+      result <- MySQLBase.storeResult conn
+      -- Find out the type of the columns
+      fields <- MySQLBase.fetchFields result
+      let getters = [maybe PersistNull (getGetter (MySQLBase.fieldType f) f . Just) | f <- fields]
+          convert = use getters where
+            use (g:gs) (col:cols) = v `seq` vs `seq` (v:vs) where
+              v  = g col
+              vs = use gs cols
+            use _ _ = []
+      let go acc = do
+            row <- MySQLBase.fetchRow result
+            case row of
+              [] -> return (acc [])
+              _  -> let converted = convert row
+                    in converted `seq` go (acc . (converted:))
+      -- TODO: this variable is ugly. Switching to pipes or conduit might help
+      rowsVar <- flip finally (MySQLBase.freeResult result) (go id) >>= newIORef
+      return $ do
+        rows <- readIORef rowsVar
         case rows of
           [] -> return Nothing
           (x:xs) -> do
-            liftIO $ writeIORef rowsVar xs
+            writeIORef rowsVar xs
             return $ Just x
-  return (next, Nothing)
+  return $ mkAcquire open (const $ return ())
 
 -- | Avoid orphan instances.
 newtype P = P PersistValue

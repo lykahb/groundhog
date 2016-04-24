@@ -71,6 +71,7 @@ library
                    , utf8-string              >= 0.3
                    , test-framework-hunit     >= 0.3
                    , test-framework           >= 0.2
+                   , resourcet                >= 1.1.2
 
    if flag(sqlite)
      build-depends:

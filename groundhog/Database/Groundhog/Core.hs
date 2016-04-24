@@ -97,6 +97,7 @@ import Control.Monad.Trans.Control (MonadBaseControl (..))
 import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
 import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Reader (MonadReader(..))
+import Data.Acquire (Acquire)
 import Data.ByteString.Char8 (ByteString)
 import Data.Int (Int64)
 import Data.Map (Map)
@@ -335,7 +336,7 @@ class (DbDescriptor conn, ConnectionManager conn) => PersistBackendConn conn whe
   getList       :: (PersistField a, PersistBackend m, Conn m ~ conn) => Int64 -> m [a]
 
 type Action conn = ReaderT conn IO
-type RowStream a = (IO (Maybe a), Maybe (IO ()))
+type RowStream a = Acquire (IO (Maybe a))
 
 type Migration m = StateT NamedMigrations m ()
 

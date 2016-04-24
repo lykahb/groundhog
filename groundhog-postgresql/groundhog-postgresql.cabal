@@ -31,6 +31,7 @@ library
                    , resource-pool            >= 0.2.1
                    , time                     >= 1.1
                    , vector                   >= 0.10     && < 0.12
+                   , resourcet                >= 1.1.2
     exposed-modules: Database.Groundhog.Postgresql
                      Database.Groundhog.Postgresql.Array
                      Database.Groundhog.Postgresql.Geometry

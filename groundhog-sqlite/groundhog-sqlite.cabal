@@ -25,6 +25,7 @@ library
                    , direct-sqlite            >= 2.3.5
                    , resource-pool            >= 0.2.1
                    , unordered-containers
+                   , resourcet                >= 1.1.2
     exposed-modules: Database.Groundhog.Sqlite
     ghc-options:     -Wall -fno-warn-unused-do-bind
 

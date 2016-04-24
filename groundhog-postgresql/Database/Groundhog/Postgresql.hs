@@ -40,6 +40,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask)
 import Control.Monad.Trans.State (mapStateT)
+import Data.Acquire (mkAcquire)
 import Data.ByteString.Char8 (pack, unpack, copy)
 import Data.Char (isAlphaNum, isSpace, toUpper)
 import Data.Function (on)
@@ -689,57 +690,56 @@ getStatement sql = PG.Query $ fromUtf8 sql
 queryRaw' :: Utf8 -> [PersistValue] -> Action Postgresql (RowStream [PersistValue])
 queryRaw' query vals = do
 --  $logDebugS "SQL" $ fromString $ show (fromUtf8 query) ++ " " ++ show vals
-  liftIO $ putStrLn $ show (fromUtf8 query) ++ " " ++ show vals
   Postgresql conn <- ask
-  rawquery <- liftIO $ PG.formatQuery conn (getStatement query) (map P vals)
-  liftIO $ print rawquery
-  -- Take raw connection
-  (ret, rowRef, rowCount, getters) <- liftIO $ PG.withConnection conn $ \rawconn -> do
-    -- Execute query
-    mret <- LibPQ.exec rawconn rawquery
-    case mret of
-      Nothing -> do
-        merr <- LibPQ.errorMessage rawconn
-        fail $ case merr of
-                 Nothing -> "Postgresql.withStmt': unknown error"
-                 Just e  -> "Postgresql.withStmt': " ++ unpack e
-      Just ret -> do
-        -- Check result status
-        status <- LibPQ.resultStatus ret
-        case status of
-          LibPQ.TuplesOk -> return ()
-          _ -> do
-            msg <- LibPQ.resStatus status
-            merr <- LibPQ.errorMessage rawconn
-            fail $ "Postgresql.withStmt': bad result status " ++
-                   show status ++ " (" ++ show msg ++ ")" ++
-                   maybe "" ((". Error message: " ++) . unpack) merr
+  let open = do
+        rawquery <- PG.formatQuery conn (getStatement query) (map P vals)
+        -- Take raw connection
+        (ret, rowRef, rowCount, getters) <- PG.withConnection conn $ \rawconn -> do
+          -- Execute query
+          mret <- LibPQ.exec rawconn rawquery
+          case mret of
+            Nothing -> do
+              merr <- LibPQ.errorMessage rawconn
+              fail $ case merr of
+                       Nothing -> "Postgresql.queryRaw': unknown error"
+                       Just e  -> "Postgresql.queryRaw': " ++ unpack e
+            Just ret -> do
+              -- Check result status
+              status <- LibPQ.resultStatus ret
+              case status of
+                LibPQ.TuplesOk -> return ()
+                _ -> do
+                  msg <- LibPQ.resStatus status
+                  merr <- LibPQ.errorMessage rawconn
+                  fail $ "Postgresql.queryRaw': bad result status " ++
+                         show status ++ " (" ++ show msg ++ ")" ++
+                         maybe "" ((". Error message: " ++) . unpack) merr
 
-        -- Get number and type of columns
-        cols <- LibPQ.nfields ret
-        getters <- forM [0..cols-1] $ \col -> do
-          oid <- LibPQ.ftype ret col
-          return $ getGetter oid $ PG.Field ret col oid
-        -- Ready to go!
-        rowRef   <- newIORef (LibPQ.Row 0)
-        rowCount <- LibPQ.ntuples ret
-        return (ret, rowRef, rowCount, getters)
+              -- Get number and type of columns
+              cols <- LibPQ.nfields ret
+              getters <- forM [0..cols-1] $ \col -> do
+                oid <- LibPQ.ftype ret col
+                return $ getGetter oid $ PG.Field ret col oid
+              -- Ready to go!
+              rowRef   <- newIORef (LibPQ.Row 0)
+              rowCount <- LibPQ.ntuples ret
+              return (ret, rowRef, rowCount, getters)
 
-  let next = liftIO $ do
-        row <- atomicModifyIORef rowRef (\r -> (r+1, r))
-        if row == rowCount
-          then return Nothing
-          else liftM Just $ forM (zip getters [0..]) $ \(getter, col) -> do
-            mbs <-  {-# SCC "getvalue'" #-} LibPQ.getvalue' ret row col
-            case mbs of
-              Nothing -> return PersistNull
-              Just bs -> do
-                ok <- PGFF.runConversion (getter mbs) conn
-                bs `seq` case ok of
-                  Errors (exc:_) -> throw exc
-                  Errors [] -> error "Got an Errors, but no exceptions"
-                  Ok v  -> return v
-  return (next, Nothing)
+        return $ do
+          row <- atomicModifyIORef rowRef (\r -> (r+1, r))
+          if row == rowCount
+            then return Nothing
+            else liftM Just $ forM (zip getters [0..]) $ \(getter, col) -> do
+              mbs <- LibPQ.getvalue' ret row col
+              case mbs of
+                Nothing -> return PersistNull
+                Just bs -> do
+                  ok <- PGFF.runConversion (getter mbs) conn
+                  bs `seq` case ok of
+                    Errors (exc:_) -> throw exc
+                    Errors [] -> error "Got an Errors, but no exceptions"
+                    Ok v  -> return v
+  return $ mkAcquire open (const $ return ())
 
 -- | Avoid orphan instances.
 newtype P = P PersistValue

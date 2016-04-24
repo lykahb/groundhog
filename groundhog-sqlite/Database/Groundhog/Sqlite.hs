@@ -26,9 +26,10 @@ import Control.Arrow ((***))
 import Control.Monad (liftM, forM)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Trans.Reader (ask)
+import Control.Monad.Trans.Reader (ask, runReaderT)
 import Control.Monad.Trans.State (mapStateT)
 import qualified Data.ByteString.Char8 as BS
+import Data.Acquire (mkAcquire)
 import Data.Char (toUpper)
 import Data.Function (on)
 import Data.Int (Int64)
@@ -476,20 +477,24 @@ executeRawCached' query vals = do
     S.Done <- S.step stmt
     return ()
 
-queryStmt :: S.Statement -> [PersistValue] -> (S.Statement -> IO ()) -> Action Sqlite (RowStream [PersistValue])
-queryStmt stmt vals close = do
+runQuery :: (Utf8 -> Action Sqlite S.Statement) -> (S.Statement -> IO ()) -> Utf8 -> [PersistValue] -> Action Sqlite (RowStream [PersistValue])
+runQuery getStmt close query vals = do
   --  $logDebugS "SQL" $ T.pack $ show (fromUtf8 query) ++ " " ++ show vals
-  liftIO $ bind stmt vals
-  let next = do
+  conn <- ask
+  let open = do
+        stmt <- runReaderT (getStmt query) conn
+        bind stmt vals
+        return stmt
+      mkNext stmt = do
         x <- S.step stmt
         case x of
           S.Done -> return Nothing
           S.Row  -> fmap (Just . map pFromSql) $ S.columns stmt
-  return (next, Just $ close stmt)
+  return $ fmap mkNext $ mkAcquire open close
 
 queryRaw', queryRawCached' :: Utf8 -> [PersistValue] -> Action Sqlite (RowStream [PersistValue])
-queryRaw' query vals = getStatement query >>= \stmt -> queryStmt stmt vals S.finalize
-queryRawCached' query vals = getStatementCached query >>= \stmt -> queryStmt stmt vals S.reset
+queryRaw' = runQuery getStatement S.finalize
+queryRawCached' = runQuery getStatementCached S.reset
 
 pFromSql :: S.SQLData -> PersistValue
 pFromSql (S.SQLInteger i) = PersistInt64 i

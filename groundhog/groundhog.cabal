@@ -30,6 +30,7 @@ library
                    , containers               >= 0.2
                    , monad-control            >= 0.3        && < 1.1
                    , transformers-base
+                   , resourcet                >= 1.1.2
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core
                      Database.Groundhog.Expression
