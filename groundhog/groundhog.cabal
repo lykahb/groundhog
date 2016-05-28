@@ -19,7 +19,7 @@ library
     build-depends:   base                     >= 4.5        && < 5
                    , bytestring               >= 0.10
                    , base64-bytestring
-                   , transformers             >= 0.2.1      && < 0.5
+                   , transformers             >= 0.2.1      && < 0.6
                    , mtl                      >= 2.0
                    , time                     >= 1.1.4
                    , attoparsec               >= 0.11
@@ -41,7 +41,7 @@ library
                      Database.Groundhog.Generic.PersistBackendHelpers
                      Database.Groundhog.Instances
     ghc-options:     -Wall
-    
+
 source-repository head
   type:     git
   location: git://github.com/lykahb/groundhog.git
