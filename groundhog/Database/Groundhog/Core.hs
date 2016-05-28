@@ -1,5 +1,8 @@
 {-# LANGUAGE GADTs, TypeFamilies, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, EmptyDataDecls, ConstraintKinds, CPP, LiberalTypeSynonyms #-}
-{-# LANGUAGE UndecidableInstances, UndecidableSuperClasses #-} -- Required for Projection'
+{-# LANGUAGE UndecidableInstances #-} -- Required for Projection'
+#if __GLASGOW_HASKELL__ >= 800
+{-# LANGUAGE UndecidableSuperClasses #-}
+#endif
 -- | This module defines the functions and datatypes used throughout the framework.
 -- Most of them are for the internal use
 module Database.Groundhog.Core
