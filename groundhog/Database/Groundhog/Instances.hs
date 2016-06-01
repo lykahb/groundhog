@@ -86,7 +86,7 @@ instance (PurePersistField a, PurePersistField b, PurePersistField c) => PurePer
     (b, rest1) = fromPurePersistValues rest0
     (c, rest2) = fromPurePersistValues rest1
     in ((a, b, c), rest2)
-  
+
 instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d) => PurePersistField (a, b, c, d) where
   toPurePersistValues (a, b, c, d) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c . toPurePersistValues d
   fromPurePersistValues xs = let
@@ -95,7 +95,7 @@ instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersis
     (c, rest2) = fromPurePersistValues rest1
     (d, rest3) = fromPurePersistValues rest2
     in ((a, b, c, d), rest3)
-  
+
 instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d, PurePersistField e) => PurePersistField (a, b, c, d, e) where
   toPurePersistValues (a, b, c, d, e) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c . toPurePersistValues d . toPurePersistValues e
   fromPurePersistValues xs = let
@@ -238,11 +238,11 @@ instance (DbDescriptor db, PersistEntity v, PersistField v) => PrimitivePersistF
   toPrimitivePersistValue (KeyForBackend a) = toPrimitivePersistValue a
   fromPrimitivePersistValue x = KeyForBackend (fromPrimitivePersistValue x)
 
-instance PrimitivePersistField a => PurePersistField a where
+instance (PersistField a, PrimitivePersistField a) => PurePersistField a where
   toPurePersistValues = primToPurePersistValues
   fromPurePersistValues = primFromPurePersistValues
 
-instance PrimitivePersistField a => SinglePersistField a where
+instance (PersistField a, PrimitivePersistField a) => SinglePersistField a where
   toSinglePersistValue = primToSinglePersistValue
   fromSinglePersistValue = primFromSinglePersistValue
 
@@ -444,7 +444,7 @@ instance (PersistField a, PersistField b) => PersistField (a, b) where
     (b, rest1) <- fromPersistValues rest0
     return ((a, b), rest1)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b) -> a) a)), ("val1", dbType db ((undefined :: (a, b) -> b) a))]) Nothing
-  
+
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
   persistName a = "Tuple3" ++ delim : delim : persistName ((undefined :: (a, b, c) -> a) a) ++ delim : persistName ((undefined :: (a, b, c) -> b) a) ++ delim : persistName ((undefined :: (a, b, c) -> c) a)
   toPersistValues (a, b, c) = do
@@ -458,7 +458,7 @@ instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b,
     (c, rest2) <- fromPersistValues rest1
     return ((a, b, c), rest2)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b, c) -> a) a)), ("val1", dbType db ((undefined :: (a, b, c) -> b) a)), ("val2", dbType db ((undefined :: (a, b, c) -> c) a))]) Nothing
-  
+
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
   persistName a = "Tuple4" ++ delim : delim : persistName ((undefined :: (a, b, c, d) -> a) a) ++ delim : persistName ((undefined :: (a, b, c, d) -> b) a) ++ delim : persistName ((undefined :: (a, b, c, d) -> c) a) ++ delim : persistName ((undefined :: (a, b, c, d) -> d) a)
   toPersistValues (a, b, c, d) = do
@@ -474,7 +474,7 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d) => Per
     (d, rest3) <- fromPersistValues rest2
     return ((a, b, c, d), rest3)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b, c, d) -> a) a)), ("val1", dbType db ((undefined :: (a, b, c, d) -> b) a)), ("val2", dbType db ((undefined :: (a, b, c, d) -> c) a)), ("val3", dbType db ((undefined :: (a, b, c, d) -> d) a))]) Nothing
-  
+
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
   persistName a = "Tuple5" ++ delim : delim : persistName ((undefined :: (a, b, c, d, e) -> a) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> b) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> c) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> d) a) ++ delim : persistName ((undefined :: (a, b, c, d, e) -> e) a)
   toPersistValues (a, b, c, d, e) = do
