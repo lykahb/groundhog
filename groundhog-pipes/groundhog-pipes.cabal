@@ -21,7 +21,7 @@ library
                    , pipes                    >= 4.0     && < 4.2
                    , pipes-safe               >= 2.0     && < 2.3
                    , containers               >= 0.2
-                   , transformers             >= 0.2     && < 0.5
+                   , transformers             >= 0.2     && < 0.6
     exposed-modules: Database.Groundhog.Pipes
     ghc-options:     -Wall
     
