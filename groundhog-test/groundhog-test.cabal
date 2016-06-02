@@ -42,7 +42,7 @@ library
                      Migration.Old
 
 
-    hs-source-dirs: ., groundhog, groundhog-th, groundhog-sqlite, groundhog-postgresql, groundhog-mysql
+    hs-source-dirs: ., ../groundhog, ../groundhog-th, ../groundhog-sqlite, ../groundhog-postgresql, ../groundhog-mysql
 
     ghc-options:   -Wall
 
