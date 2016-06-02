@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell, RecordWildCards, CPP #-}
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
@@ -203,10 +203,7 @@ mkPersist CodegenConfig{..} PersistDefinitions{..} = do
   let getDecl name = do
         info <- reify $ mkName name
         return $ case info of
-          TyConI x -> case x of
-            d@DataD{}  -> d
-            d@NewtypeD{} -> d
-            _ -> error $ "Unknown declaration type: " ++ name ++ " " ++ show x
+          TyConI d -> d
           _        -> error $ "Only datatypes can be processed: " ++ name
       
   entities   <- forM psEntities $ \e ->
@@ -362,10 +359,11 @@ validateEmbedded def = do
   return def
 
 mkTHEntityDef :: NamingStyle -> Dec -> THEntityDef
-mkTHEntityDef NamingStyle{..} (DataD _ dName typeVars cons _) =
-  THEntityDef dName (mkDbEntityName dName') Nothing (Just $ THAutoKeyDef (mkEntityKeyName dName') True) [] typeVars constrs where
+mkTHEntityDef NamingStyle{..} dec = THEntityDef dName (mkDbEntityName dName') Nothing autokey [] typeVars constrs where
+  (dName, typeVars, cons) = fromDataD dec
   constrs = zipWith mkConstr [0..] cons
   dName' = nameBase dName
+  autokey = Just $ THAutoKeyDef (mkEntityKeyName dName') True
 
   mkConstr cNum c = case c of
     NormalC name params -> mkConstr' name $ zipWith (mkField (nameBase name)) params [0..]
@@ -383,11 +381,11 @@ mkTHEntityDef NamingStyle{..} (DataD _ dName typeVars cons _) =
     mkVarField cName (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (apply mkExprFieldName) t Nothing Nothing Nothing Nothing where
       apply f = f dName' cName cNum fName' fNum
       fName' = nameBase fName
-mkTHEntityDef _ _ = error "Only datatypes can be processed"
 
 mkTHEmbeddedDef :: NamingStyle -> Dec -> THEmbeddedDef
-mkTHEmbeddedDef (NamingStyle{..}) (DataD _ dName typeVars cons _) =
-  THEmbeddedDef dName cName (mkDbEntityName dName') typeVars fields where
+mkTHEmbeddedDef (NamingStyle{..}) dec = THEmbeddedDef dName cName (mkDbEntityName dName') typeVars fields where
+
+  (dName, typeVars, cons) = fromDataD dec
   dName' = nameBase dName
   
   (cName, fields) = case cons of
@@ -405,15 +403,19 @@ mkTHEmbeddedDef (NamingStyle{..}) (DataD _ dName typeVars cons _) =
   mkVarField cName' (fName, _, t) fNum = THFieldDef fName' (apply mkDbFieldName) Nothing (mkExprSelectorName dName' cName' fName' fNum) t Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fName' fNum
     fName' = nameBase fName
-mkTHEmbeddedDef _ dec = error $ "Only datatypes can be declared as embedded: " ++ show dec
 
 mkTHPrimitiveDef :: NamingStyle -> Dec -> THPrimitiveDef
-mkTHPrimitiveDef (NamingStyle{..}) dec =
-  THPrimitiveDef dName' (mkDbEntityName $ nameBase dName') 'showReadConverter where
-  dName' = case dec of
+mkTHPrimitiveDef (NamingStyle{..}) dec = THPrimitiveDef dName (mkDbEntityName dName') 'showReadConverter where
+  dName = case dec of
+#if MIN_VERSION_template_haskell(2, 11, 0)
+    DataD _ dName _ _ _ _ -> dName
+    NewtypeD _ dName _ _ _ _ -> dName
+#else
     DataD _ dName _ _ _ -> dName
     NewtypeD _ dName _ _ _ -> dName
+#endif
     _ -> error $ "Only datatypes and newtypes can be declared as primitive: " ++ show dec
+  dName' = nameBase dName
 
 showReadConverter :: (Show a, Read a) => (a -> String, String -> a)
 showReadConverter = (show, read)
@@ -643,3 +645,12 @@ defaultMkPrimitiveDecs = fmap concat . mapM (\def -> do
     ]
 --  runIO $ putStrLn $ pprint decs
   return decs)
+
+fromDataD :: InstanceDec -> (Name, [TyVarBndr], [Con])
+fromDataD d = case d of
+#if MIN_VERSION_template_haskell(2, 11, 0)
+  (DataD _ dName typeVars _ constrs _) -> (dName, typeVars, constrs)
+#else
+  (DataD _ dName typeVars constrs _) -> (dName, typeVars, constrs)
+#endif
+  d -> error $ "Only datatypes can be processed: " ++ show d

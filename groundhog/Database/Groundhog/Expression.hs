@@ -1,4 +1,8 @@
-{-# LANGUAGE MultiParamTypeClasses, TypeFamilies, FlexibleContexts, FlexibleInstances, FunctionalDependencies, UndecidableInstances, OverlappingInstances, EmptyDataDecls, ConstraintKinds #-}
+{-# LANGUAGE MultiParamTypeClasses, TypeFamilies, FlexibleContexts, FlexibleInstances, FunctionalDependencies, UndecidableInstances, EmptyDataDecls, ConstraintKinds, CPP #-}
+
+#if __GLASGOW_HASKELL__ < 710
+{-# LANGUAGE OverlappingInstances #-}
+#endif
 
 -- | This module provides mechanism for flexible and typesafe usage of plain data values and fields.
 -- The expressions can used in conditions and right part of Update statement.
@@ -30,17 +34,6 @@ import Database.Groundhog.Instances ()
 class Expression db r a where
   toExpr :: a -> UntypedExpr db r
 
--- | This helper class can make type signatures more concise
-class (Expression db r a, PersistField a') => ExpressionOf db r a a' | a -> a'
-
-instance (Expression db r a, Normalize HTrue a (flag, a'), PersistField a') => ExpressionOf db r a a'
-
-instance PurePersistField a => Expression db r a where
-  toExpr = ExprPure
-
-instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
-  toExpr (Expr e) = e
-
 fieldHelper :: (FieldLike f a, DbDescriptor db, ProjectionDb f db) => f -> UntypedExpr db r
 fieldHelper f = result where
   result = ExprField $ fieldChain db f
@@ -62,6 +55,10 @@ instance (PersistEntity v, DbDescriptor db, IsUniqueKey k, k ~ Key v (Unique u),
 instance (db' ~ db, r' ~ r) => Expression db' r' (Cond db r) where
   toExpr = ExprCond
 
+#if __GLASGOW_HASKELL__ >= 710
+
+#else
+
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.
 -- Example: Int -> Field v c Int, but Entity -> Field v c (Entity / Key Entity)
 class Unifiable a b
@@ -69,7 +66,19 @@ instance Unifiable a a
 -- Tie a type-level knot. Knowing if another type is plain helps to avoid indirection. In practice, it enables to infer type of polymorphic field when it is compared to a plain type.
 instance (Normalize bk a (ak, r), Normalize ak b (bk, r)) => Unifiable a b
 
+-- | This helper class can make type signatures more concise
+class (Expression db r a, PersistField a') => ExpressionOf db r a a' | a -> a'
+
+instance (Expression db r a, Normalize HTrue a (flag, a'), PersistField a') => ExpressionOf db r a a'
+
+instance PurePersistField a => Expression db r a where
+  toExpr = ExprPure
+
+instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
+  toExpr (Expr e) = e
+
 class Normalize counterpart t r | t -> r
+
 instance NormalizeValue a (isPlain, r) => Normalize HFalse (Field v c a) (HFalse, r)
 instance r ~ (HFalse, a)               => Normalize HTrue  (Field v c a) r
 instance NormalizeValue a (isPlain, r) => Normalize HFalse (SubField db v c a) (HFalse, r)
@@ -87,6 +96,7 @@ instance r ~ (HTrue, t)     => Normalize HTrue  t r
 
 class NormalizeValue t r | t -> r
 -- Normalize @Key v u@ to @v@ only if this key is used for storing @v@.
+
 instance (TypeEq (DefaultKey v) (Key v u) isDef,
          NormalizeKey isDef v u k,
          r ~ (Not isDef, Maybe k))
@@ -98,6 +108,7 @@ instance (TypeEq (DefaultKey v) (Key v u) isDef,
 instance r ~ (HTrue, a) => NormalizeValue a r
 
 class TypeEq x y b | x y -> b
+
 instance b ~ HFalse => TypeEq x y b
 instance TypeEq x x HTrue
 
@@ -108,6 +119,8 @@ instance k ~ Key v u => NormalizeKey HFalse v u k
 type family Not bool
 type instance Not HTrue  = HFalse
 type instance Not HFalse = HTrue
+
+#endif
 
 -- | Update field
 infixr 3 =.
