@@ -565,9 +565,9 @@ toUnderscore = map toLower . go where
 --mkPersist defaultCodegenConfig [groundhog|
 --definitions:
 --  - primitive: WeekDay
---    representation: enum                # Its column will have integer type. The conversion will use Enum instance.
+--    converter: enumConverter            # Its column will have integer type. The conversion will use Enum instance.
 --  - primitive: Point
---    representation: showread            # Its column will have string type. The conversion will use Show/Read instances. If representation is omitted, showread will be used by default.
+--    converter: showReadConverter        # Its column will have string type. The conversion will use Show/Read instances. If representation is omitted, showread will be used by default.
 -- |]
 -- @
 
