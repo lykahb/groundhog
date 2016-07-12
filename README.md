@@ -1,11 +1,11 @@
 ## Interact with relational databases in Haskell [![Build Status](https://travis-ci.org/lykahb/groundhog.png?branch=master)](https://travis-ci.org/lykahb/groundhog)
 
-Access PostgreSQL, MySQL, and SQLite with type safety.
-Advanced migration capabilities allow you to precisely specify the schema description, fitting it to an existing database, or
-creating a migration script for a new one. Groundhog is not opinionated about schema and can bind your datatypes to a relational model which may have composite keys, references across multiple schemas, indexes, etc.
+PostgreSQL, MySQL, and SQLite with ultimate type safety.
+Advanced migration capabilities allow you to precisely specify the schema description, whether for an existing database, or
+creating a migration script for a new one. Groundhog is not opinionated about schema and can bind your datatypes to a almost any relational model. Schemas can include composite keys, references across multiple schemas, indexes, and more.
 It is used in hobby projects and commercial applications.
 
-## Useful links
+## Docs
 
 * [Tutorial](http://www.fpcomplete.com/user/lykahb/groundhog).
 * Full list of [examples](examples).
@@ -69,3 +69,9 @@ easy to use.  Its migration facilities allow me to iterate very quickly when bui
 fantastic whenever I have encountered issues. Groundhog is definitely my first choice when I need a Haskell "ORM".
 
 Doug Beardsley, Soostone Inc.
+
+> Groundhog is an excellent library for relational databases in Haskell.  It uses quasi quotation to help you understand the details of your model, not to hide them from you.   
+The converters feature allows us to make our "base" types light of type-class baggage while still getting the benefits of automated schema control.  
+Thank you very much for your hard work on this Boris!
+
+Scott Murphy, founder of Plow Technologies
