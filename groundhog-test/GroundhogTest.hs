@@ -255,7 +255,7 @@ migr v = do
   let afterMigration = filter (/= Right []) (Map.elems m2)
   liftIO $ unless (null afterMigration) $
     H.assertFailure $ ("first migration: " ++ show (Map.elems m1) ++ "\nsecond migration:" ++ show afterMigration)
-    
+
 
 (@=?) :: (Eq a, Show a, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
@@ -411,12 +411,12 @@ testCond = do
 --  ("?-single=?", [1, 2 :: Int]) === (1 - liftExpr SingleField ==. (2 :: Int))
   ("?*single>single", [1 :: Int]) === (intNum 1 * liftExpr SingleField >. SingleField)
 --  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + liftExpr SingleField >=. liftExpr SingleField - 2)
-  
+
   -- test parentheses
   ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
   ("single=? AND (?<? OR ?<?)", [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) &&. (1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int))
   ("NOT (single=? AND (single=single OR single<single))", [0 :: Int]) === (Not $ SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField <. SingleField))
-  
+
   -- test empty conditions
   ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
   ("single#val0=? AND single#val1=?", ["abc", "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
@@ -495,7 +495,7 @@ testTupleList = do
   k <- insert val
   val' <- get k
   Just val @=? val'
-  
+
 testListTriggersOnDelete :: PersistBackend m => m ()
 testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
@@ -882,7 +882,7 @@ testFloating = do
   cosh pi @=??~ cosh (liftExpr SingleField)
   asinh pi @=??~ asinh (liftExpr SingleField)
   atanh (pi / 4) @=??~ atanh (liftExpr SingleField / 4)
-  acosh (pi) @=??~ acosh (liftExpr SingleField)
+  acosh (pi :: Double) @=??~ acosh (liftExpr SingleField)
 
 testSchemaAnalysis :: (PersistBackend m, SchemaAnalyzer (Conn m)) => m ()
 testSchemaAnalysis = do

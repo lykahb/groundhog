@@ -39,78 +39,74 @@ fieldHelper f = result where
   result = ExprField $ fieldChain db f
   db = (undefined :: UntypedExpr db r -> proxy db) result
 
-instance (EntityConstr v c, DbDescriptor db, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
+instance {-# OVERLAPPING #-} (EntityConstr v c, DbDescriptor db, PersistField a, RestrictionHolder v c ~ r') => Expression db r' (Field v c a) where
   toExpr = fieldHelper
 
-instance (EntityConstr v c, DbDescriptor db, PersistField a, db' ~ db, RestrictionHolder v c ~ r') => Expression db' r' (SubField db v c a) where
+instance {-# OVERLAPPING #-} (EntityConstr v c, DbDescriptor db, PersistField a, db' ~ db, RestrictionHolder v c ~ r') => Expression db' r' (SubField db v c a) where
   toExpr = fieldHelper
 
-instance (EntityConstr v c, DbDescriptor db, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
+instance {-# OVERLAPPING #-} (EntityConstr v c, DbDescriptor db, RestrictionHolder v c ~ r') => Expression db r' (AutoKeyField v c) where
   toExpr = fieldHelper
 
-instance (PersistEntity v, DbDescriptor db, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v c ~ r')
+instance {-# OVERLAPPING #-} (PersistEntity v, DbDescriptor db, IsUniqueKey k, k ~ Key v (Unique u), RestrictionHolder v c ~ r')
       => Expression db r' (u (UniqueMarker v)) where
   toExpr = fieldHelper
 
-instance (db' ~ db, r' ~ r) => Expression db' r' (Cond db r) where
+instance {-# OVERLAPPING #-} (db' ~ db, r' ~ r) => Expression db' r' (Cond db r) where
   toExpr = ExprCond
-
-#if __GLASGOW_HASKELL__ >= 710
-
-#else
 
 -- Let's call "plain type" the types that uniquely define type of a Field it is compared to.
 -- Example: Int -> Field v c Int, but Entity -> Field v c (Entity / Key Entity)
 class Unifiable a b
-instance Unifiable a a
+instance {-# OVERLAPPING #-} Unifiable a a
 -- Tie a type-level knot. Knowing if another type is plain helps to avoid indirection. In practice, it enables to infer type of polymorphic field when it is compared to a plain type.
-instance (Normalize bk a (ak, r), Normalize ak b (bk, r)) => Unifiable a b
+instance {-# OVERLAPPABLE #-} (Normalize bk a (ak, r), Normalize ak b (bk, r)) => Unifiable a b
 
 -- | This helper class can make type signatures more concise
 class (Expression db r a, PersistField a') => ExpressionOf db r a a' | a -> a'
 
 instance (Expression db r a, Normalize HTrue a (flag, a'), PersistField a') => ExpressionOf db r a a'
 
-instance PurePersistField a => Expression db r a where
+instance {-# OVERLAPPABLE #-} PurePersistField a => Expression db r a where
   toExpr = ExprPure
 
-instance (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
+instance {-# OVERLAPPING #-} (PersistField a, db' ~ db, r' ~ r) => Expression db' r' (Expr db r a) where
   toExpr (Expr e) = e
 
 class Normalize counterpart t r | t -> r
 
-instance NormalizeValue a (isPlain, r) => Normalize HFalse (Field v c a) (HFalse, r)
-instance r ~ (HFalse, a)               => Normalize HTrue  (Field v c a) r
-instance NormalizeValue a (isPlain, r) => Normalize HFalse (SubField db v c a) (HFalse, r)
-instance r ~ (HFalse, a)               => Normalize HTrue  (SubField db v c a) r
-instance NormalizeValue a (isPlain, r) => Normalize HFalse (Expr db r' a) (HFalse, r)
-instance r ~ (HFalse, a)               => Normalize HTrue  (Expr db r' a) r
-instance NormalizeValue (Key v (Unique u)) (isPlain, r) => Normalize HFalse (u (UniqueMarker v)) (HFalse, r)
-instance r ~ (HFalse, Key v (Unique u))                 => Normalize HTrue  (u (UniqueMarker v)) r
-instance NormalizeValue (Key v BackendSpecific) (isPlain, r) => Normalize HFalse (AutoKeyField v c) (HFalse, r)
-instance r ~ (HFalse, Key v BackendSpecific)                 => Normalize HTrue  (AutoKeyField v c) r
-instance r ~ (HTrue, Bool) => Normalize HFalse (Cond db r') r
-instance r ~ (HTrue, Bool) => Normalize HTrue  (Cond db r') r
-instance NormalizeValue t r => Normalize HFalse t r
-instance r ~ (HTrue, t)     => Normalize HTrue  t r
+instance {-# OVERLAPPING #-} NormalizeValue a (isPlain, r) => Normalize HFalse (Field v c a) (HFalse, r)
+instance {-# OVERLAPS #-} r ~ (HFalse, a)               => Normalize HTrue  (Field v c a) r
+instance {-# OVERLAPPING #-} NormalizeValue a (isPlain, r) => Normalize HFalse (SubField db v c a) (HFalse, r)
+instance {-# OVERLAPS #-} r ~ (HFalse, a)               => Normalize HTrue  (SubField db v c a) r
+instance {-# OVERLAPPING #-} NormalizeValue a (isPlain, r) => Normalize HFalse (Expr db r' a) (HFalse, r)
+instance {-# OVERLAPS #-} r ~ (HFalse, a)               => Normalize HTrue  (Expr db r' a) r
+instance {-# OVERLAPPING #-} NormalizeValue (Key v (Unique u)) (isPlain, r) => Normalize HFalse (u (UniqueMarker v)) (HFalse, r)
+instance {-# OVERLAPS #-} r ~ (HFalse, Key v (Unique u))                 => Normalize HTrue  (u (UniqueMarker v)) r
+instance {-# OVERLAPPING #-} NormalizeValue (Key v BackendSpecific) (isPlain, r) => Normalize HFalse (AutoKeyField v c) (HFalse, r)
+instance {-# OVERLAPS #-} r ~ (HFalse, Key v BackendSpecific)                 => Normalize HTrue  (AutoKeyField v c) r
+instance {-# OVERLAPPING #-} r ~ (HTrue, Bool) => Normalize HFalse (Cond db r') r
+instance {-# OVERLAPPING #-} r ~ (HTrue, Bool) => Normalize HTrue  (Cond db r') r
+instance {-# OVERLAPPABLE #-} NormalizeValue t r => Normalize HFalse t r
+instance {-# OVERLAPPABLE #-} r ~ (HTrue, t)     => Normalize HTrue  t r
 
 class NormalizeValue t r | t -> r
 -- Normalize @Key v u@ to @v@ only if this key is used for storing @v@.
 
-instance (TypeEq (DefaultKey v) (Key v u) isDef,
+instance {-# OVERLAPPING #-} (TypeEq (DefaultKey v) (Key v u) isDef,
          NormalizeKey isDef v u k,
          r ~ (Not isDef, Maybe k))
          => NormalizeValue (Maybe (Key v u)) r
-instance (TypeEq (DefaultKey v) (Key v u) isDef,
+instance {-# OVERLAPPING #-} (TypeEq (DefaultKey v) (Key v u) isDef,
          NormalizeKey isDef v u k,
          r ~ (Not isDef, k))
          => NormalizeValue (Key v u) r
-instance r ~ (HTrue, a) => NormalizeValue a r
+instance {-# OVERLAPPABLE #-} r ~ (HTrue, a) => NormalizeValue a r
 
 class TypeEq x y b | x y -> b
 
-instance b ~ HFalse => TypeEq x y b
-instance TypeEq x x HTrue
+instance {-# OVERLAPPABLE #-} b ~ HFalse => TypeEq x y b
+instance {-# OVERLAPPING #-} TypeEq x x HTrue
 
 class NormalizeKey isDef v u k | isDef v u -> k, k -> v
 instance k ~ v => NormalizeKey HTrue v u k
@@ -119,8 +115,6 @@ instance k ~ Key v u => NormalizeKey HFalse v u k
 type family Not bool
 type instance Not HTrue  = HFalse
 type instance Not HFalse = HTrue
-
-#endif
 
 -- | Update field
 infixr 3 =.
