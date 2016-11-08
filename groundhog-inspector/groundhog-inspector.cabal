@@ -36,7 +36,7 @@ library
                    , groundhog-th             >= 0.7     && < 0.8
                    , template-haskell
                    , containers               >= 0.2
-                   , aeson-pretty             >= 0.7
+                   , aeson-pretty             >= 0.8
                    , text                     >= 0.8
                    , regex-compat                           < 1.0
                    , syb                      >= 0.3

@@ -408,7 +408,7 @@ showData = removeForalls . pprint . removeModules where
 -- You can use a third-party tool to convert JSON to YAML.
 showMappings :: [PSEntityDef] -> ByteString
 showMappings = encodePretty' config where
-  config = Config { confIndent = 4, confCompare = keyOrder keys }
+  config = Config { confIndent = Spaces 4, confCompare = keyOrder keys }
   keys = ["entity", "name", "dbName", "schema", "autoKey", "keyDbName", "type", "embeddedType", "columns", "keys", "fields", "uniques"]
 
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
