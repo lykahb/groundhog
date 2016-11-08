@@ -13,7 +13,7 @@ build-type:      Simple
 homepage:        http://github.com/lykahb/groundhog
 
 Flag sqlite
-   Description: test Slite
+   Description: test Sqlite
    Default: False
 
 Flag postgresql
@@ -42,7 +42,7 @@ library
                      Migration.Old
 
 
-    hs-source-dirs: ., groundhog, groundhog-th, groundhog-sqlite, groundhog-postgresql, groundhog-mysql
+    hs-source-dirs: ., ../groundhog, ../groundhog-th, ../groundhog-sqlite, ../groundhog-postgresql, ../groundhog-mysql
 
     ghc-options:   -Wall
 
@@ -114,7 +114,7 @@ test-suite test
 
     build-depends:   base >= 4 && < 5
                    , bytestring               >= 0.9
-                   , transformers             >= 0.2.1 && < 0.5
+                   , transformers             >= 0.2.1 && < 0.6
                    , aeson                    >= 0.5
                    , text                     >= 0.8
                    , groundhog-test
@@ -126,6 +126,10 @@ test-suite test
                    , containers               >= 0.2
                    , monad-control            >= 0.3 && < 1.1
                    , monad-logger             >= 0.3 && < 0.4
+
+    other-modules: GroundhogTest
+                   Migration.New
+                   Migration.Old
 
     if flag(sqlite)
         cpp-options: -DWITH_SQLITE
