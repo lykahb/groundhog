@@ -1,5 +1,8 @@
 {-# LANGUAGE FlexibleContexts, TypeFamilies, CPP #-}
 
+-- stack test --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite
+module Main where
+
 import GroundhogTest
 import Database.Groundhog.Generic.Sql
 import Database.Groundhog.Core

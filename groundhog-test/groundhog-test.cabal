@@ -13,131 +13,89 @@ build-type:      Simple
 homepage:        http://github.com/lykahb/groundhog
 
 Flag sqlite
-   Description: test Sqlite
-   Default: False
+    Description: test Sqlite
+    Default: False
 
 Flag postgresql
-   Description: test PostgreSQL
-   Default: False
+    Description: test PostgreSQL
+    Default: False
 
 Flag mysql
-   Description: test MySQL
-   Default: False
+    Description: test MySQL
+    Default: False
 
 library
-    exposed-modules: GroundhogTest
-                     Database.Groundhog
-                     Database.Groundhog.Core
-                     Database.Groundhog.Expression
-                     Database.Groundhog.Generic
-                     Database.Groundhog.Generic.Migration
-                     Database.Groundhog.Generic.Sql
-                     Database.Groundhog.Generic.Sql.Functions
-                     Database.Groundhog.Generic.PersistBackendHelpers
-                     Database.Groundhog.Instances
-                     Database.Groundhog.TH
-                     Database.Groundhog.TH.Settings
-                     Database.Groundhog.TH.CodeGen
-                     Migration.New
-                     Migration.Old
 
+test-suite test
+    type:          exitcode-stdio-1.0
+    main-is:       Main.hs
+
+    build-depends: base >= 4 && < 5
+                 , bytestring               >= 0.9
+                 , transformers             >= 0.2.1 && < 0.6
+                 , base64-bytestring
+                 , mtl                      >= 2.0
+                 , time                     >= 1.1.4
+                 , text                     >= 0.8
+                 , vector
+                 , aeson                    >= 0.5
+                 , scientific
+                 , blaze-builder            >= 0.3.0.0 && < 0.5
+                 , containers               >= 0.2
+                 , monad-control            >= 0.3     && < 1.1
+                 , monad-logger             >= 0.3     && < 0.4
+                 , resource-pool            >= 0.2.1
+                 , transformers-base
+                 , HUnit
+                 , template-haskell
+                 , MissingH
+                 , yaml                     >= 0.8.1
+                 , unordered-containers     >= 0.1.3
+                 , aeson                    >= 0.7
+                 , utf8-string              >= 0.3
+                 , test-framework-hunit     >= 0.3
+                 , test-framework           >= 0.2
+                 , resourcet                >= 1.1.2
 
     hs-source-dirs: ., ../groundhog, ../groundhog-th, ../groundhog-sqlite, ../groundhog-postgresql, ../groundhog-mysql
 
     ghc-options:   -Wall
 
-    build-depends:   base                     >= 4       && < 5
-                   , bytestring               >= 0.9
-                   , base64-bytestring
-                   , transformers             >= 0.2.1   && < 0.6
-                   , mtl                      >= 2.0
-                   , time                     >= 1.1.4
-                   , text                     >= 0.8
-                   , vector
-                   , aeson                    >= 0.5
-                   , scientific
-                   , blaze-builder            >= 0.3.0.0 && < 0.5
-                   , containers               >= 0.2
-                   , monad-control            >= 0.3     && < 1.1
-                   , monad-logger             >= 0.3     && < 0.4
-                   , resource-pool            >= 0.2.1
-                   , transformers-base
-                   , HUnit
-                   , template-haskell
-                   , MissingH
-                   , yaml                     >= 0.8.1
-                   , unordered-containers     >= 0.1.3
-                   , aeson                    >= 0.7
-                   , utf8-string              >= 0.3
-                   , test-framework-hunit     >= 0.3
-                   , test-framework           >= 0.2
-                   , resourcet                >= 1.1.2
-
-   if flag(sqlite)
-     build-depends:
-                     direct-sqlite           >= 2.3.5
-                   , unordered-containers
-
-     exposed-modules:
-                     Database.Groundhog.Sqlite
-
-     cpp-options: -DWITH_SQLITE
-
-   if flag(postgresql)
-     build-depends:
-                     postgresql-simple     >= 0.2
-                   , postgresql-libpq      >= 0.6
-                   , attoparsec            >= 0.8.5.3
-     exposed-modules:
-                     Database.Groundhog.Postgresql
-                   , Database.Groundhog.Postgresql.Array
-                   , Database.Groundhog.Postgresql.Geometry
-                   , Database.Groundhog.Postgresql.HStore
-
-     cpp-options: -DWITH_POSTGRESQL
-
-
-   if flag(mysql)
-     build-depends:
-                     mysql-simple          >= 0.2.2.3
-                   , mysql                 >= 0.1.1.3
-
-     exposed-modules:
-                     Database.Groundhog.MySQL
-
-     cpp-options: -DWITH_MYSQL
-
-
-test-suite test
-    type:          exitcode-stdio-1.0
-    main-is:       main.hs
-
-    build-depends:   base >= 4 && < 5
-                   , bytestring               >= 0.9
-                   , transformers             >= 0.2.1 && < 0.6
-                   , aeson                    >= 0.5
-                   , text                     >= 0.8
-                   , groundhog-test
-                   , test-framework-hunit     >= 0.3
-                   , test-framework           >= 0.2
-                   , time                     >= 1.1.4
-                   , HUnit
-                   , MissingH
-                   , containers               >= 0.2
-                   , monad-control            >= 0.3 && < 1.1
-                   , monad-logger             >= 0.3 && < 0.4
-
     other-modules: GroundhogTest
+                   Database.Groundhog
+                   Database.Groundhog.Core
+                   Database.Groundhog.Expression
+                   Database.Groundhog.Generic
+                   Database.Groundhog.Generic.Migration
+                   Database.Groundhog.Generic.Sql
+                   Database.Groundhog.Generic.Sql.Functions
+                   Database.Groundhog.Generic.PersistBackendHelpers
+                   Database.Groundhog.Instances
+                   Database.Groundhog.TH
+                   Database.Groundhog.TH.Settings
+                   Database.Groundhog.TH.CodeGen
                    Migration.New
                    Migration.Old
 
     if flag(sqlite)
-        cpp-options: -DWITH_SQLITE
+         build-depends: direct-sqlite           >= 2.3.5
+                      , unordered-containers
+         other-modules: Database.Groundhog.Sqlite
+         cpp-options: -DWITH_SQLITE
     if flag(postgresql)
-        cpp-options: -DWITH_POSTGRESQL
+         build-depends:  postgresql-simple     >= 0.2
+                       , postgresql-libpq      >= 0.6
+                       , attoparsec            >= 0.8.5.3
+         other-modules:  Database.Groundhog.Postgresql
+                       , Database.Groundhog.Postgresql.Array
+                       , Database.Groundhog.Postgresql.Geometry
+                       , Database.Groundhog.Postgresql.HStore
+         cpp-options: -DWITH_POSTGRESQL
     if flag(mysql)
+        build-depends:  mysql-simple          >= 0.2.2.3
+                      , mysql                 >= 0.1.1.3
+        other-modules:  Database.Groundhog.MySQL
         cpp-options: -DWITH_MYSQL
-
 
 source-repository head
   type:     git
