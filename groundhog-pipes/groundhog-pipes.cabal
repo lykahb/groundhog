@@ -1,5 +1,5 @@
 name:            groundhog-pipes
-version:         0.7.1.2
+version:         0.8
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -17,8 +17,8 @@ extra-source-files:
 
 library
     build-depends:   base                     >= 4       && < 5
-                   , groundhog                >= 0.7     && < 0.8
-                   , pipes                    >= 4.0     && < 4.2
+                   , groundhog                >= 0.8     && < 0.9
+                   , pipes                    >= 4.0     && < 4.4
                    , pipes-safe               >= 2.0     && < 2.3
                    , containers               >= 0.2
                    , transformers             >= 0.2     && < 0.6

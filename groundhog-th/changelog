@@ -1,3 +1,8 @@
+0.8
+* Support for GHC 8
+* Generation of instances for newtype
+* Converter functions for primitive datatypes
+
 0.7.0.1
 * Compatibility with template-haskell-2.10
 

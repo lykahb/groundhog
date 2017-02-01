@@ -1,5 +1,5 @@
 name:            groundhog-inspector
-version:         0.7.1.2
+version:         0.8
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -32,8 +32,8 @@ library
                    , bytestring               >= 0.9
                    , time                     >= 1.1.4
                    , transformers             >= 0.2.1
-                   , groundhog                >= 0.7     && < 0.8
-                   , groundhog-th             >= 0.7     && < 0.8
+                   , groundhog                >= 0.8     && < 0.9
+                   , groundhog-th             >= 0.8     && < 0.9
                    , template-haskell
                    , containers               >= 0.2
                    , aeson-pretty             >= 0.8
