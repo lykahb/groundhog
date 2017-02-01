@@ -1,0 +1,14 @@
+flags: {}
+extra-package-dbs: []
+packages:
+- groundhog/
+- examples/
+- groundhog-inspector/
+- groundhog-postgresql/
+- groundhog-sqlite/
+- groundhog-th/
+- groundhog-test/
+extra-deps:
+- mysql-0.1.4
+- mysql-simple-0.4.0.0
+resolver: lts-7.18
