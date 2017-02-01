@@ -1,9 +1,14 @@
 language: haskell
 
+ghc:
+  - 7.8
+
 before_install:
   - cd groundhog-test
 
 install:
+  - cabal install cabal-install
+  - export PATH=~/.cabal/bin:$PATH
   - cabal install --only-dependencies --enable-tests -fsqlite -fpostgresql -fmysql
 
 before_script:
