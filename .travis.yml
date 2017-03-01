@@ -1,21 +1,44 @@
-language: haskell
+sudo: false
+language: generic
 
-ghc:
-  - 7.8
+cache:
+  directories:
+  - $HOME/.stack
+
+addons:
+  apt:
+    packages:
+    - libgmp-dev
+    - cabal-install-1.24
+    sources:
+    - hvr-ghc
+  postgresql: "9.4"
+
+services:
+- mysql
+
+matrix:
+  include:
+  # ghc-7.8.4
+  - env: ARGS="--resolver lts-2"
+  # ghc-7.10.3
+  - env: ARGS="--resolver lts-6"
+  # ghc-ghc-8.0.2
+  - env: ARGS="--resolver lts-8"
 
 before_install:
-  - cd groundhog-test
-
-install:
-  - cabal install cabal-install
-  - export PATH=~/.cabal/bin:$PATH
-  - cabal install --only-dependencies --enable-tests -fsqlite -fpostgresql -fmysql
+# Download and unpack the stack executable
+- mkdir -p ~/.local/bin
+- export PATH=$HOME/.local/bin:$PATH
+- travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
 
 before_script:
-  - psql --username=postgres --file=init_postgresql.sql
-  - mysql --user=root < init_mysql.sql
+- cd groundhog-test/
+- psql --username=postgres --file=init_postgresql.sql
+- mysql --user=root < init_mysql.sql
 
+# This line does all of the work: installs GHC if necessary, build the library,
+# executables, and test suites, and runs the test suites. --no-terminal works
+# around some quirks in Travis's terminal implementation.
 script:
-  - cabal configure --enable-tests -fsqlite -fpostgresql -fmysql
-  - cabal build
-  - cabal test --log=/dev/stdout
+- stack test $ARGS --no-terminal --install-ghc --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite

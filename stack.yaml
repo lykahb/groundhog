@@ -1,4 +1,8 @@
-flags: {}
+flags:
+  groundhog-test:
+    mysql: true
+    sqlite: true
+    postgresql: true
 extra-package-dbs: []
 packages:
 - groundhog/
@@ -9,6 +13,10 @@ packages:
 - groundhog-th/
 - groundhog-test/
 extra-deps:
+# Not on stackage
 - mysql-0.1.4
 - mysql-simple-0.4.0.0
+# For older LTS
+- aeson-pretty-0.8.2
+- base-compat-0.9.1
 resolver: lts-7.18
