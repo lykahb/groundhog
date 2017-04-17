@@ -1,3 +1,6 @@
+0.8.0.1
+* Bump aeson to 1.2
+
 0.8
 * Support for GHC 8
 * Support for HStore
