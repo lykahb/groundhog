@@ -415,7 +415,7 @@ dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
 dataD' cxt name types constrs derives =
 #if MIN_VERSION_template_haskell(2, 12, 0)
   DataD cxt name types Nothing constrs [DerivClause Nothing (map ConT derives)]
-#if MIN_VERSION_template_haskell(2, 11, 0)
+#elif MIN_VERSION_template_haskell(2, 11, 0)
   DataD cxt name types Nothing constrs (map ConT derives)
 #else
   DataD cxt name types constrs derives
