@@ -56,6 +56,9 @@ test-suite test
                  , test-framework-hunit     >= 0.3
                  , test-framework           >= 0.2
                  , resourcet                >= 1.1.2
+                 , safe-exceptions
+                 , transformers-compat      >= 0.3
+                 , exceptions
 
     hs-source-dirs: ., ../groundhog, ../groundhog-th, ../groundhog-sqlite, ../groundhog-postgresql, ../groundhog-mysql
 

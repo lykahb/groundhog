@@ -163,6 +163,15 @@ instance ConnectionManager Postgresql where
     liftIO $ PG.commit c
     return x
 
+instance TryConnectionManager Postgresql where
+  tryWithConn f g conn@(Postgresql c) = do
+    liftIO $ PG.begin c
+    x <- g (f conn)
+    case x of
+      Left _ -> liftIO $ PG.rollback c
+      Right _ -> liftIO $ PG.commit c
+    return x
+
 instance ExtractConnection Postgresql Postgresql where
   extractConn f conn = f conn
 

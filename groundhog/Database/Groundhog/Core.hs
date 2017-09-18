@@ -78,6 +78,7 @@ module Database.Groundhog.Core
   , PersistBackend(..)
   , PersistBackendConn(..)
   , Action
+  , TryAction
   , RowStream
   , DbDescriptor(..)
   , DbPersist
@@ -85,18 +86,23 @@ module Database.Groundhog.Core
   -- * Connections and transactions
   , ExtractConnection(..)
   , ConnectionManager(..)
+  , TryConnectionManager(..)
   , Savepoint(..)
   , withSavepoint
   , runDb
   , runDbConn
+  , runTryDbConn
+  , runTryDbConn'
   , runDb'
   , runDbConn'
   ) where
 
 import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
 import Control.Applicative (Applicative)
+import Control.Exception.Safe (MonadCatch, SomeException(..), Exception, tryAny)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl (..))
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Control.Monad.Trans.Reader (ReaderT(..), runReaderT)
 import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Reader (MonadReader(..))
@@ -339,6 +345,7 @@ class (DbDescriptor conn, ConnectionManager conn) => PersistBackendConn conn whe
   getList       :: (PersistField a, PersistBackend m, Conn m ~ conn) => Int64 -> m [a]
 
 type Action conn = ReaderT conn IO
+type TryAction e m conn = ReaderT conn (ExceptT e m)
 type RowStream a = Acquire (IO (Maybe a))
 
 type Migration m = StateT NamedMigrations m ()
@@ -561,6 +568,10 @@ class ConnectionManager conn where
   -- | Opens the transaction.
   withConn :: (MonadBaseControl IO m, MonadIO m) => (conn -> m a) -> conn -> m a
 
+class TryConnectionManager conn where
+  -- | Tries the transaction, using a provided function which evaluates to an Either. Any Left result will cause transaction rollback.
+  tryWithConn :: (MonadBaseControl IO m, MonadIO m, MonadCatch m) => (conn -> n a) -> (n a ->  m (Either SomeException a)) -> conn -> m (Either SomeException a)
+
 class Savepoint conn where
   -- | Wraps the passed action into a named savepoint
   withConnSavepoint :: (MonadBaseControl IO m, MonadIO m) => String -> m a -> conn -> m a
@@ -585,6 +596,14 @@ runDb f = getConnection >>= liftIO . withConn (runReaderT f)
 runDbConn :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
 runDbConn f cm = extractConn (liftIO . withConn (runReaderT f)) cm
 
+-- | Runs TryAction within connection.
+runTryDbConn :: (MonadIO m, MonadBaseControl IO m, MonadCatch m, TryConnectionManager conn, ExtractConnection cm conn, Exception e) => TryAction e m conn a -> cm -> m (Either SomeException a)
+runTryDbConn f cm = extractConn (tryWithConn (runReaderT f) tryExceptT) cm
+
+-- | Tries Action within connection.
+runTryDbConn' :: (MonadIO m, MonadBaseControl IO m, MonadCatch m, TryConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m (Either SomeException a)
+runTryDbConn' f cm = extractConn (liftIO . tryWithConn (runReaderT f) tryAny) cm
+
 -- | It helps to run database operations within an application monad. Unlike `runDb` it does not wrap action in transaction
 runDb' :: PersistBackend m => Action (Conn m) a -> m a
 runDb' f = getConnection >>= liftIO . runReaderT f
@@ -603,3 +622,15 @@ runDbConn' f cm = extractConn (liftIO . runReaderT f) cm
 -- | It helps to run 'withConnSavepoint' within a monad. Make sure that transaction is open
 withSavepoint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, Savepoint (Conn m)) => String -> m a -> m a
 withSavepoint name m = getConnection >>= withConnSavepoint name m
+
+tryExceptT :: ( MonadCatch m
+              , Exception e )
+           => ExceptT e m a
+           -> m (Either SomeException a)
+tryExceptT e = do
+  outside <- tryAny $ runExceptT e
+  case outside of
+    Left outsideErr -> return . Left $ outsideErr
+    Right inside -> case inside of
+      Left insideErr -> return . Left . SomeException $ insideErr
+      Right y -> return $ Right y

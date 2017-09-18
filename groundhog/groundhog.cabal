@@ -31,6 +31,8 @@ library
                    , monad-control            >= 0.3        && < 1.1
                    , transformers-base
                    , resourcet                >= 1.1.2
+                   , safe-exceptions
+                   , transformers-compat      >= 0.3
     exposed-modules: Database.Groundhog
                      Database.Groundhog.Core
                      Database.Groundhog.Expression
