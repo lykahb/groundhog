@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, EmptyDataDecls, CPP #-}
+{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, EmptyDataDecls, CPP, DeriveDataTypeable #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 
 module GroundhogTest (
@@ -47,6 +47,8 @@ module GroundhogTest (
     , testNoColumns
     , testNoKeys
     , testJSON
+    , testTryActionThrownException
+    , testTryActionExceptT
     , testMigrateOrphanConstructors
     , testSchemas
     , testFloating
@@ -72,9 +74,12 @@ module GroundhogTest (
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
 import Control.Monad (liftM, forM_, unless)
+import Control.Monad.Catch (MonadCatch)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (MonadLogger)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl, control)
+import Control.Monad.Trans.Except (throwE)
 import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
@@ -108,6 +113,7 @@ import qualified Data.Text as Text
 import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.Traversable as T
+import Data.Typeable (Typeable)
 import Data.Word
 import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit
@@ -133,6 +139,11 @@ data ConverterTest = ConverterTest { convertedField :: NotFieldInstance} derivin
 data NoColumns = NoColumns deriving (Eq, Show)
 data NoKeys = NoKeys Int Int deriving (Eq, Show)
 data ExpressionIndex = ExpressionIndex { expressionIndex :: Int } deriving (Eq, Show)
+
+data TestException = TestException
+  deriving (Show, Typeable)
+
+instance E.Exception TestException
 
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
@@ -849,6 +860,82 @@ testJSON = do
   k <- insert val
   A.Success k @=? A.fromJSON (A.toJSON k)
 
+
+
+testTryActionThrownException :: ( MonadIO m
+                                , MonadBaseControl IO m
+                                , MonadCatch m
+                                , TryConnectionManager conn
+                                , ConnectionManager conn
+                                , PersistBackendConn conn
+                                , ExtractConnection conn conn)
+                             => conn -> m ()
+testTryActionThrownException c = do
+  singleKey <- runDbConn op1 c
+  let settable = Settable "abc" (Just singleKey) (1, ("qqq", Nothing))
+  shouldFail <- runTryDbConn (op2 settable) c
+  checkLeft shouldFail
+  shouldSucceed <- runTryDbConn (op3 settable) c
+  checkRight shouldSucceed
+
+  where
+    op1 :: (PersistBackend m) => m (Key (Single String) BackendSpecific)
+    op1 = do
+      let val = Single "def"
+      migr val
+      k <- insert val
+      return k
+
+    op2 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
+    op2 s = do
+      migr s
+      k <- insert s
+      k2 <- insert s
+      return k2
+
+    op3 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
+    op3 s = do
+      migr s
+      k <- insert s
+      return k
+
+testTryActionExceptT :: ( MonadIO m
+                        , MonadBaseControl IO m
+                        , MonadCatch m
+                        , TryConnectionManager conn
+                        , ConnectionManager conn
+                        , PersistBackendConn conn
+                        , ExtractConnection conn conn)
+                     => conn -> m ()
+testTryActionExceptT c = do
+  singleKey <- runDbConn op1 c
+  let settable = Settable "abc" (Just singleKey) (1, ("qqq", Nothing))
+  shouldFail <- runTryDbConn (op2 settable) c
+  checkLeft shouldFail
+  shouldSucceed <- runTryDbConn (op3 settable) c
+  checkRight shouldSucceed
+
+  where
+    op1 :: (PersistBackend m) => m (Key (Single String) BackendSpecific)
+    op1 = do
+      let val = Single "def"
+      migr val
+      k <- insert val
+      return k
+
+    op2 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
+    op2 s = do
+      migr s
+      k <- insert s
+      lift $ throwE TestException
+      return k
+
+    op3 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
+    op3 s = do
+      migr s
+      k <- insert s
+      return k
+  
 testSchemas :: PersistBackend m => m ()
 testSchemas = do
   let val = InCurrentSchema Nothing
@@ -1059,3 +1146,13 @@ queryRaw' :: PersistBackend m => String -> [PersistValue] -> m (RowStream [Persi
 queryRaw' query vals = do
   proxy <- phantomDb
   queryRaw True (reescape proxy query) vals
+
+checkLeft :: MonadIO m => Either a b -> m ()
+checkLeft e = case e of
+  Right _ -> liftIO $ H.assertFailure "exception not caught"
+  Left _ -> return ()
+
+checkRight :: MonadIO m => Either a b -> m ()
+checkRight e = case e of
+  Right _ -> return ()
+  Left _ -> liftIO $ H.assertFailure "exception should not have been caught"

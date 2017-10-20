@@ -11,6 +11,7 @@ import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit (testCase)
 
 import Control.Monad (forM_)
+import Control.Monad.Catch (MonadCatch)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (MonadLogger)
 import Control.Monad.Trans.Control (MonadBaseControl)
@@ -28,19 +29,22 @@ import Database.Groundhog.MySQL
 main :: IO ()
 main = do
 #if WITH_POSTGRESQL
-  let postgresql = [testGroup "Database.Groundhog.Postgresql" $ concatMap ($ runPSQL) [mkTestSuite, mkSqlTestSuite, postgresqlTestSuite]]
-      runPSQL m = withPostgresqlConn "dbname=test user=test password=test host=localhost" . runDbConn $ m >> cleanPostgresql
+  let postgresql = [testGroup "Database.Groundhog.Postgresql" $ concatMap ($ runPSQL) [mkTestSuite, mkSqlTestSuite, postgresqlTestSuite] ++ mkTryTestSuite runPSQLWithConn]
+      connString = "dbname=test user=test password=test host=localhost"
+      runPSQL m = withPostgresqlConn connString . runDbConn $ m >> cleanPostgresql
+      runPSQLWithConn m = withPostgresqlConn connString $ \conn -> m conn
 #else
   let postgresql = []
 #endif
 #if WITH_SQLITE
-  let sqlite = [testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite)  [mkTestSuite, mkSqlTestSuite, sqliteTestSuite]]
+  let sqlite = [testGroup "Database.Groundhog.Sqlite" $ concatMap ($ runSqlite)  [mkTestSuite, mkSqlTestSuite, sqliteTestSuite] ++ mkTryTestSuite runSqliteWithConn]
       runSqlite m = withSqliteConn ":memory:" . runDbConn $ m
+      runSqliteWithConn m = withSqliteConn ":memory:" $ \conn -> m conn
 #else
   let sqlite = []
 #endif
 #if WITH_MYSQL
-  let mysql = [testGroup "Database.Groundhog.MySQL" $ concatMap ($ runMySQL) [mkTestSuite, mkSqlTestSuite, mysqlTestSuite]]
+  let mysql = [testGroup "Database.Groundhog.MySQL" $ concatMap ($ runMySQL) [mkTestSuite, mkSqlTestSuite, mysqlTestSuite] ++ mkTryTestSuite runMySQLWithConn]
       mySQLConnInfo = defaultConnectInfo
                         { connectHost     = "localhost"
                         , connectUser     = "test"
@@ -48,6 +52,7 @@ main = do
                         , connectDatabase = "test"
                         }
       runMySQL m = withMySQLConn mySQLConnInfo . runDbConn $ m >> cleanMySQL
+      runMySQLWithConn m = withMySQLConn mySQLConnInfo $ \conn -> m conn
 #else
   let mysql = []
 #endif
@@ -123,6 +128,23 @@ mkTestSuite run = map (\(name, func) -> testCase name $ run func)
   , ("testNoColumns", testNoColumns)
   , ("testNoKeys", testNoKeys)
   , ("testJSON", testJSON)
+  ]
+
+-- mkTryTestSuiteFail :: (PersistBackend m, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
+-- mkTryTestSuite run = map (\(name, func, helper) -> testCase name $ run (func,helper))
+--   [ ("testTryActionException", testTryActionException, helperTryActionLeft)
+--   ]
+
+mkTryTestSuite :: ( ExtractConnection conn conn
+                  , PersistBackendConn conn
+                  , TryConnectionManager conn
+                  , MonadCatch m
+                  , MonadBaseControl IO m
+                  , MonadIO m)
+               => ((conn -> m ()) -> IO ()) -> [Test]
+mkTryTestSuite run = map (\(name, func) -> testCase name $ run func)
+  [ ("testTryActionThrownException", testTryActionThrownException)
+  , ("testTryActionExceptT", testTryActionExceptT)
   ]
 
 #if WITH_SQLITE

@@ -152,6 +152,15 @@ instance ConnectionManager MySQL where
     liftIO $ MySQL.commit c
     return x
 
+instance TryConnectionManager MySQL where
+  tryWithConn f g conn@(MySQL c) = do
+    liftIO $ MySQL.execute_ c "start transaction"
+    x <- g (f conn)
+    case x of
+      Left _ -> liftIO $ MySQL.rollback c
+      Right _ -> liftIO $ MySQL.commit c
+    return x
+
 instance ExtractConnection MySQL MySQL where
   extractConn f conn = f conn
 

@@ -19,4 +19,5 @@ extra-deps:
 # For older LTS
 - aeson-pretty-0.8.2
 - base-compat-0.9.1
+- safe-exceptions-0.1.6.0
 resolver: lts-7.18

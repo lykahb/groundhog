@@ -140,6 +140,15 @@ instance ConnectionManager Sqlite where
     liftIO $ S.exec c "COMMIT"
     return x
 
+instance TryConnectionManager Sqlite where
+  tryWithConn f g conn@(Sqlite c _) = do
+    liftIO $ S.exec c "BEGIN"
+    x <- g (f conn)
+    case x of
+      Left _ -> liftIO $ S.exec c "ROLLBACK"
+      Right _ -> liftIO $ S.exec c "COMMIT"
+    return x
+
 instance ExtractConnection Sqlite Sqlite where
   extractConn f conn = f conn
 
