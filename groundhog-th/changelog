@@ -1,3 +1,6 @@
+0.8.0.2
+* Fixed Template Haskell incomplete patterns
+
 0.8.0.1
 * Compatibility with template-haskell-2.12
 

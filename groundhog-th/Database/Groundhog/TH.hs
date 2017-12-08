@@ -368,8 +368,7 @@ mkTHEntityDef NamingStyle{..} dec = THEntityDef dName (mkDbEntityName dName') No
   mkConstr cNum c = case c of
     NormalC name params -> mkConstr' name $ zipWith (mkField (nameBase name)) params [0..]
     RecC name params -> mkConstr' name $ zipWith (mkVarField (nameBase name)) params [0..]
-    InfixC{} -> error $ "Types with infix constructors are not supported" ++ show dName
-    ForallC{} -> error $ "Types with existential quantification are not supported" ++ show dName
+    _ -> error $ "Only regular types and records are supported" ++ show dName
    where
     mkConstr' name params = THConstructorDef name (apply mkPhantomName) (apply mkDbConstrName) (Just $ apply mkDbConstrAutoKeyName) params [] where
       apply f = f dName' (nameBase name) cNum
@@ -392,8 +391,7 @@ mkTHEmbeddedDef (NamingStyle{..}) dec = THEmbeddedDef dName cName (mkDbEntityNam
     [cons'] -> case cons' of
       NormalC name params -> (name, zipWith (mkField (nameBase name)) params [0..])
       RecC name params -> (name, zipWith (mkVarField (nameBase name)) params [0..])
-      InfixC{} -> error $ "Types with infix constructors are not supported" ++ show dName
-      ForallC{} -> error $ "Types with existential quantification are not supported" ++ show dName
+      _ -> error $ "Only regular types and records are supported" ++ show dName
     _ -> error $ "An embedded datatype must have exactly one constructor: " ++ show dName
   
   mkField :: String -> StrictType -> Int -> THFieldDef

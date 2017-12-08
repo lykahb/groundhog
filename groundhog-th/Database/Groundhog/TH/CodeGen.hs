@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse, ExplicitForAll #-}
+{-# LANGUAGE TemplateHaskell, RecordWildCards, DoAndIfThenElse, ExplicitForAll, StandaloneDeriving #-}
 {-# LANGUAGE CPP #-}
 
 module Database.Groundhog.TH.CodeGen
@@ -35,7 +35,9 @@ import Control.Monad (liftM, liftM2, forM, forM_, filterM, replicateM, zipWithM)
 import Data.Either (lefts, rights)
 import Data.List (findIndex, nub, partition)
 import Data.Maybe (catMaybes, mapMaybe)
-import qualified Text.Read as R
+import qualified GHC.Read as R
+import qualified Text.Read.Lex as R
+import qualified Text.ParserCombinators.ReadPrec as R
 
 mkEmbeddedPersistFieldInstance :: THEmbeddedDef -> Q [Dec]
 mkEmbeddedPersistFieldInstance def = do
@@ -358,8 +360,7 @@ mkKeyEqShowInstances def = do
     mkRead (cName, fieldsNum, u) = do
       let key = foldl (\a b -> [| $a <*> $b |]) [| $(conE $ mkName cName) <$> R.step R.readPrec |]
             $ replicate (fieldsNum - 1) [| R.step R.readPrec |]
-          func = lamE [conP 'R.Ident [litP $ StringL cName]] key
-          body = [| R.parens $ R.prec 10 $ R.lexP >>= $func |]
+          body = [| R.parens $ R.prec 10 $ R.expectP (R.Ident $(litE $ StringL cName)) >> $key |]
       keyType <- [t| Key $(return entity) $u |]
       readPrec' <- funD 'R.readPrec [clause [] (normalB body) []]
       readListPrec' <- funD 'R.readListPrec [clause [] (normalB [| R.readListPrecDefault |]) []]
