@@ -1,3 +1,6 @@
+0.8.0.2
+* Remove upper bound for aeson
+
 0.8.0.1
 * Bump aeson to 1.2
 
