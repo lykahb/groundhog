@@ -1,3 +1,6 @@
+0.8.0.1
+* New typeclass to allow transaction rollback through ExceptT
+
 0.8
 * Support for GHC 8
 * Bumped MySQL dependencies

@@ -1,3 +1,6 @@
+0.8.0.1
+* New typeclass to allow transaction rollback through ExceptT
+
 0.8
 * Simplified signatures for PurePersistField and PrimitivePersistField
 * Basic support for streaming API
