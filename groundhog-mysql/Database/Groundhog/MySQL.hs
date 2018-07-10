@@ -47,7 +47,7 @@ import Data.Int (Int64)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (groupBy, intercalate, intersect, isInfixOf, partition, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust)
-import Data.Monoid
+import Data.Monoid hiding ((<>))
 import Data.Pool
 
 newtype MySQL = MySQL MySQL.Connection

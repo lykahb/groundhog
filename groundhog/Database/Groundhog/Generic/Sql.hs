@@ -44,12 +44,17 @@ import Database.Groundhog.Generic (isSimple)
 import Database.Groundhog.Instances ()
 import qualified Blaze.ByteString.Builder.Char.Utf8 as B
 import Data.Maybe (mapMaybe, maybeToList)
+#if !(MIN_VERSION_base(4,8,0))
 import Data.Monoid
+#endif
 import Data.String
 
 import Database.Groundhog.Expression
 
-class (Monoid a, IsString a) => StringLike a where
+-- rely on semigroups package providing Semigroup prior to base-4.9
+import Data.Semigroup as Sem
+
+class (Sem.Semigroup a, Monoid a, IsString a) => StringLike a where
   fromChar :: Char -> a
 
 data RenderS db r = RenderS {
@@ -57,9 +62,14 @@ data RenderS db r = RenderS {
   , getValues :: [PersistValue] -> [PersistValue]
 }
 
+instance Sem.Semigroup Utf8 where
+  (Utf8 a) <> (Utf8 b) = Utf8 (a <> b)
+
 instance Monoid Utf8 where
   mempty = Utf8 mempty
-  mappend (Utf8 a) (Utf8 b) = Utf8 (mappend a b)
+#if !(MIN_VERSION_base(4,11,0))
+  mappend = (<>)
+#endif
 
 instance IsString Utf8 where
   fromString = Utf8 . B.fromString
@@ -135,9 +145,14 @@ renderPersistValue :: PersistValue -> RenderS db r
 renderPersistValue (PersistCustom s as) = RenderS s (as++)
 renderPersistValue a = RenderS (fromChar '?') (a:)
 
+instance Sem.Semigroup (RenderS db r) where
+  (RenderS f1 g1) <> (RenderS f2 g2) = RenderS (f1 <> f2) (g1 . g2)
+
 instance Monoid (RenderS db r) where
   mempty = RenderS mempty id
-  (RenderS f1 g1) `mappend` (RenderS f2 g2) = RenderS (f1 `mappend` f2) (g1 . g2)
+#if !(MIN_VERSION_base(4,11,0))
+  mappend = (<>)
+#endif
 
 instance IsString (RenderS db r) where
   fromString s = RenderS (fromString s) id

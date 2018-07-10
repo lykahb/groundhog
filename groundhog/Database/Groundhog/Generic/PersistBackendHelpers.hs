@@ -32,7 +32,7 @@ import Database.Groundhog.Generic.Sql
 import Control.Monad (liftM)
 import Data.Either (rights)
 import Data.Maybe (catMaybes, fromJust, mapMaybe)
-import Data.Monoid
+import Data.Monoid hiding ((<>))
 
 get :: forall conn v . (PersistBackendConn conn, PersistEntity v, PrimitivePersistField (Key v BackendSpecific))
     => RenderConfig -> (Utf8 -> [PersistValue] -> Action conn (RowStream [PersistValue])) -> Key v BackendSpecific -> Action conn (Maybe v)

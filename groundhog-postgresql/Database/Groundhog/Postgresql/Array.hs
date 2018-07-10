@@ -40,7 +40,7 @@ import qualified Data.Attoparsec.Zepto as Z
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as B
-import Data.Monoid
+import Data.Monoid hiding ((<>))
 import Data.Word
 import qualified Data.Vector as V
 import Data.Traversable (traverse)
