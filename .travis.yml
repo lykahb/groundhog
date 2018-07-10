@@ -38,6 +38,7 @@ before_script:
 - cd groundhog-test/
 - psql --username=postgres --file=init_postgresql.sql
 - mysql --user=root < init_mysql.sql
+- cd ..
 
 # This line does all of the work: installs GHC if necessary, build the library,
 # executables, and test suites, and runs the test suites. --no-terminal works
