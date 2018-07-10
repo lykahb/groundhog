@@ -8,3 +8,4 @@ dist/
 .idea
 .cabal-sandbox/
 cabal.sandbox.config
+.stack-work/
