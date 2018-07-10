@@ -60,6 +60,9 @@ test-suite test
                  , transformers-compat      >= 0.3
                  , exceptions
 
+    if !impl(ghc >= 8.0)
+      build-depends: semigroups == 0.18.*
+
     hs-source-dirs: ., ../groundhog, ../groundhog-th, ../groundhog-sqlite, ../groundhog-postgresql, ../groundhog-mysql
 
     ghc-options:   -Wall
