@@ -1,0 +1,16 @@
+flags:
+  groundhog-test:
+    mysql: true
+    sqlite: true
+    postgresql: true
+extra-package-dbs: []
+packages:
+- groundhog/
+- examples/
+- groundhog-inspector/
+- groundhog-postgresql/
+- groundhog-sqlite/
+- groundhog-th/
+- groundhog-test/
+extra-deps: []
+resolver: lts-12.0

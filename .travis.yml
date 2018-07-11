@@ -23,10 +23,12 @@ matrix:
   - env: STACK_YAML="stack-ghc-7.8.yaml"
   # ghc-7.10.3
   - env: STACK_YAML="stack-ghc-7.10.yaml"
-  # ghc-ghc-8.0.2
+  # ghc-8.0.2
   - env: STACK_YAML="stack-ghc-8.0.yaml"
-  # ghc-ghc-8.2
+  # ghc-8.2.2
   - env: STACK_YAML="stack-ghc-8.2.yaml"
+  # ghc-8.4.3
+  - env: STACK_YAML="stack-ghc-8.4.yaml"
 
 before_install:
 # Download and unpack the stack executable
