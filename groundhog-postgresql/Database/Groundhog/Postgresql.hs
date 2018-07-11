@@ -53,7 +53,7 @@ import Data.Monoid hiding ((<>))
 import Data.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
 
--- work around for no Semigroup instance og PG.Query prior to
+-- work around for no Semigroup instance of PG.Query prior to
 -- postgresql-simple 0.5.3.0
 import qualified Data.ByteString as B
 

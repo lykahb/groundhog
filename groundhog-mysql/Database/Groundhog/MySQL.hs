@@ -50,6 +50,10 @@ import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Monoid hiding ((<>))
 import Data.Pool
 
+-- work around for no Semigroup instance of MySQL.Query prior to
+-- mysql-simple 0.4.5
+import qualified Data.ByteString as B
+
 newtype MySQL = MySQL MySQL.Connection
 
 instance DbDescriptor MySQL where
@@ -137,12 +141,21 @@ withMySQLConn :: (MonadBaseControl IO m, MonadIO m)
               -> m a
 withMySQLConn s = bracket (liftIO $ open' s) (liftIO . close')
 
+-- As with the postgresql backend, it's not obvious to me how best to
+-- handle the Semigroup/Monoid changes. So this manually copies over
+-- the changes added in
+-- https://github.com/paul-rouse/mysql-simple/commit/c42e1d8dd915cf2312464db0fe7b577074435d6d#diff-20308cd48ab326c8ac85f54bdb65f0ebR73
+--
+combine :: MySQL.Query -> MySQL.Query -> MySQL.Query
+-- combine = (<>)
+combine (MySQL.Query a) (MySQL.Query b) = MySQL.Query (B.append a b)
+  
 instance Savepoint MySQL where
   withConnSavepoint name m (MySQL c) = do
     let name' = fromString name
-    liftIO $ MySQL.execute_ c $ "SAVEPOINT " <> name'
-    x <- onException m (liftIO $ MySQL.execute_ c $ "ROLLBACK TO SAVEPOINT " <> name')
-    liftIO $ MySQL.execute_ c $ "RELEASE SAVEPOINT" <> name'
+    liftIO $ MySQL.execute_ c $ "SAVEPOINT " `combine` name'
+    x <- onException m (liftIO $ MySQL.execute_ c $ "ROLLBACK TO SAVEPOINT " `combine` name')
+    liftIO $ MySQL.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
     return x
 
 instance ConnectionManager MySQL where
