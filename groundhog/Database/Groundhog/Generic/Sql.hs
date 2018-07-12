@@ -45,7 +45,7 @@ import Database.Groundhog.Instances ()
 import qualified Blaze.ByteString.Builder.Char.Utf8 as B
 import Data.Maybe (mapMaybe, maybeToList)
 #if !(MIN_VERSION_base(4,8,0))
-import Data.Monoid
+import Data.Monoid hiding ((<>))
 #endif
 import Data.String
 

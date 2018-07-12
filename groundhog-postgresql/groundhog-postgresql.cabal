@@ -35,7 +35,7 @@ library
 
     -- See https://prime.haskell.org/wiki/Libraries/Proposals/SemigroupMonoid#Writingcompatiblecode
     if !impl(ghc >= 8.0)
-      build-depends: semigroups == 0.18.*
+      build-depends: semigroups
 
     exposed-modules: Database.Groundhog.Postgresql
                      Database.Groundhog.Postgresql.Array

@@ -13,8 +13,12 @@ packages:
 - groundhog-th/
 - groundhog-test/
 extra-deps:
-- aeson-pretty-0.8.7
+- aeson-pretty-0.8.6
 - base-compat-0.10.4
 - safe-exceptions-0.1.7.0
-- semigroups-0.18.5
+- semigroups-0.16.2.2
+# had trouble getting a build solution with newer versions of semigroups
+# - semigroups-0.17.0.1
+# - semigroups-0.18.1
+# - semigroups-0.18.5
 resolver: lts-2.22
