@@ -12,5 +12,6 @@ packages:
 - groundhog-sqlite/
 - groundhog-th/
 - groundhog-test/
-extra-deps: []
-resolver: lts-12.0
+extra-deps:
+- aeson-pretty-0.8.7
+resolver: lts-6.35

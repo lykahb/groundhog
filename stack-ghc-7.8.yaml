@@ -1,0 +1,24 @@
+flags:
+  groundhog-test:
+    mysql: true
+    sqlite: true
+    postgresql: true
+extra-package-dbs: []
+packages:
+- groundhog/
+- examples/
+- groundhog-inspector/
+- groundhog-postgresql/
+- groundhog-sqlite/
+- groundhog-th/
+- groundhog-test/
+extra-deps:
+- aeson-pretty-0.8.6
+- base-compat-0.10.4
+- safe-exceptions-0.1.7.0
+- semigroups-0.16.2.2
+# had trouble getting a build solution with newer versions of semigroups
+# - semigroups-0.17.0.1
+# - semigroups-0.18.1
+# - semigroups-0.18.5
+resolver: lts-2.22

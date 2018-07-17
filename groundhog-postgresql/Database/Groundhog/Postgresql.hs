@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables, FlexibleInstances, FlexibleContexts, OverloadedStrings, TypeFamilies, MultiParamTypeClasses, TemplateHaskell #-}
+
 module Database.Groundhog.Postgresql
     ( withPostgresqlPool
     , withPostgresqlConn
@@ -48,9 +49,13 @@ import Data.Int (Int64)
 import Data.IORef
 import Data.List (groupBy, intercalate, isPrefixOf, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
-import Data.Monoid
+import Data.Monoid hiding ((<>))
 import Data.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
+
+-- work around for no Semigroup instance of PG.Query prior to
+-- postgresql-simple 0.5.3.0
+import qualified Data.ByteString as B
 
 -- typical operations for connection: OPEN, BEGIN, COMMIT, ROLLBACK, CLOSE
 newtype Postgresql = Postgresql PG.Connection
@@ -148,12 +153,24 @@ createPostgresqlPool :: MonadIO m
                      -> m (Pool Postgresql)
 createPostgresqlPool s connCount = liftIO $ createPool (open' s) close' 1 20 connCount
 
+-- Not sure of the best way to handle Semigroup/Monoid changes in ghc 8.4
+-- here. It appears that the long SQL query text interferes with the use
+-- of CPP here.
+--
+-- Manually copying over https://github.com/lpsmith/postgresql-simple/commit/44c0bb8dec3b71e8daefe104cf643c0c4fb26768#diff-75d19972de474bc8fa181e4733f3f0d6R94
+-- but this is not really a good idea.
+--
+combine :: PG.Query -> PG.Query -> PG.Query
+-- combine = (<>)
+combine (PG.Query a) (PG.Query b) = PG.Query (B.append a b)
+
+
 instance Savepoint Postgresql where
   withConnSavepoint name m (Postgresql c) = do
     let name' = fromString name
-    liftIO $ PG.execute_ c $ "SAVEPOINT " <> name'
-    x <- onException m (liftIO $ PG.execute_ c $ "ROLLBACK TO SAVEPOINT " <> name')
-    liftIO $ PG.execute_ c $ "RELEASE SAVEPOINT" <> name'
+    liftIO $ PG.execute_ c $ "SAVEPOINT " `combine` name'
+    x <- onException m (liftIO $ PG.execute_ c $ "ROLLBACK TO SAVEPOINT " `combine` name')
+    liftIO $ PG.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
     return x
 
 instance ConnectionManager Postgresql where

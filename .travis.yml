@@ -20,11 +20,15 @@ services:
 matrix:
   include:
   # ghc-7.8.4
-  - env: ARGS="--resolver lts-2"
+  - env: STACK_YAML="stack-ghc-7.8.yaml"
   # ghc-7.10.3
-  - env: ARGS="--resolver lts-6"
-  # ghc-ghc-8.0.2
-  - env: ARGS="--resolver lts-8"
+  - env: STACK_YAML="stack-ghc-7.10.yaml"
+  # ghc-8.0.2
+  - env: STACK_YAML="stack-ghc-8.0.yaml"
+  # ghc-8.2.2
+  - env: STACK_YAML="stack-ghc-8.2.yaml"
+  # ghc-8.4.3
+  - env: STACK_YAML="stack-ghc-8.4.yaml"
 
 before_install:
 # Download and unpack the stack executable
@@ -36,9 +40,10 @@ before_script:
 - cd groundhog-test/
 - psql --username=postgres --file=init_postgresql.sql
 - mysql --user=root < init_mysql.sql
+- cd ..
 
 # This line does all of the work: installs GHC if necessary, build the library,
 # executables, and test suites, and runs the test suites. --no-terminal works
 # around some quirks in Travis's terminal implementation.
 script:
-- stack test $ARGS --no-terminal --install-ghc --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite
+- stack test --no-terminal --install-ghc --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite

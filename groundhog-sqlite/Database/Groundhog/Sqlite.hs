@@ -37,7 +37,7 @@ import Data.List (groupBy, intercalate, isInfixOf, partition, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
 import Data.Maybe (fromMaybe)
-import Data.Monoid
+import Data.Monoid hiding ((<>))
 import Data.Pool
 import qualified Data.Text as T
 
