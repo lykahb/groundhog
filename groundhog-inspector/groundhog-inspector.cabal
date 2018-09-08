@@ -32,8 +32,8 @@ library
                    , bytestring               >= 0.9
                    , time                     >= 1.1.4
                    , transformers             >= 0.2.1
-                   , groundhog                >= 0.8     && < 0.9
-                   , groundhog-th             >= 0.8     && < 0.9
+                   , groundhog                >= 0.8     && < 0.10
+                   , groundhog-th             >= 0.8     && < 0.10
                    , template-haskell
                    , containers               >= 0.2
                    , aeson-pretty             >= 0.8
@@ -42,7 +42,7 @@ library
                    , syb                      >= 0.3
     exposed-modules: Database.Groundhog.Inspector
     ghc-options:     -Wall
-    
+
 source-repository head
   type:     git
   location: git://github.com/lykahb/groundhog.git
