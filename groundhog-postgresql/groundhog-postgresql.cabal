@@ -17,7 +17,7 @@ extra-source-files:
 library
     build-depends:   base                     >= 4         && < 5
                    , aeson                    >= 0.8
-                   , postgresql-simple        >= 0.3       && < 0.6
+                   , postgresql-simple        >= 0.3       && < 0.7
                    , postgresql-libpq         >= 0.6.1
                    , bytestring               >= 0.9
                    , blaze-builder            >= 0.3       && < 0.5
