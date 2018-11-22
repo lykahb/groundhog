@@ -47,8 +47,7 @@ module GroundhogTest (
     , testNoColumns
     , testNoKeys
     , testJSON
-    , testTryActionThrownException
-    , testTryActionExceptT
+    , testTryAction
     , testMigrateOrphanConstructors
     , testSchemas
     , testFloating
@@ -860,82 +859,41 @@ testJSON = do
   k <- insert val
   A.Success k @=? A.fromJSON (A.toJSON k)
 
+testTryAction :: ( MonadIO m
+                 , MonadBaseControl IO m
+                 , MonadCatch m
+                 , TryConnectionManager conn
+                 , ConnectionManager conn
+                 , PersistBackendConn conn
+                 , ExtractConnection conn conn)
+              => conn -> m ()
+testTryAction c = do
+  result <- runTryDbConn success c
+  checkRight result
 
+  result <- runTryDbConn dbException c
+  checkLeft result  -- should be (Left error)
 
-testTryActionThrownException :: ( MonadIO m
-                                , MonadBaseControl IO m
-                                , MonadCatch m
-                                , TryConnectionManager conn
-                                , ConnectionManager conn
-                                , PersistBackendConn conn
-                                , ExtractConnection conn conn)
-                             => conn -> m ()
-testTryActionThrownException c = do
-  singleKey <- runDbConn op1 c
-  let settable = Settable "abc" (Just singleKey) (1, ("qqq", Nothing))
-  shouldFail <- runTryDbConn (op2 settable) c
-  checkLeft shouldFail
-  shouldSucceed <- runTryDbConn (op3 settable) c
-  checkRight shouldSucceed
-
-  where
-    op1 :: (PersistBackend m) => m (Key (Single String) BackendSpecific)
-    op1 = do
-      let val = Single "def"
-      migr val
-      k <- insert val
-      return k
-
-    op2 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
-    op2 s = do
-      migr s
-      k <- insert s
-      k2 <- insert s
-      return k2
-
-    op3 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
-    op3 s = do
-      migr s
-      k <- insert s
-      return k
-
-testTryActionExceptT :: ( MonadIO m
-                        , MonadBaseControl IO m
-                        , MonadCatch m
-                        , TryConnectionManager conn
-                        , ConnectionManager conn
-                        , PersistBackendConn conn
-                        , ExtractConnection conn conn)
-                     => conn -> m ()
-testTryActionExceptT c = do
-  singleKey <- runDbConn op1 c
-  let settable = Settable "abc" (Just singleKey) (1, ("qqq", Nothing))
-  shouldFail <- runTryDbConn (op2 settable) c
-  checkLeft shouldFail
-  shouldSucceed <- runTryDbConn (op3 settable) c
-  checkRight shouldSucceed
+  result <- runTryDbConn throwException c
+  checkLeft result  -- should be (Left error)
 
   where
-    op1 :: (PersistBackend m) => m (Key (Single String) BackendSpecific)
-    op1 = do
-      let val = Single "def"
+    dbException :: (MonadIO m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
+    dbException = do
+      let val = UniqueKeySample 1 2 (Just 3)
       migr val
-      k <- insert val
-      return k
+      insert val
+      insert val  -- should fail with uniqueness exception
 
-    op2 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
-    op2 s = do
-      migr s
-      k <- insert s
+    throwException :: (MonadIO m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
+    throwException = do
       lift $ throwE TestException
-      return k
+      return ()
 
-    op3 :: (MonadIO m, Functor m, PersistBackendConn conn) => Settable -> TryAction TestException m conn (Key Settable BackendSpecific)
-    op3 s = do
-      migr s
-      k <- insert s
-      return k
-  
+    success :: (MonadIO m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
+    success = do
+      return ()
+
 testSchemas :: PersistBackend m => m ()
 testSchemas = do
   let val = InCurrentSchema Nothing
@@ -1147,12 +1105,14 @@ queryRaw' query vals = do
   proxy <- phantomDb
   queryRaw True (reescape proxy query) vals
 
+
+-- These helpers are useful for Either a SomeException since the exception is not Eq and cannot be compared
 checkLeft :: MonadIO m => Either a b -> m ()
 checkLeft e = case e of
   Right _ -> liftIO $ H.assertFailure "exception not caught"
   Left _ -> return ()
 
-checkRight :: MonadIO m => Either a b -> m ()
+checkRight :: (MonadIO m, Show a) => Either a b -> m ()
 checkRight e = case e of
   Right _ -> return ()
-  Left _ -> liftIO $ H.assertFailure "exception should not have been caught"
+  Left e -> liftIO $ H.assertFailure ("caught unexpected exception: " ++ show e)

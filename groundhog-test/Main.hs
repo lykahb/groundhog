@@ -61,6 +61,7 @@ main = do
 #if WITH_POSTGRESQL
 cleanPostgresql :: (PersistBackend m, Conn m ~ Postgresql) => m ()
 cleanPostgresql = do
+  liftIO $ print "executing rollback"
   executeRaw True "rollback" []
   executeRaw True "begin" []
 #endif
@@ -130,11 +131,6 @@ mkTestSuite run = map (\(name, func) -> testCase name $ run func)
   , ("testJSON", testJSON)
   ]
 
--- mkTryTestSuiteFail :: (PersistBackend m, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
--- mkTryTestSuite run = map (\(name, func, helper) -> testCase name $ run (func,helper))
---   [ ("testTryActionException", testTryActionException, helperTryActionLeft)
---   ]
-
 mkTryTestSuite :: ( ExtractConnection conn conn
                   , PersistBackendConn conn
                   , TryConnectionManager conn
@@ -143,8 +139,7 @@ mkTryTestSuite :: ( ExtractConnection conn conn
                   , MonadIO m)
                => ((conn -> m ()) -> IO ()) -> [Test]
 mkTryTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testTryActionThrownException", testTryActionThrownException)
-  , ("testTryActionExceptT", testTryActionExceptT)
+  [ ("testTryAction", testTryAction)
   ]
 
 #if WITH_SQLITE
