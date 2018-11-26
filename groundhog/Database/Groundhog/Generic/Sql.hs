@@ -43,6 +43,8 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic (isSimple)
 import Database.Groundhog.Instances ()
 import qualified Blaze.ByteString.Builder.Char.Utf8 as B
+import qualified Data.Vector as V
+import qualified Data.Foldable as F
 import Data.Maybe (mapMaybe, maybeToList)
 #if !(MIN_VERSION_base(4,8,0))
 import Data.Monoid hiding ((<>))
@@ -262,6 +264,10 @@ defaultShowPrim (PersistUTCTime x) = show x
 defaultShowPrim (PersistZonedTime x) = show x
 defaultShowPrim (PersistNull) = "NULL"
 defaultShowPrim (PersistCustom _ _) = error "Unexpected PersistCustom"
+defaultShowPrim (PersistList as) = "ARRAY[" <> (intercalate ", " $ V.map defaultShowPrim as) <> "]"
+  where intercalate incut vec = case V.null vec of
+          True -> mempty
+          False -> (F.foldr (\a b -> a <> incut <> b) mempty (V.init vec)) <> V.last vec
 
 {-# INLINABLE renderOrders #-}
 renderOrders :: SqlDb db => RenderConfig -> [Order db r] -> RenderS db r

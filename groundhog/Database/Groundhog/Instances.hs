@@ -10,6 +10,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
+import qualified Data.Foldable as F
 #if MIN_VERSION_base(4, 7, 0)
 import Data.Bits (finiteBitSize)
 #else
@@ -22,6 +23,7 @@ import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, utc, utcToZonedTime)
 import Data.Word (Word8, Word16, Word32, Word64)
+import qualified Data.Vector as V
 #if MIN_VERSION_aeson(0, 7, 0)
 import qualified Data.Scientific
 #else
@@ -120,6 +122,7 @@ instance PrimitivePersistField String where
   fromPrimitivePersistValue (PersistBool b) = show b
   fromPrimitivePersistValue PersistNull = error "Unexpected NULL"
   fromPrimitivePersistValue (PersistCustom _ _) = error "Unexpected PersistCustom"
+  fromPrimitivePersistValue (PersistList a) = F.concatMap fromPrimitivePersistValue a
 
 instance PrimitivePersistField T.Text where
   toPrimitivePersistValue s = PersistText s
@@ -671,6 +674,7 @@ instance A.ToJSON PersistValue where
   toJSON (PersistDay d) = A.String $ T.pack $ show d
   toJSON (PersistZonedTime (ZT z)) = A.String $ T.pack $ show z
   toJSON PersistNull = A.Null
+  toJSON (PersistList a) = A.Array $ V.map A.toJSON a
   toJSON a@(PersistCustom _ _) = error $ "toJSON: unexpected " ++ show a
 
 instance Read (Key v u) => A.FromJSON (Key v u) where

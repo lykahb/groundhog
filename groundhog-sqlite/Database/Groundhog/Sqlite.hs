@@ -466,6 +466,7 @@ bind stmt = go 1 where
       PersistUTCTime d        -> S.bindText stmt i $ T.pack $ show d
       PersistZonedTime (ZT d) -> S.bindText stmt i $ T.pack $ show d
       PersistCustom _ _       -> error "bind: unexpected PersistCustom"
+      PersistList _           -> error "bind: unexpected PersistList"
     go (i + 1) xs
 
 executeRaw' :: Utf8 -> [PersistValue] -> Action Sqlite ()

@@ -28,5 +28,6 @@ library
                    , resource-pool            >= 0.2.1
                    , time                     >= 1.1
                    , resourcet                >= 1.1.2
+                   , vector                   >= 0.10     && < 0.13
     exposed-modules: Database.Groundhog.MySQL
     ghc-options:     -Wall -fno-warn-unused-do-bind

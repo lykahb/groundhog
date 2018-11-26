@@ -114,6 +114,7 @@ import Data.Text (Text)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, zonedTimeToLocalTime, zonedTimeZone)
 import GHC.Exts (Constraint)
+import qualified Data.Vector as V
 
 -- | Only instances of this class can be persisted in a database
 class (PurePersistField (AutoKey v), PurePersistField (DefaultKey v)) => PersistEntity v where
@@ -500,6 +501,7 @@ data PersistValue = PersistString String
                   | PersistNull
                   -- | Creating some datatypes may require calling a function, using a special constructor, or other syntax. The string (which can have placeholders) is included into query without escaping. The recursive constructions are not allowed, i.e., [PersistValue] cannot contain PersistCustom values.
                   | PersistCustom Utf8 [PersistValue]
+                  | PersistList (V.Vector PersistValue)
   deriving (Eq, Show, Read)
 
 -- | Avoid orphan instances.

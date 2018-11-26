@@ -49,6 +49,8 @@ import Data.List (groupBy, intercalate, intersect, isInfixOf, partition, stripPr
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Monoid hiding ((<>))
 import Data.Pool
+import qualified Data.Vector as V
+import Data.Coerce (coerce)
 
 -- work around for no Semigroup instance of MySQL.Query prior to
 -- mysql-simple 0.4.5
@@ -642,6 +644,7 @@ instance MySQL.Param P where
   render (P (PersistZonedTime (ZT t))) = MySQL.render $ show t
   render (P PersistNull)            = MySQL.render MySQL.Null
   render (P (PersistCustom _ _))    = error "toField: unexpected PersistCustom"
+  render (P (PersistList vs))       = MySQL.render $ MySQL.In (coerce (V.toList vs) :: [P])
 
 type Getter a = MySQLBase.Field -> Maybe ByteString -> a
 
