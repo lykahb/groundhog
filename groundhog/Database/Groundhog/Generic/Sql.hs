@@ -1,10 +1,10 @@
-{-# LANGUAGE FlexibleContexts, OverloadedStrings, FlexibleInstances, TypeFamilies, RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts, OverloadedStrings, FlexibleInstances, TypeFamilies, RecordWildCards, ScopedTypeVariables#-}
 {-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module defines the functions which are used only for backends creation.
 module Database.Groundhog.Generic.Sql
-    ( 
+    (
     -- * SQL rendering utilities
       renderCond
     , defaultShowPrim
@@ -193,7 +193,7 @@ renderCond conf cond = renderCondPriority conf 0 cond where
 
 {-# INLINABLE renderCondPriority #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
-renderCondPriority :: SqlDb db
+renderCondPriority :: forall db r . SqlDb db
   => RenderConfig
   -> Int -> Cond db r -> Maybe (RenderS db r)
 renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
@@ -202,12 +202,28 @@ renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
   go (Not CondEmpty) _ = Just "(1=0)" -- special case for False
   go (Not a)         p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
   go (Compare compOp f1 f2) p = (case compOp of
-    Eq -> renderComp andP " AND " 37 equalsOperator f1 f2
-    Ne -> renderComp orP " OR " 50 notEqualsOperator f1 f2
+    Eq -> renderComp andP " AND " 37 op f1 f2 where
+      op = if bothNotNull then (\a b -> a <> fromChar '=' <> b) else equalsOperator
+    Ne -> renderComp orP " OR " 50 op f1 f2 where
+      op = if bothNotNull then (\a b -> a <> "<>" <> b) else notEqualsOperator
     Gt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '>' <> b) f1 f2
     Lt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '<' <> b) f1 f2
     Ge -> renderComp orP " OR " 38 (\a b -> a <> ">=" <> b) f1 f2
     Le -> renderComp orP " OR " 38 (\a b -> a <> "<=" <> b) f1 f2) where
+      proxy = undefined :: proxy db
+      bothNotNull = case (isNullable f1, isNullable f2) of
+        (Just False, Just False) -> True
+        _ -> False
+      isTypeNullable (DbTypePrimitive _ nullable _ _) = nullable
+      -- for more complex types like embeddeds with many columns just assume that they are nullable for safety
+      isTypeNullable _ = True
+
+      isNullable expr = case expr of
+        ExprRaw _ -> Nothing  -- there is not enough information
+        ExprField ((_, t), _) -> Just $ isTypeNullable t
+        ExprPure a -> Just $ isTypeNullable $ dbType proxy a
+        ExprCond a -> Just False
+
       renderComp interP interOp opP op expr1 expr2 = result where
         expr1' = renderExprExtended conf opP expr1
         expr2' = renderExprExtended conf opP expr2
@@ -220,7 +236,7 @@ renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
     [a] -> Just a
     _ -> error "renderCond: cannot render CondRaw with many elements"
   go CondEmpty _ = Nothing
- 
+
   notP = 35
   andP = 30
   orP = 20
@@ -235,16 +251,16 @@ renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
 
 {-
 examples of prefixes
-[("val1", DbEmbedded False _), ("val4", EmbeddedDef False _), ("val5", EmbeddedDef False _)] -> "val5$val4$val1"
-[("val1", DbEmbedded True _),  ("val4", EmbeddedDef False _), ("val5", EmbeddedDef False _)] -> ""
-[("val1", DbEmbedded False _), ("val4", EmbeddedDef True _),  ("val5", EmbeddedDef False _)] -> "val1"
-[("val1", DbEmbedded False _), ("val4", EmbeddedDef True _),  ("val5", EmbeddedDef True _)] -> "val1"
-[("val1", DbEmbedded False _), ("val4", EmbeddedDef False _), ("val5", EmbeddedDef True _)] -> "val4$val1"
+[("val1", EmbeddedDef False _), ("val4", EmbeddedDef False _), ("val5", EmbeddedDef False _)] -> "val5$val4$val1"
+[("val1", EmbeddedDef True _),  ("val4", EmbeddedDef False _), ("val5", EmbeddedDef False _)] -> ""
+[("val1", EmbeddedDef False _), ("val4", EmbeddedDef True _),  ("val5", EmbeddedDef False _)] -> "val1"
+[("val1", EmbeddedDef False _), ("val4", EmbeddedDef True _),  ("val5", EmbeddedDef True _)] -> "val1"
+[("val1", EmbeddedDef False _), ("val4", EmbeddedDef False _), ("val5", EmbeddedDef True _)] -> "val4$val1"
 -}
 {-# INLINABLE renderChain #-}
 renderChain :: RenderConfig -> FieldChain -> [Utf8] -> [Utf8]
 renderChain RenderConfig{..} (f, prefix) acc = (case prefix of
-  ((name, EmbeddedDef False _):fs) -> flattenP esc (goP (fromString name) fs) f acc
+  ((name, EmbeddedDef False _):fs) -> flattenP esc (Just $ goP (fromString name) fs) f acc
   _ -> flatten esc f acc) where
   goP p ((name, EmbeddedDef False _):fs) = goP (fromString name <> fromChar delim <> p) fs
   goP p _ = p
@@ -281,26 +297,21 @@ renderOrders conf xs = if null orders then mempty else " ORDER BY " <> commasJoi
 renderFields :: StringLike s => (s -> s) -> [(String, DbType)] -> s
 renderFields escape = commasJoin . foldr (flatten escape) []
 
--- TODO: merge code of flatten and flattenP
 {-# SPECIALIZE flatten :: (Utf8 -> Utf8) -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
 flatten :: StringLike s => (s -> s) -> (String, DbType) -> ([s] -> [s])
-flatten escape (fname, typ) acc = go typ where
-  go typ' = case typ' of
-    DbEmbedded emb _ -> handleEmb emb
-    _            -> escape fullName : acc
-  fullName = fromString fname
-  handleEmb (EmbeddedDef False ts) = foldr (flattenP escape fullName) acc ts
-  handleEmb (EmbeddedDef True  ts) = foldr (flatten escape) acc ts
+flatten escape (fname, typ) acc = flattenP escape Nothing (fname, typ) acc
 
-{-# SPECIALIZE flattenP :: (Utf8 -> Utf8) -> Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
-flattenP :: StringLike s => (s -> s) -> s -> (String, DbType) -> ([s] -> [s])
+{-# SPECIALIZE flattenP :: (Utf8 -> Utf8) -> Maybe Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
+flattenP :: StringLike s => (s -> s) -> Maybe s -> (String, DbType) -> ([s] -> [s])
 flattenP escape prefix (fname, typ) acc = go typ where
   go typ' = case typ' of
     DbEmbedded emb _ -> handleEmb emb
     _            -> escape fullName : acc
-  fullName = prefix <> fromChar delim <> fromString fname
-  handleEmb (EmbeddedDef False ts) = foldr (flattenP escape fullName) acc ts
-  handleEmb (EmbeddedDef True  ts) = foldr (flatten escape) acc ts
+  fullName = case prefix of
+    Nothing -> fromString fname
+    Just prefix -> prefix <> fromChar delim <> fromString fname
+  handleEmb (EmbeddedDef False ts) = foldr (flattenP escape (Just fullName)) acc ts
+  handleEmb (EmbeddedDef True  ts) = foldr (flattenP escape Nothing) acc ts
 
 commasJoin :: StringLike s => [s] -> s
 commasJoin = intercalateS (fromChar ',')

@@ -272,7 +272,7 @@ runDbPersist :: Monad m => DbPersist conn m a -> conn -> m a
 runDbPersist = runReaderT
 
 class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
-  -- | Type of the database default autoincremented key. For example, Sqlite has Int64
+  -- | Type of the database default auto-incremented key. For example, Sqlite has Int64
   type AutoKeyType db
   -- | Value of this type can be used as a part of a query. For example, it can be RenderS for relational databases, or BSON for MongoDB.
   type QueryRaw db :: * -> *
