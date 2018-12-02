@@ -89,7 +89,7 @@ instance (ArrayElem a, PrimitivePersistField a) => PrimitivePersistField (Array 
 parseString :: Parser ByteString
 parseString = (char '"' *> jstring_)
           <|> takeWhile1 (\c -> c /= ',' && c /= '}')
-          
+
 -- Borrowed from aeson
 jstring_ :: Parser ByteString
 jstring_ = {-# SCC "jstring_" #-} do
@@ -131,11 +131,11 @@ unescape = toByteString <$> go mempty where
 doubleQuote, backslash :: Word8
 doubleQuote = 34
 backslash = 92
-  
+
 parseArr :: ArrayElem a => Parser (Array a)
 parseArr = Array <$> (char '{' *> parseElem `sepBy` char ',' <* char '}')
 
-(!) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b Int) => a -> b -> Expr Postgresql r elem
+(!) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r b Int, PersistField elem) => a -> b -> Expr Postgresql r elem
 (!) arr i = mkExpr $ Snippet $ \conf _ -> [renderExpr conf (toExpr arr) <> "[" <> renderExpr conf (toExpr i) <> "]"]
 
 (!:) :: (ExpressionOf Postgresql r a (Array elem), ExpressionOf Postgresql r i1 Int, ExpressionOf Postgresql r i2 Int) => a -> (i1, i2) -> Expr Postgresql r (Array elem)

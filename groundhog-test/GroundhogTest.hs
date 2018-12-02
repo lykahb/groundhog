@@ -411,12 +411,12 @@ testCond = do
   -- should cover all cases of renderCond comparison rendering
   ("single#val0 IS ? AND single#val1 IS ?", ["abc", "def"]) === (SingleField ==. ("abc", "def"))
   ("single#val0=single#val1", [] :: [Int]) === (intField SingleField ~> Tuple2_0Selector ==. SingleField ~> Tuple2_1Selector)
-  ("single#val1 IS single#val0*(?+single#val0)", [5 :: Int]) === (intField SingleField ~> Tuple2_1Selector ==. liftExpr (SingleField ~> Tuple2_0Selector) * (5 + liftExpr (SingleField ~> Tuple2_0Selector)))
+  ("single#val1=single#val0*(?+single#val0)", [5 :: Int]) === (intField SingleField ~> Tuple2_1Selector ==. liftExpr (SingleField ~> Tuple2_0Selector) * (5 + liftExpr (SingleField ~> Tuple2_0Selector)))
 
   ("? IS ? AND ? IS ?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int) &&. SingleField ==. ()) -- SingleField ==. () is required to replace Any with a PersistEntity instance
   ("?<? OR ?<?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int) &&. SingleField ==. ())
   ("? IS single#val0 AND ? IS single#val1", [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
-  ("? IS single+?*?", [1, 2, 3 :: Int]) === ((1 :: Int) ==. liftExpr SingleField + 2 * 3)
+  ("?=single+?*?", [1, 2, 3 :: Int]) === ((1 :: Int) ==. liftExpr SingleField + 2 * 3)
 
 --  ("?-single=?", [1, 2 :: Int]) === (1 - liftExpr SingleField ==. (2 :: Int))
   ("?*single>single", [1 :: Int]) === (intNum 1 * liftExpr SingleField >. SingleField)
@@ -854,9 +854,12 @@ testNoKeys = do
 
 testJSON :: PersistBackend m => m ()
 testJSON = do
-  let val = Single "abc"
+  let val = Single (A.toJSON [1 :: Int, 2])
   migr val
   k <- insert val
+  Just val @=?? get k
+
+  -- test conversion of Key to JSON
   A.Success k @=? A.fromJSON (A.toJSON k)
 
 testTryAction :: ( MonadIO m

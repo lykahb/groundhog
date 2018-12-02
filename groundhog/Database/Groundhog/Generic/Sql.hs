@@ -100,8 +100,10 @@ class SqlDb db => FloatingSqlDb db where
   logBase' :: (ExpressionOf db r b a, ExpressionOf db r x a, Floating a) => b -> x -> Expr db r a
 
 -- | If we reuse complex expression several times, prerendering it saves time. `RenderConfig` can be obtained with `mkExprWithConf`
-prerenderExpr :: SqlDb db => RenderConfig -> Expr db r a -> Expr db r a
-prerenderExpr conf (Expr e) = Expr $ ExprRaw $ Snippet $ \_ _ -> prerendered where
+prerenderExpr :: forall db r a. (SqlDb db, PersistField a) => RenderConfig -> Expr db r a -> Expr db r a
+prerenderExpr conf (Expr e) = Expr $ ExprRaw typ $ Snippet $ \_ _ -> prerendered where
+  proxy = undefined :: proxy db
+  typ = dbType proxy (undefined :: a)
   -- Priority of outer operation is not known. Assuming that it is high ensures that parentheses won't be missing.
   prerendered = renderExprExtended conf maxBound e
 
@@ -120,22 +122,22 @@ renderExpr conf expr = renderExprPriority conf 0 expr
 
 renderExprPriority :: SqlDb db => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
 renderExprPriority conf p expr = (case expr of
-  ExprRaw (Snippet f) -> let vals = f conf p in ensureOne vals id
+  ExprRaw _ (Snippet f) -> explicitHead (f conf p)
   ExprField f -> let fs = renderChain conf f []
-                 in ensureOne fs $ \f' -> RenderS f' id
+                 in RenderS (explicitHead fs) id
   ExprPure  a -> let vals = toPurePersistValues a
-                 in ensureOne (vals []) renderPersistValue
+                 in renderPersistValue $ explicitHead (vals [])
   ExprCond  a -> case renderCondPriority conf p a of
                    Nothing -> error "renderExprPriority: empty condition"
                    Just x -> x) where
-    ensureOne :: [a] -> (a -> b) -> b
-    ensureOne xs f = case xs of
-      [x] -> f x
+    explicitHead :: [a] -> a
+    explicitHead xs = case xs of
+      [x] -> x
       xs' -> error $ "renderExprPriority: expected one column field, found " ++ show (length xs')
 
 renderExprExtended :: SqlDb db => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
 renderExprExtended conf p expr = (case expr of
-  ExprRaw (Snippet f) -> f conf p
+  ExprRaw _ (Snippet f) -> f conf p
   ExprField f -> map (flip RenderS id) $ renderChain conf f []
   ExprPure a -> let vals = toPurePersistValues a []
                 in map renderPersistValue vals
@@ -175,8 +177,10 @@ operator pr op = \a b -> Snippet $ \conf p ->
 function :: SqlDb db => String -> [UntypedExpr db r] -> Snippet db r
 function func args = Snippet $ \conf _ -> [fromString func <> fromChar '(' <> commasJoin (map (renderExpr conf) args) <> fromChar ')']
 
-mkExpr :: SqlDb db => Snippet db r -> Expr db r a
-mkExpr = Expr . ExprRaw
+mkExpr :: forall db r a . (SqlDb db, PersistField a) => Snippet db r -> Expr db r a
+mkExpr snippet = Expr $ ExprRaw typ snippet where
+  proxy = undefined :: proxy db
+  typ = dbType proxy (undefined :: a)
 
 #if !MIN_VERSION_base(4, 5, 0)
 {-# INLINABLE (<>) #-}
@@ -219,7 +223,7 @@ renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
       isTypeNullable _ = True
 
       isNullable expr = case expr of
-        ExprRaw _ -> Nothing  -- there is not enough information
+        ExprRaw t _ -> Just $ isTypeNullable t
         ExprField ((_, t), _) -> Just $ isTypeNullable t
         ExprPure a -> Just $ isTypeNullable $ dbType proxy a
         ExprCond a -> Just False

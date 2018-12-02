@@ -519,7 +519,7 @@ class NeverNull a
 -- | Used to uniformly represent fields, constants and more complex things, e.g., arithmetic expressions.
 -- A value should be converted to 'UntypedExpr' for usage in expressions
 data UntypedExpr db r where
-  ExprRaw :: QueryRaw db r -> UntypedExpr db r
+  ExprRaw :: DbType -> QueryRaw db r -> UntypedExpr db r
   ExprField :: FieldChain -> UntypedExpr db r
   ExprPure :: forall db r a . PurePersistField a => a -> UntypedExpr db r
   ExprCond :: Cond db r -> UntypedExpr db r

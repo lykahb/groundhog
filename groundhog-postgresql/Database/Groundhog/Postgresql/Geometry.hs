@@ -251,7 +251,7 @@ instance Intersects Lseg Line
 instance Intersects Lseg Lseg
 instance Intersects Path Path
 
-psqlOperatorExpr :: (SqlDb db, Expression db r a, Expression db r b) => String -> a -> b -> Expr db r c
+psqlOperatorExpr :: (SqlDb db, Expression db r a, Expression db r b, PersistField c) => String -> a -> b -> Expr db r c
 psqlOperatorExpr op x y = mkExpr $ operator 50 op x y
 
 psqlOperatorCond :: (SqlDb db, Expression db r a, Expression db r b) => String -> a -> b -> Cond db r
@@ -263,25 +263,25 @@ infixl 6 -.
 infixl 7 *.
 infixl 7 /.
 -- | Translation
--- 
+--
 -- @box '((0,0),(1,1))' + point '(2.0,0)' = box '(3,1),(2,0)'@
 (+.) :: (SqlDb db, Plus a b, ExpressionOf db r x a, ExpressionOf db r y b) => x -> y -> Expr db r a
 x +. y = mkExpr $ operator 60 "+" x y
 
 -- | Translation
--- 
+--
 -- @box '((0,0),(1,1))' - point '(2.0,0)' = box '(-1,1),(-2,0)'@
 (-.) :: (SqlDb db, BoxCirclePathPoint a, ExpressionOf db r x a, ExpressionOf db r y Point) => x -> y -> Expr db r a
 x -. y = mkExpr $ operator 60 "-" x y
 
 -- | Scaling/rotation
--- 
+--
 -- @box '((0,0),(1,1))' * point '(2.0,0)' = box '(2,2),(0,0)'@
 (*.) :: (SqlDb db, BoxCirclePathPoint a, ExpressionOf db r x a, ExpressionOf db r y Point) => x -> y -> Expr db r a
 x *. y = mkExpr $ operator 70 "*" x y
 
 -- | Scaling/rotation
--- 
+--
 -- @box '((0,0),(2,2))' / point '(2.0,0)' = box '(1,1),(0,0)'@
 (/.) :: (SqlDb db, BoxCirclePathPoint a, ExpressionOf db r x a, ExpressionOf db r y Point) => x -> y -> Expr db r a
 x /. y = mkExpr $ operator 70 "/" x y
@@ -295,31 +295,31 @@ x /. y = mkExpr $ operator 70 "/" x y
 (#) = psqlOperatorExpr "#"
 
 -- | Closest point to first operand on second operand
--- 
+--
 -- @point '(0,0)' ## lseg '((2,0),(0,2))' = point '(1,1)'@
 (##) :: (SqlDb db, Closest a b, ExpressionOf db r x a, ExpressionOf db r y b) => x -> y -> Expr db r Point
 (##) = psqlOperatorExpr "##"
 
 -- | Distance between
--- 
+--
 -- @circle '((0,0),1)' <-> circle '((5,0),1)' = 3@
 (<->) :: (SqlDb db, Distance a b, ExpressionOf db r x a, ExpressionOf db r y b) => x -> y -> Expr db r Double
 (<->) = psqlOperatorExpr "<->"
 
 -- | Overlaps?
--- 
+--
 -- @box '((0,0),(1,1))' && box '((0,0),(2,2))' = true@
 (&&) :: (SqlDb db, BoxCirclePolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (&&) = psqlOperatorCond "&&"
 
 -- | Is strictly left of?
--- 
+--
 -- @circle '((0,0),1)' << circle '((5,0),1)' = true@
 (<<) :: (SqlDb db, BoxCirclePointPolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (<<) = psqlOperatorCond "<<"
 
 -- | Is strictly right of?
--- 
+--
 -- @circle '((5,0),1)' >> circle '((0,0),1)' = true@
 (>>) :: (SqlDb db, BoxCirclePointPolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (>>) = psqlOperatorCond ">>"
@@ -329,91 +329,91 @@ x /. y = mkExpr $ operator 70 "/" x y
 (&<) = psqlOperatorCond "&<"
 
 -- | Does not extend to the left of?
--- 
+--
 -- @box '((0,0),(3,3))' &> box '((0,0),(2,2))' = true@
 (&>) :: (SqlDb db, BoxCirclePolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (&>) = psqlOperatorCond "&>"
 
 -- | Is strictly below?
--- 
+--
 -- @box '((0,0),(3,3))' <<| box '((3,4),(5,5))' = true@
 (<<|) :: (SqlDb db, BoxCirclePolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (<<|) = psqlOperatorCond "<<|"
 
 -- | Is strictly above?
--- 
+--
 -- @box '((3,4),(5,5))' |>> box '((0,0),(3,3))'@
 (|>>):: (SqlDb db, BoxCirclePolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (|>>) = psqlOperatorCond "|>>"
 
 -- | Does not extend above?
--- 
+--
 -- @box '((0,0),(1,1))' &<| box '((0,0),(2,2))' = true@
 (&<|):: (SqlDb db, BoxCirclePolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (&<|) = psqlOperatorCond "&<|"
 
 -- | Does not extend below?
--- 
+--
 -- @box '((0,0),(3,3))' |&> box '((0,0),(2,2))' = true@
 (|&>) :: (SqlDb db, BoxCirclePolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (|&>) = psqlOperatorCond "|&>"
 
 -- | Is below (allows touching)?
--- 
+--
 -- @circle '((0,0),1)' <^ circle '((0,5),1)' = true@
 (<^) :: (SqlDb db, BoxPoint a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (<^) = psqlOperatorCond "<^"
 
 -- | Is above (allows touching)?
--- 
+--
 -- @circle '((0,5),1)' >^ circle '((0,0),1)' = true@
 (>^) :: (SqlDb db, BoxPoint a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (>^) = psqlOperatorCond ">^"
 
 -- | Intersects?
--- 
+--
 -- @lseg '((-1,0),(1,0))' ?# box '((-2,-2),(2,2))' = true@
 (?#) :: (SqlDb db, Intersects a b, ExpressionOf db r x a, ExpressionOf db r y b) => x -> y -> Cond db r
 (?#) = psqlOperatorCond "?#"
 
 -- | Are horizontally aligned?
--- 
+--
 -- @point '(1,0)' ?- point '(0,0)' = true@
 (?-) :: (SqlDb db, ExpressionOf db r x Point, ExpressionOf db r y Point) => x -> y -> Cond db r
 (?-) = psqlOperatorCond "?-"
 
 -- | Are vertically aligned?
--- 
+--
 -- @point '(0,1)' ?| point '(0,0)' = true@
 (?|) :: (SqlDb db, ExpressionOf db r x Point, ExpressionOf db r y Point) => x -> y -> Cond db r
 (?|) = psqlOperatorCond "?|"
 
 -- | Is perpendicular?
--- 
+--
 -- @lseg '((0,0),(0,1))' ?-| lseg '((0,0),(1,0))' = true@
 (?-|) :: (SqlDb db, LineLseg a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (?-|) = psqlOperatorCond "?-|"
 
 -- | Are parallel?
--- 
+--
 -- @lseg '((-1,0),(1,0))' ?|| lseg '((-1,2),(1,2))' = true@
 (?||) :: (SqlDb db, LineLseg a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (?||) = psqlOperatorCond "?||"
 
 -- | Contains?
--- 
+--
 -- @circle '((0,0),2)' \@> point '(1,1)' = true@
 (@>) :: (SqlDb db, Contains a b, ExpressionOf db r x a, ExpressionOf db r y b) => x -> y -> Cond db r
 (@>) = psqlOperatorCond "@>"
 
 -- | Contained in or on?
--- 
+--
 -- @point '(1,1)' <\@ circle '((0,0),2)' = true@
 (<@) :: (SqlDb db, Contained a b, ExpressionOf db r x a, ExpressionOf db r y b) => x -> y -> Cond db r
 (<@) = psqlOperatorCond "<@"
 
 -- | Same as?
--- 
+--
 -- @polygon '((0,0),(1,1))' ~= polygon '((1,1),(0,0))' = true@
 (~=) :: (SqlDb db, BoxCirclePointPolygon a, ExpressionOf db r x a, ExpressionOf db r y a) => x -> y -> Cond db r
 (~=) = psqlOperatorCond "~="

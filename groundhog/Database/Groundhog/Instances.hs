@@ -229,6 +229,17 @@ instance PrimitivePersistField ZonedTime where
   fromPrimitivePersistValue (PersistUTCTime a) = utcToZonedTime utc a
   fromPrimitivePersistValue x = readHelper x ("Expected ZonedTime, received: " ++ show x)
 
+instance PrimitivePersistField A.Value where
+  toPrimitivePersistValue a = PersistByteString $ Lazy.toStrict $ A.encode a
+  fromPrimitivePersistValue x = (case x of
+    PersistString str -> decode' $ T.encodeUtf8 $ T.pack str
+    PersistText str -> decode' $ T.encodeUtf8 str
+    PersistByteString str -> decode' str
+    _ -> error $ "Expected Aeson.Value, received: " ++ show x) where
+      decode' str = case A.eitherDecode $ Lazy.fromStrict str of
+        Right val -> val
+        Left err -> error $ "Error decoding Aeson.Value: " ++ err
+
 instance (PrimitivePersistField a, NeverNull a) => PrimitivePersistField (Maybe a) where
   toPrimitivePersistValue a = maybe PersistNull toPrimitivePersistValue a
   fromPrimitivePersistValue PersistNull = Nothing
@@ -266,6 +277,7 @@ instance NeverNull Day
 instance NeverNull TimeOfDay
 instance NeverNull UTCTime
 instance NeverNull ZonedTime
+instance NeverNull A.Value
 instance PrimitivePersistField (Key v u) => NeverNull (Key v u)
 instance NeverNull (KeyForBackend db v)
 
@@ -288,6 +300,12 @@ instance PersistField ByteString where
 
 instance PersistField Lazy.ByteString where
   persistName _ = "ByteString"
+  toPersistValues = primToPersistValue
+  fromPersistValues = primFromPersistValue
+  dbType _ _ = DbTypePrimitive DbBlob False Nothing Nothing
+
+instance PersistField A.Value where
+  persistName _ = "JsonValue"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
   dbType _ _ = DbTypePrimitive DbBlob False Nothing Nothing

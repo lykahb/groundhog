@@ -277,7 +277,7 @@ insertList' (l :: [a]) = do
       go _ [] = return ()
   go 0 l
   return $ fromPrimitivePersistValue k
-  
+
 getList' :: forall a . PersistField a => Int64 -> Action Postgresql [a]
 getList' k = do
   let mainName = "List" <> delim' <> delim' <> fromString (persistName (undefined :: a))
@@ -386,7 +386,7 @@ migTriggerOnDelete tName deletes = do
             -- this can happen when an ephemeral field was added or removed.
             else [DropTrigger trigName tName, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
-      
+
 -- | Table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
 migTriggerOnUpdate :: QualifiedName -> [(String, String)] -> Action Postgresql [(Bool, [AlterDB])]
@@ -414,7 +414,7 @@ migTriggerOnUpdate tName dels = forM dels $ \(fieldName, del) -> do
             -- this can happen when an ephemeral field was added or removed.
             else [DropTrigger trigName tName, addTrigger])
   return (trigExisted, funcMig ++ trigMig)
-  
+
 analyzeTable' :: QualifiedName -> Action Postgresql (Maybe TableInfo)
 analyzeTable' name = do
   table <- queryRaw' "SELECT * FROM information_schema.tables WHERE table_schema = coalesce(?, current_schema()) AND table_name = ?" (toPurePersistValues name []) >>= firstRow
@@ -432,7 +432,7 @@ analyzeTable' name = do
 
       cols <- queryRaw' colQuery (toPurePersistValues name []) >>= mapStream (return . getColumn . fst . fromPurePersistValues) >>= streamToList
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,current_schema()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
-      
+
       uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues ("UNIQUE" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
       uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues ("PRIMARY KEY" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
       -- indexes with system columns like oid are omitted
@@ -709,7 +709,7 @@ mainTableId = "id"
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String
 escape s = '\"' : s ++ "\""
-  
+
 getStatement :: Utf8 -> PG.Query
 getStatement sql = PG.Query $ fromUtf8 sql
 
@@ -828,8 +828,8 @@ withSchema :: QualifiedName -> String
 withSchema (sch, name) = maybe "" (\x -> escape x ++ ".") sch ++ escape name
 
 -- | Put explicit type for expression. It is useful for values which are defaulted to a wrong type.
--- For example, a literal Int from a 64bit machine can be defaulted to a 32bit int by Postgresql. 
--- Also a value entered as an external string (geometry, arrays and other complex types have this representation) may need an explicit type. 
+-- For example, a literal Int from a 64bit machine can be defaulted to a 32bit int by Postgresql.
+-- Also a value entered as an external string (geometry, arrays and other complex types have this representation) may need an explicit type.
 explicitType :: (Expression Postgresql r a, PersistField a) => a -> Expr Postgresql r a
 explicitType a = castType a t where
   t = case dbType proxy a of
@@ -837,7 +837,7 @@ explicitType a = castType a t where
     _ -> error "explicitType: type is not primitive"
 
 -- | Casts expression to a type. @castType value \"INT\"@ results in @value::INT@.
-castType :: Expression Postgresql r a => a -> String -> Expr Postgresql r a
+castType :: (Expression Postgresql r a, PersistField a) => a -> String -> Expr Postgresql r a
 castType a t = mkExpr $ Snippet $ \conf _ -> ["(" <> renderExpr conf (toExpr a) <> ")::" <> fromString t] where
 
 -- | Distinct only on certain fields or expressions. For example, @select $ CondEmpty `distinctOn` (lower EmailField, IpField)@.
