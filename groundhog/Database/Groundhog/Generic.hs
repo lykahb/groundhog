@@ -2,7 +2,7 @@
 
 -- | This helper module is intended for use by the backend creators
 module Database.Groundhog.Generic
-  ( 
+  (
   -- * Migration
     createMigration
   , executeMigration

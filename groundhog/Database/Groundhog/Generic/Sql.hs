@@ -193,7 +193,15 @@ mkExpr snippet = Expr $ ExprRaw typ snippet where
 renderCond :: SqlDb db
   => RenderConfig
   -> Cond db r -> Maybe (RenderS db r)
-renderCond conf cond = renderCondPriority conf 0 cond where
+renderCond conf cond = renderCondPriority conf 0 cond
+
+flattenNullables :: DbType -> [Bool]
+flattenNullables typ = go typ [] where
+  go :: DbType -> [Bool] -> [Bool]
+  go typ acc = case typ of
+    DbEmbedded (EmbeddedDef _ ts) _ -> foldr go acc $ map snd ts
+    DbList _ _ -> False : acc
+    DbTypePrimitive _ nullable _ _ -> nullable : acc
 
 {-# INLINABLE renderCondPriority #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.
@@ -206,35 +214,40 @@ renderCondPriority conf@RenderConfig{..} priority cond = go cond priority where
   go (Not CondEmpty) _ = Just "(1=0)" -- special case for False
   go (Not a)         p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
   go (Compare compOp f1 f2) p = (case compOp of
-    Eq -> renderComp andP " AND " 37 op f1 f2 where
-      op = if bothNotNull then (\a b -> a <> fromChar '=' <> b) else equalsOperator
-    Ne -> renderComp orP " OR " 50 op f1 f2 where
-      op = if bothNotNull then (\a b -> a <> "<>" <> b) else notEqualsOperator
+    Eq -> renderCompOps andP " AND " 37 ops f1 f2 where
+      ops = map (\isNull -> if isNull then equalsOperator else (\a b -> a <> fromChar '=' <> b)) eitherNullable
+    Ne -> renderCompOps andP " OR " 50 ops f1 f2 where
+      ops = map (\isNull -> if isNull then notEqualsOperator else (\a b -> a <> "<>" <> b)) eitherNullable
     Gt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '>' <> b) f1 f2
     Lt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '<' <> b) f1 f2
     Ge -> renderComp orP " OR " 38 (\a b -> a <> ">=" <> b) f1 f2
     Le -> renderComp orP " OR " 38 (\a b -> a <> "<=" <> b) f1 f2) where
       proxy = undefined :: proxy db
-      bothNotNull = case (isNullable f1, isNullable f2) of
-        (Just False, Just False) -> True
-        _ -> False
-      isTypeNullable (DbTypePrimitive _ nullable _ _) = nullable
-      -- for more complex types like embeddeds with many columns just assume that they are nullable for safety
-      isTypeNullable _ = True
 
-      isNullable expr = case expr of
-        ExprRaw t _ -> Just $ isTypeNullable t
-        ExprField ((_, t), _) -> Just $ isTypeNullable t
-        ExprPure a -> Just $ isTypeNullable $ dbType proxy a
-        ExprCond a -> Just False
+      eitherNullable = zipWith (||) (nullables f1) (nullables f2)
 
-      renderComp interP interOp opP op expr1 expr2 = result where
+      nullables expr = case expr of
+        ExprRaw t _ -> flattenNullables t
+        ExprField ((_, t), _) -> flattenNullables t
+        ExprPure a -> flattenNullables $ dbType proxy a
+        ExprCond a -> [False]
+
+      renderZip opP op expr1 expr2 = zipWith op expr1' expr2' where
         expr1' = renderExprExtended conf opP expr1
         expr2' = renderExprExtended conf opP expr2
-        result = case zipWith op expr1' expr2' of
-          [] -> Nothing
-          [clause] -> Just $ parens (opP - 1) p clause  -- put lower priority to make parentheses appear when the same operator is nested
-          clauses  -> Just $ parens interP p $ intercalateS interOp clauses
+
+      renderZip3 opP ops expr1 expr2 = zipWith3 (\op e1 e2 -> op e1 e2) ops expr1' expr2' where
+        expr1' = renderExprExtended conf opP expr1
+        expr2' = renderExprExtended conf opP expr2
+
+      groupComparisons interP interOp opP comparisons = case comparisons of
+        [] -> Nothing
+        [clause] -> Just $ parens (opP - 1) p clause  -- put lower priority to make parentheses appear when the same operator is nested
+        clauses  -> Just $ parens interP p $ intercalateS interOp clauses
+
+      renderComp interP interOp opP op expr1 expr2 = groupComparisons interP interOp opP $ renderZip opP op expr1 expr2
+      renderCompOps interP interOp opP ops expr1 expr2 = groupComparisons interP interOp opP $ renderZip3 opP ops expr1 expr2
+
   go (CondRaw (Snippet f)) p = case f conf p of
     [] -> Nothing
     [a] -> Just a

@@ -409,13 +409,13 @@ testCond = do
   let intField f = f `asTypeOf` (undefined :: Field (Single (Int, Int)) c a)
       intNum = fromInteger :: Integer -> Expr db r Int
   -- should cover all cases of renderCond comparison rendering
-  ("single#val0 IS ? AND single#val1 IS ?", ["abc", "def"]) === (SingleField ==. ("abc", "def"))
+  ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def"))
   ("single#val0=single#val1", [] :: [Int]) === (intField SingleField ~> Tuple2_0Selector ==. SingleField ~> Tuple2_1Selector)
   ("single#val1=single#val0*(?+single#val0)", [5 :: Int]) === (intField SingleField ~> Tuple2_1Selector ==. liftExpr (SingleField ~> Tuple2_0Selector) * (5 + liftExpr (SingleField ~> Tuple2_0Selector)))
 
-  ("? IS ? AND ? IS ?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int) &&. SingleField ==. ()) -- SingleField ==. () is required to replace Any with a PersistEntity instance
+  ("?=? AND ?=?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int) &&. SingleField ==. ()) -- SingleField ==. () is required to replace Any with a PersistEntity instance
   ("?<? OR ?<?", [1, 2, 3, 4 :: Int]) === ((1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int) &&. SingleField ==. ())
-  ("? IS single#val0 AND ? IS single#val1", [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
+  ("?=single#val0 AND ?=single#val1", [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
   ("?=single+?*?", [1, 2, 3 :: Int]) === ((1 :: Int) ==. liftExpr SingleField + 2 * 3)
 
 --  ("?-single=?", [1, 2 :: Int]) === (1 - liftExpr SingleField ==. (2 :: Int))
@@ -423,16 +423,19 @@ testCond = do
 --  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + liftExpr SingleField >=. liftExpr SingleField - 2)
 
   -- test parentheses
-  ("NOT (NOT single=? OR ? IS ? AND ? IS ?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
+  ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
   ("single=? AND (?<? OR ?<?)", [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) &&. (1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int))
   ("NOT (single=? AND (single=single OR single<single))", [0 :: Int]) === (Not $ SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField <. SingleField))
 
   -- test empty conditions
-  ("single#val0 IS ? AND single#val1 IS ?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
-  ("single#val0 IS ? AND single#val1 IS ?", ["abc", "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
+  ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
+  ("single#val0=? AND single#val1=?", ["abc", "def"]) === ((() ==. () ||. ((), ()) <. ((), ())) &&. SingleField ==. ("abc", "def"))
 
   -- test conditions used as expressions
   ("(?=?)=(?=?)", [1, 1, 0, 0] :: [Int]) === (((1 :: Int) ==. (1 :: Int)) ==. ((0 :: Int) ==. (0 :: Int)))
+
+  -- test nullable expressions
+  ("single#val0 IS ? AND single#val1=?", ["abc", "def"]) === (SingleField ==. (Just "abc", "def"))
 
 testCount :: PersistBackend m => m ()
 testCount = do
