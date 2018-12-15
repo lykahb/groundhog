@@ -1,3 +1,7 @@
+0.10
+* Pass type information along the UntypedExpr
+* Fix #57 (table indexes are ignored)
+
 0.9.0.1
 * Bump upper bound for postgresql-simple
 
