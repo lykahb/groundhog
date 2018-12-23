@@ -2,7 +2,7 @@
 
 -- | This module provides functions to generate the auxiliary structures for the user data type
 module Database.Groundhog.TH
-  ( 
+  (
   -- * Settings format
   -- $settingsDoc
     mkPersist
@@ -66,7 +66,7 @@ defaultCodegenConfig :: CodegenConfig
 defaultCodegenConfig = CodegenConfig suffixNamingStyle Nothing [defaultMkEntityDecs] [defaultMkEmbeddedDecs] [defaultMkPrimitiveDecs]
 
 -- $namingStylesDoc
--- When describing a datatype you can omit the most of the declarations. 
+-- When describing a datatype you can omit the most of the declarations.
 -- In this case the omitted parts of description will be automatically generated using the default names created by naming style.
 -- Any default name can be overridden by setting its value explicitly.
 
@@ -191,13 +191,13 @@ lowerCaseSuffixNamingStyle = suffixNamingStyle {
   , mkNormalDbFieldName = \_ cName _ fNum -> toUnderscore $ cName ++ show fNum
 }
 
--- | Creates the auxiliary structures. 
+-- | Creates the auxiliary structures.
 -- Particularly, it creates GADT 'Field' data instance for referring to the fields in expressions and phantom types for data constructors.
 -- The default names of auxiliary datatypes and names used in database are generated using the naming style and can be changed via configuration.
--- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'. 
+-- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'.
 mkPersist :: CodegenConfig -> PersistDefinitions -> Q [Dec]
 mkPersist CodegenConfig{..} PersistDefinitions{..} = do
-  let duplicates = notUniqueBy id $ 
+  let duplicates = notUniqueBy id $
         map psDataName psEntities ++ map psEmbeddedName psEmbeddeds ++ map psPrimitiveName psPrimitives
   unless (null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
   let getDecl name = do
@@ -205,7 +205,7 @@ mkPersist CodegenConfig{..} PersistDefinitions{..} = do
         return $ case info of
           TyConI d -> d
           _        -> error $ "Only datatypes can be processed: " ++ name
-      
+
   entities   <- forM psEntities $ \e ->
     either error id . validateEntity   . applyEntitySettings namingStyle e . mkTHEntityDef namingStyle    <$> getDecl (psDataName e)
   embeddeds  <- forM psEmbeddeds $ \e ->
@@ -246,7 +246,7 @@ mkUniqueKey style@NamingStyle{..} dName cDef@THConstructorDef{..} PSUniqueKeyDef
   uniqueFields = mkFieldsForUniqueKey style dName key cDef
 
 applyAutoKeySettings :: THAutoKeyDef -> PSAutoKeyDef -> THAutoKeyDef
-applyAutoKeySettings def@(THAutoKeyDef{..}) PSAutoKeyDef{..} = 
+applyAutoKeySettings def@(THAutoKeyDef{..}) PSAutoKeyDef{..} =
   def { thAutoKeyConstrName = fromMaybe thAutoKeyConstrName psAutoKeyConstrName
       , thAutoKeyIsDef = fromMaybe thAutoKeyIsDef psAutoKeyIsDef
       }
@@ -261,7 +261,7 @@ applyConstructorSettings PSConstructorDef{..} def@(THConstructorDef{..}) =
       } where
   f = foldr $ replaceOne "field" psFieldName thFieldName applyFieldSettings
   convertUnique (PSUniqueDef uName uType uFields) = THUniqueDef uName (fromMaybe UniqueConstraint uType) uFields
-  
+
 applyFieldSettings :: PSFieldDef String -> THFieldDef -> THFieldDef
 applyFieldSettings PSFieldDef{..} def@(THFieldDef{..}) =
   def { thDbFieldName = fromMaybe thDbFieldName psDbFieldName
@@ -321,7 +321,7 @@ validateEntity def = do
       ys -> fail $ "Constraints must have at least one field: " ++ show ys
     when (isNothing (thDbAutoKeyName cdef) /= isNothing (thAutoKey def)) $
       fail $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def) ++ ": " ++ show (thDbAutoKeyName cdef) ++ " - " ++ show (thAutoKey def)
-      
+
   -- check that unique keys = [] for multiple constructor datatype
   if length constrs > 1 && not (null $ thUniqueKeys def)
     then fail $ "Unique keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
@@ -332,7 +332,7 @@ validateEntity def = do
   let isPrimary x = case x of
             UniquePrimary _ -> True
             _ -> False
-      primaryConstraints = length $ filter (isPrimary . thUniqueType) $ concatMap thConstrUniques constrs 
+      primaryConstraints = length $ filter (isPrimary . thUniqueType) $ concatMap thConstrUniques constrs
   if length constrs > 1
     then when (primaryConstraints > 0) $
            fail $ "Custom primary keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
@@ -343,7 +343,7 @@ validateEntity def = do
   when (not (null keyDefaults) && length (filter id keyDefaults) /= 1) $
     fail $ "A datatype with keys must have one default key: " ++ show (thDataName def)
   return def
-  
+
 validateField :: THFieldDef -> Either String ()
 validateField fDef = do
   assertSpaceFree (thExprName fDef) "field expr name"
@@ -386,14 +386,14 @@ mkTHEmbeddedDef (NamingStyle{..}) dec = THEmbeddedDef dName cName (mkDbEntityNam
 
   (dName, typeVars, cons) = fromDataD dec
   dName' = nameBase dName
-  
+
   (cName, fields) = case cons of
     [cons'] -> case cons' of
       NormalC name params -> (name, zipWith (mkField (nameBase name)) params [0..])
       RecC name params -> (name, zipWith (mkVarField (nameBase name)) params [0..])
       _ -> error $ "Only regular types and records are supported" ++ show dName
     _ -> error $ "An embedded datatype must have exactly one constructor: " ++ show dName
-  
+
   mkField :: String -> StrictType -> Int -> THFieldDef
   mkField cName' (_, t) fNum = THFieldDef (apply mkNormalFieldName) (apply mkNormalDbFieldName) Nothing (mkNormalExprSelectorName dName' cName' fNum) t Nothing Nothing Nothing Nothing where
     apply f = f dName' cName' 0 fNum
@@ -436,11 +436,11 @@ toUnderscore = map toLower . go where
 -- $settingsDoc
 -- Groundhog needs to analyze the datatypes and create the auxiliary definitions before it can work with them.
 -- We use YAML-based settings to list the datatypes and adjust the result of their introspection.
--- 
+--
 -- A datatype can be treated as entity or embedded. An entity is stored in its own table, can be referenced in fields of other data, etc. It is a first-class value.
 -- An embedded type can only be a field of an entity or another embedded type. For example, the tuples are embedded.
 -- You can create your own embedded types and adjust the fields names of an existing embedded type individually for any place where it is used.
--- 
+--
 -- Unless the property is marked as mandatory, it can be omitted. In this case value created by the NamingStyle will be used.
 --
 -- @
@@ -545,7 +545,7 @@ toUnderscore = map toLower . go where
 --              - {name: city, dbName: sales_city}
 --              - {name: zip_code, dbName: sales_zipcode}
 --              - {name: street, dbName: sales_street}
---  - embedded: Address                        
+--  - embedded: Address
 --    fields:                             # The syntax is the same as for constructor fields. Nested embedded types are allowed.
 --      - name: city                      # This line does nothing and can be omitted. Default settings for city are not changed.
 --      - name: zipCode
