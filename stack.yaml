@@ -13,4 +13,4 @@ packages:
 - groundhog-th/
 - groundhog-test/
 extra-deps: []
-resolver: lts-12.25
+resolver: lts-13.0

@@ -598,13 +598,8 @@ parseDefinitions s = do
         , replicate (Y.yamlColumn mark) ' ' ++ "^"
         ]
       _ -> fail $ show err
-#if MIN_VERSION_yaml(0, 10, 0)
     Right (_, Left err) -> fail err
     Right (_, Right result') -> lift (result' :: PersistDefinitions)
-#else
-    Right (Left err) -> fail err
-    Right (Right result') -> lift (result' :: PersistDefinitions)
-#endif
 
 defaultMkEntityDecs :: [THEntityDef] -> Q [Dec]
 defaultMkEntityDecs = fmap concat . mapM (\def -> do

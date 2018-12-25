@@ -105,7 +105,7 @@ import Data.ByteString.Char8 (unpack)
 import Data.Function (on)
 import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, fromJust)
 import qualified Data.Map as Map
 import qualified Data.String.Utils as Utils
 import qualified Data.Text as Text
@@ -514,7 +514,8 @@ testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
   proxy <- phantomDb
   k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
-  Just [listKey] <- queryRaw' "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
+  listKey' <- queryRaw' "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
+  let listKey = head $ fromJust listKey'
   listsInsideListKeys <- queryRaw' "select value from \"List##List##String#values\" where id=?" [listKey] >>= streamToList
   deleteBy k
   -- test if the main list table and the associated values were deleted
@@ -533,7 +534,8 @@ testListTriggersOnUpdate = do
   migr val
   proxy <- phantomDb
   k <- insert val
-  Just [listKey] <- queryRaw' "select \"single\" from \"Single#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
+  listKey' <- queryRaw' "select \"single\" from \"Single#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
+  let listKey = head $ fromJust listKey'
   listsInsideListKeys <- queryRaw' "select value from \"List##List##String#values\" where id=?" [listKey] >>= streamToList
   replace k (Single [] :: Single [[String]])
   -- test if the main list table and the associated values were deleted
@@ -580,8 +582,8 @@ testReplaceMulti = do
   proxy <- phantomDb
   -- we need Single to test that referenced value can be replaced
   k <- insert $ Single (Second "abc")
-  Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
-  let valueKey = fromPrimitivePersistValue valueKey'
+  valueKey' <- queryRaw' "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
+  let valueKey = fromPrimitivePersistValue $ head $ fromJust valueKey'
 
   replace valueKey (Second "def")
   replaced <- get valueKey
@@ -600,8 +602,8 @@ testReplaceSingle = do
   migr val
   proxy <- phantomDb
   k <- insert val
-  Just [valueKey'] <- queryRaw' "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
-  let valueKey = fromPrimitivePersistValue valueKey'
+  valueKey' <- queryRaw' "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
+  let valueKey = fromPrimitivePersistValue $ head $ fromJust valueKey'
   replace valueKey (Single "def")
   replaced <- get valueKey
   Just (Single "def") @=? replaced
