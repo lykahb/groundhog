@@ -23,7 +23,7 @@ module Database.Groundhog.TH.CodeGen
   , mkPrimitivePrimitivePersistFieldInstance
   , mkMigrateFunction
   ) where
-  
+
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
@@ -196,7 +196,7 @@ mkAutoKeyPersistFieldInstance def = case thAutoKey def of
   Just _ -> do
     let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
     keyType <- [t| Key $(return entity) BackendSpecific |]
-    
+
     persistName' <- do
       a <- newName "a"
       let body = [| "Key" ++ [delim] ++ persistName ((undefined :: Key v u -> v) $(varE a)) |]
@@ -209,7 +209,7 @@ mkAutoKeyPersistFieldInstance def = case thAutoKey def of
       let e = [| entityDef $(varE proxy) ((undefined :: Key v a -> v) $(varE a)) |]
           body = [| DbTypePrimitive (getDefaultAutoKeyType $(varE proxy)) False Nothing (Just (Left ($e, Nothing), Nothing, Nothing)) |]
       funD 'dbType [clause [varP proxy, varP a] (normalB body) []]
-    
+
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [persistName', toPersistValues', fromPersistValues', dbType']
     return [instanceD' context (AppT (ConT ''PersistField) keyType) decs]
@@ -274,7 +274,7 @@ mkUniqueKeysEmbeddedInstances def = do
     uniqKeyType <- [t| Key $(return entity) (Unique $(conT $ mkName $ thUniqueKeyPhantomName unique)) |]
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     mkEmbeddedInstance' uniqKeyType (thUniqueKeyFields unique) context
-  
+
 mkUniqueKeysPersistFieldInstances :: THEntityDef -> Q [Dec]
 mkUniqueKeysPersistFieldInstances def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
@@ -302,7 +302,7 @@ mkUniqueKeysPersistFieldInstances def = do
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [persistName', toPersistValues', fromPersistValues', dbType']
     return $ instanceD' context (AppT (ConT ''PersistField) uniqKeyType) decs
-    
+
 mkUniqueKeysPrimitiveOrPurePersistFieldInstances :: THEntityDef -> Q [Dec]
 mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
@@ -321,7 +321,7 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
         fromPrim' <- funD 'fromPrimitivePersistValue [clause [varP x] (normalB [| $(conE conName) (fromPrimitivePersistValue $(varE x)) |]) []]
         let decs = [toPrim', fromPrim']
         sequence [ return $ instanceD' context (AppT (ConT ''PrimitivePersistField) uniqKeyType) decs
-                 , return $ instanceD' context (AppT (ConT ''NeverNull) uniqKeyType) decs
+                 , return $ instanceD' context (AppT (ConT ''NeverNull) uniqKeyType) []
                  , mkDefaultPurePersistFieldInstance context uniqKeyType
                  , mkDefaultSinglePersistFieldInstance context uniqKeyType]
       else mkPurePersistFieldInstance uniqKeyType conName (thUniqueKeyFields unique) context
@@ -344,7 +344,7 @@ mkKeyEqShowInstances def = do
           body = [| showParen ($(varE p) >= (11 :: Int)) ($showC . $showArgs) |]
       clause [varP p, pat] (normalB body) []
     in funD 'showsPrec $ map mkClause keysInfo
-    
+
   eq' <- let
     mkClause (cName, fieldsNum, _) = do
       let fields = replicateM fieldsNum (newName "x")
@@ -377,7 +377,7 @@ mkEmbeddedInstance def = do
       embedded = foldl AppT (ConT (thEmbeddedName def)) types
       context = paramsContext (thEmbeddedTypeParams def) (thEmbeddedFields def)
   mkEmbeddedInstance' embedded (thEmbeddedFields def) context
-  
+
 mkEmbeddedInstance' :: Type -> [THFieldDef] -> Cxt -> Q [Dec]
 mkEmbeddedInstance' dataType fDefs context = do
   selector' <- do
@@ -402,7 +402,7 @@ mkEntityPhantomConstructors def = do
     phantom <- [t| ConstructorMarker $(return entity) |]
     let constr = ForallC (thTypeParams def) [equalP' (VarT v) phantom] $ NormalC name []
     return $ dataD' [] name [PlainTV v] [constr] []
-  
+
 mkEntityPhantomConstructorInstances :: THEntityDef -> Q [Dec]
 mkEntityPhantomConstructorInstances def = sequence $ zipWith f [0..] $ thConstructors def where
   f :: Int -> THConstructorDef -> Q Dec
@@ -422,7 +422,7 @@ mkEntityUniqueKeysPhantoms def = do
         let constr = ForallC (thTypeParams def) [equalP' (VarT v) phantom] $ NormalC name []
         return [dataD' [] name [PlainTV v] [constr] []]
       else return []
-    
+
 mkPersistEntityInstance :: THEntityDef -> Q [Dec]
 mkPersistEntityInstance def = do
   let entity = foldl AppT (ConT (thDataName def)) $ map extractType $ thTypeParams def
@@ -448,7 +448,7 @@ mkPersistEntityInstance def = do
       Nothing -> [t| () |]
       Just _ -> [t| Key $(return entity) BackendSpecific |]
     return $ mkTySynInstD ''AutoKey [entity] autoType
-    
+
   defaultKey' <- do
     typ <- case thAutoKey def of
       Just k | thAutoKeyIsDef k -> [t| Key $(return entity) BackendSpecific |]
@@ -462,7 +462,7 @@ mkPersistEntityInstance def = do
           then ''HFalse
           else ''HTrue
     return $ mkTySynInstD ''IsSumType [entity] isSumType
-  
+
   fields' <- do
     cParam <- newName "c"
     fParam <- newName "f"
@@ -470,7 +470,7 @@ mkPersistEntityInstance def = do
     let f cdef = map (mkField $ mkName $ thPhantomConstrName cdef) $ thConstrFields cdef
     let constrs = concatMap f $ thConstructors def
     return $ dataInstD' [] ''Field [entity, VarT cParam, VarT fParam] constrs []
-    
+
   entityDef' <- do
     v <- newName "v"
     proxy <- newName "p"
@@ -493,7 +493,7 @@ mkPersistEntityInstance def = do
           mkConstraint (THUniqueDef uName uType uFields) = [| UniqueDef (Just uName) uType $(listE $ map getField uFields) |]
           getField (Left fName) = [| Left $(snd $ findOne "field" fst fName fields) |]
           getField (Right expr) = [| Right expr |]
-    
+
         paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
         fullEntityName = case null types of
          True  -> [| $(stringE $ thDbEntityName def) |]
@@ -575,11 +575,11 @@ mkEntityPersistFieldInstance def = case getDefaultKey def of
   Just defaultKey -> do
     let types = map extractType $ thTypeParams def
     let entity = foldl AppT (ConT (thDataName def)) types
-  
+
     persistName' <- do
       v <- newName "v"
       let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t| $(return entity) -> $(return t) |]) |]
-    
+
       let paramNames = foldr1 (\p xs -> [| $p ++ [delim] ++ $xs |] ) $ map (\t -> [| persistName ($(mkLambda t) $(varE v)) |]) types
       let fullEntityName = case null types of
            True  -> [| $(stringE $ thDbEntityName def) |]
@@ -587,7 +587,7 @@ mkEntityPersistFieldInstance def = case getDefaultKey def of
       let body = normalB $ fullEntityName
       let pat = if null types then wildP else varP v
       funD 'persistName $ [ clause [pat] body [] ]
-  
+
     isOne <- isDefaultKeyOneColumn def
     let uniqInfo = either auto uniq defaultKey where
         auto _ = Nothing
