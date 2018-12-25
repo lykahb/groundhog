@@ -12,5 +12,7 @@ packages:
 - groundhog-sqlite/
 - groundhog-th/
 - groundhog-test/
-extra-deps: []
+extra-deps:
+- libyaml-0.1.0.0
+- yaml-0.11.0.0
 resolver: lts-9.21
