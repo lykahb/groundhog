@@ -7,7 +7,7 @@ It is used in hobby projects and commercial applications.
 
 ## Docs
 
-* [Tutorial](http://www.fpcomplete.com/user/lykahb/groundhog).
+* [Tutorial](https://www.schoolofhaskell.com/user/lykahb/groundhog).
 * Full list of [examples](examples).
 * Read [docs](http://hackage.haskell.org/package/groundhog) for
 groundhog on Hackage.
