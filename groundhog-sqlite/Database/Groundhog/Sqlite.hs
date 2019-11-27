@@ -90,7 +90,7 @@ instance PersistBackendConn Sqlite where
   getList k = runDb' $ getList' k
 
 instance SchemaAnalyzer Sqlite where
-  schemaExists = fail "schemaExists: is not supported by Sqlite"
+  schemaExists _ = fail "schemaExists: is not supported by Sqlite"
   getCurrentSchema = return Nothing
   listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
@@ -103,7 +103,7 @@ instance SchemaAnalyzer Sqlite where
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues src)
   analyzeTrigger (sch, _) = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
-  analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
+  analyzeFunction _ = fail "analyzeFunction: is not supported by Sqlite"
   getMigrationPack = return migrationPack
 
 withSqlitePool :: (MonadBaseControl IO m, MonadIO m)

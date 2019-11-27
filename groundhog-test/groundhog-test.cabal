@@ -48,7 +48,6 @@ test-suite test
                  , transformers-base
                  , HUnit
                  , template-haskell
-                 , MissingH
                  , yaml                     >= 0.11    && < 0.12
                  , libyaml
                  , unordered-containers     >= 0.1.3

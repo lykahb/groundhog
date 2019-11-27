@@ -580,11 +580,11 @@ class Savepoint conn where
 -- If your monad has several connections, e.g., for main and audit databases, create run*Db function
 -- runAuditDb :: Action conn a -> m a
 
-class (Monad m, Applicative m, Functor m, MonadIO m, ConnectionManager (Conn m), PersistBackendConn (Conn m)) => PersistBackend m where
+class (Monad m, Applicative m, Functor m, MonadIO m, MonadFail m, ConnectionManager (Conn m), PersistBackendConn (Conn m)) => PersistBackend m where
   type Conn m
   getConnection :: m (Conn m)
 
-instance (Monad m, Applicative m, Functor m, MonadIO m, PersistBackendConn conn) => PersistBackend (ReaderT conn m) where
+instance (Monad m, Applicative m, Functor m, MonadIO m, MonadFail m, PersistBackendConn conn) => PersistBackend (ReaderT conn m) where
   type Conn (ReaderT conn m) = conn
   getConnection = ask
 

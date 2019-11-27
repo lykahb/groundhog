@@ -791,7 +791,10 @@ mkType THFieldDef{..} proxy nvar = t3 where
 
 mkTySynInstD :: Name -> [Type] -> Type -> Dec
 mkTySynInstD name ts t =
-#if MIN_VERSION_template_haskell(2, 9, 0)
+#if MIN_VERSION_template_haskell(2, 15, 0)
+  TySynInstD $ TySynEqn Nothing typ t where
+    typ = foldl AppT (ConT name) ts
+#elif MIN_VERSION_template_haskell(2, 9, 0)
   TySynInstD name $ TySynEqn ts t
 #else
   TySynInstD name ts t
@@ -823,7 +826,10 @@ instanceD' =
 
 dataInstD' :: Cxt -> Name -> [Type] -> [Con] -> [Name] -> InstanceDec
 dataInstD' cxt name types constrs derives =
-#if MIN_VERSION_template_haskell(2, 12, 0)
+#if MIN_VERSION_template_haskell(2, 15, 0)
+  DataInstD cxt Nothing typ Nothing constrs [DerivClause Nothing (map ConT derives)] where
+    typ = foldl AppT (ConT name) types
+#elif MIN_VERSION_template_haskell(2, 12, 0)
   DataInstD cxt name types Nothing constrs [DerivClause Nothing (map ConT derives)]
 #elif MIN_VERSION_template_haskell(2, 11, 0)
   DataInstD cxt name types Nothing constrs (map ConT derives)

@@ -1,0 +1,18 @@
+flags:
+  groundhog-test:
+    mysql: true
+    sqlite: true
+    postgresql: true
+extra-package-dbs: []
+packages:
+- groundhog/
+- examples/
+- groundhog-inspector/
+- groundhog-postgresql/
+- groundhog-sqlite/
+- groundhog-th/
+- groundhog-test/
+extra-deps:
+- direct-sqlite-2.3.24
+- semigroups-0.18.5@sha256:41ef9f5f183f66c519c5cddcb3fbfdbc9b67a2b7bfae7d81f91de9ff7367d8c6
+resolver: nightly-2019-11-25
