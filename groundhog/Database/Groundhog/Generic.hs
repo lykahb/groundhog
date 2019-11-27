@@ -51,7 +51,6 @@ module Database.Groundhog.Generic
   , streamToList
   , mapStream
   , joinStreams
-  , deleteByKey
   ) where
 
 import Database.Groundhog.Core
@@ -338,6 +337,3 @@ isSimple :: [ConstructorDef] -> Bool
 isSimple [_] = True
 isSimple _   = False
 
-{-# DEPRECATED deleteByKey "Use deleteBy instead" #-}
-deleteByKey :: (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) => Key v BackendSpecific -> m ()
-deleteByKey = deleteBy

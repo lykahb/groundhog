@@ -37,7 +37,6 @@ import Data.List (groupBy, intercalate, isInfixOf, partition, sort)
 import Data.IORef
 import qualified Data.HashMap.Strict as Map
 import Data.Maybe (fromMaybe)
-import Data.Monoid hiding ((<>))
 import Data.Pool
 import qualified Data.Text as T
 
@@ -90,7 +89,7 @@ instance PersistBackendConn Sqlite where
   getList k = runDb' $ getList' k
 
 instance SchemaAnalyzer Sqlite where
-  schemaExists = fail "schemaExists: is not supported by Sqlite"
+  schemaExists _ = fail "schemaExists: is not supported by Sqlite"
   getCurrentSchema = return Nothing
   listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
   listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
@@ -103,7 +102,7 @@ instance SchemaAnalyzer Sqlite where
       Nothing  -> return Nothing
       Just src -> return (fst $ fromPurePersistValues src)
   analyzeTrigger (sch, _) = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
-  analyzeFunction = error "analyzeFunction: is not supported by Sqlite"
+  analyzeFunction _ = fail "analyzeFunction: is not supported by Sqlite"
   getMigrationPack = return migrationPack
 
 withSqlitePool :: (MonadBaseControl IO m, MonadIO m)
@@ -343,10 +342,10 @@ showColumn (Column name nullable typ def) = escape name ++ " " ++ showSqlType ty
     maybe "" (" DEFAULT " ++) def]
 
 sqlReference :: Reference -> String
-sqlReference Reference{..} = "FOREIGN KEY(" ++ our ++ ") REFERENCES " ++ escape (snd referencedTableName) ++ "(" ++ foreign ++ ")" ++ actions where
+sqlReference Reference{..} = "FOREIGN KEY(" ++ ourKey ++ ") REFERENCES " ++ escape (snd referencedTableName) ++ "(" ++ foreignKey ++ ")" ++ actions where
   actions = maybe "" ((" ON DELETE " ++) . showReferenceAction) referenceOnDelete
          ++ maybe "" ((" ON UPDATE " ++) . showReferenceAction) referenceOnUpdate
-  (our, foreign) = f *** f $ unzip referencedColumns
+  (ourKey, foreignKey) = f *** f $ unzip referencedColumns
   f = intercalate ", " . map escape
 
 sqlUnique :: UniqueDefInfo -> String

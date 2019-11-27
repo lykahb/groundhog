@@ -296,14 +296,14 @@ mkFieldsForUniqueKey style dName uniqueKey cDef = zipWith (setSelector . findFie
 notUniqueBy :: Eq b => (a -> b) -> [a] -> [b]
 notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
 
-assertUnique :: (Monad m, Eq b, Show b) => (a -> b) -> [a] -> String -> m ()
+assertUnique :: (Eq b, Show b) => (a -> b) -> [a] -> String -> Either String ()
 assertUnique f xs what = case notUniqueBy f xs of
   [] -> return ()
-  ys -> fail $ "All " ++ what ++ " must be unique: " ++ show ys
+  ys -> Left $ "All " ++ what ++ " must be unique: " ++ show ys
 
 -- we need to validate datatype names because TH just creates unusable fields with spaces
-assertSpaceFree :: Monad m => String -> String -> m ()
-assertSpaceFree s what = when (any isSpace s) $ fail $ "Spaces in " ++ what ++ " are not allowed: " ++ show s
+assertSpaceFree :: String -> String -> Either String ()
+assertSpaceFree s what = when (any isSpace s) $ Left $ "Spaces in " ++ what ++ " are not allowed: " ++ show s
 
 validateEntity :: THEntityDef -> Either String THEntityDef
 validateEntity def = do
@@ -318,37 +318,37 @@ validateEntity def = do
     mapM_ validateField fields
     case filter (\(THUniqueDef _ _ uFields) -> null uFields) $ thConstrUniques cdef of
       [] -> return ()
-      ys -> fail $ "Constraints must have at least one field: " ++ show ys
+      ys -> Left $ "Constraints must have at least one field: " ++ show ys
     when (isNothing (thDbAutoKeyName cdef) /= isNothing (thAutoKey def)) $
-      fail $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def) ++ ": " ++ show (thDbAutoKeyName cdef) ++ " - " ++ show (thAutoKey def)
+      Left $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def) ++ ": " ++ show (thDbAutoKeyName cdef) ++ " - " ++ show (thAutoKey def)
 
   -- check that unique keys = [] for multiple constructor datatype
   if length constrs > 1 && not (null $ thUniqueKeys def)
-    then fail $ "Unique keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
+    then Left $ "Unique keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
     else -- check that all unique keys reference existing uniques
          let uniqueNames = map thUniqueName $ thConstrUniques $ head constrs
          in  forM_ (thUniqueKeys def) $ \cKey -> unless (thUniqueKeyName cKey `elem` uniqueNames) $
-             fail $ "Unique key mentions unknown unique: " ++ thUniqueKeyName cKey ++ " in datatype " ++ show (thDataName def)
+             Left $ "Unique key mentions unknown unique: " ++ thUniqueKeyName cKey ++ " in datatype " ++ show (thDataName def)
   let isPrimary x = case x of
             UniquePrimary _ -> True
             _ -> False
       primaryConstraints = length $ filter (isPrimary . thUniqueType) $ concatMap thConstrUniques constrs
   if length constrs > 1
     then when (primaryConstraints > 0) $
-           fail $ "Custom primary keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
+           Left $ "Custom primary keys may exist only for datatypes with single constructor: " ++ show (thDataName def)
     else when (primaryConstraints + maybe 0 (const 1) (thAutoKey def) > 1) $
-           fail $ "A datatype cannot have more than one primary key constraint: " ++ show (thDataName def)
+           Left $ "A datatype cannot have more than one primary key constraint: " ++ show (thDataName def)
   -- check that only one of the keys is default
   let keyDefaults = maybe id ((:) . thAutoKeyIsDef) (thAutoKey def) $ map thUniqueKeyIsDef (thUniqueKeys def)
   when (not (null keyDefaults) && length (filter id keyDefaults) /= 1) $
-    fail $ "A datatype with keys must have one default key: " ++ show (thDataName def)
+    Left $ "A datatype with keys must have one default key: " ++ show (thDataName def)
   return def
 
 validateField :: THFieldDef -> Either String ()
 validateField fDef = do
   assertSpaceFree (thExprName fDef) "field expr name"
   when (isJust (thDbTypeName fDef) && isJust (thEmbeddedDef fDef)) $
-    fail $ "A field may not have both type and embeddedType: " ++ show (thFieldName fDef)
+    Left $ "A field may not have both type and embeddedType: " ++ show (thFieldName fDef)
 
 validateEmbedded :: THEmbeddedDef -> Either String THEmbeddedDef
 validateEmbedded def = do

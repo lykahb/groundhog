@@ -35,7 +35,8 @@ import Database.Groundhog.Postgresql.Array (Array)
 import Database.PostgreSQL.Simple.HStore
 
 import Data.Aeson (Value)
-import qualified Blaze.ByteString.Builder as B
+import qualified Data.ByteString.Builder as B
+import qualified Data.ByteString.Lazy as B (toStrict)
 import Control.Applicative
 import qualified Data.Map as Map
 import Data.String
@@ -53,7 +54,7 @@ instance PersistField HStore where
   dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "hstore"]) False Nothing Nothing
 
 instance PrimitivePersistField HStore where
-  toPrimitivePersistValue (HStore a) = PersistCustom "E?::hstore" [toPrimitivePersistValue $ T.decodeUtf8 $ B.toByteString $ toBuilder (toHStore (HStoreMap a))]
+  toPrimitivePersistValue (HStore a) = PersistCustom "E?::hstore" [toPrimitivePersistValue $ T.decodeUtf8 $ B.toStrict $ toLazyByteString (toHStore (HStoreMap a))]
   fromPrimitivePersistValue x = case parseHStoreList $ fromPrimitivePersistValue x of
      Left err -> error $ "HStore: " ++ err
      Right (HStoreList val) -> HStore $ Map.fromList val

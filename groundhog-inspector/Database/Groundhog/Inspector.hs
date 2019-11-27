@@ -40,17 +40,13 @@ import qualified Data.Foldable as Fold
 import Data.Function (on)
 import Data.List (groupBy, elemIndex, isInfixOf, sort, sortBy)
 import Data.Map (Map)
+import Data.Monoid ((<>))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, mapMaybe)
-import Data.Monoid
 import qualified Data.Traversable as Traversable
 import Language.Haskell.TH
-#if MIN_VERSION_base(4, 7, 0)
 import Data.Bits (finiteBitSize)
-#else
-import Data.Bits (bitSize)
-#endif
 import Data.ByteString.Lazy (ByteString)
 import Data.Int (Int32, Int64)
 import Data.Time (Day, TimeOfDay, UTCTime)

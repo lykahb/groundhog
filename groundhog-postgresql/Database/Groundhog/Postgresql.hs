@@ -49,7 +49,6 @@ import Data.Int (Int64)
 import Data.IORef
 import Data.List (groupBy, intercalate, isPrefixOf, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust, mapMaybe)
-import Data.Monoid hiding ((<>))
 import Data.Pool
 import Data.Time.LocalTime (localTimeToUTC, utc)
 

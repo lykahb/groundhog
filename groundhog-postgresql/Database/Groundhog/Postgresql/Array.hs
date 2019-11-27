@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, OverloadedStrings, UndecidableInstances, OverlappingInstances, BangPatterns #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, OverloadedStrings, UndecidableInstances, BangPatterns #-}
 
 -- | See detailed documentation for PostgreSQL arrays at http://www.postgresql.org/docs/9.2/static/arrays.html and http://www.postgresql.org/docs/9.2/static/functions-array.html
 module Database.Groundhog.Postgresql.Array
@@ -29,8 +29,6 @@ import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql hiding (append)
 import Database.Groundhog.Postgresql hiding (append)
 
-import Blaze.ByteString.Builder (fromByteString, toByteString)
-import Blaze.ByteString.Builder.Word (fromWord8)
 import Control.Applicative
 import Control.Monad (mzero)
 import qualified Data.Aeson as A
@@ -39,7 +37,9 @@ import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Zepto as Z
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as B (toStrict)
 import qualified Data.ByteString.Unsafe as B
+import qualified Data.ByteString.Builder as B
 import Data.Monoid hiding ((<>))
 import Data.Word
 import qualified Data.Vector as V
@@ -71,10 +71,10 @@ arrayType p a = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"] where
 class ArrayElem a where
   parseElem :: Parser a
 
-instance ArrayElem a => ArrayElem (Array a) where
+instance {-# OVERLAPPABLE #-} ArrayElem a => ArrayElem (Array a) where
   parseElem = parseArr
 
-instance PrimitivePersistField a => ArrayElem a where
+instance {-# OVERLAPPABLE #-} PrimitivePersistField a => ArrayElem a where
   parseElem = fmap (fromPrimitivePersistValue . PersistByteString) parseString
 
 instance (ArrayElem a, PrimitivePersistField a) => PrimitivePersistField (Array a) where
@@ -107,7 +107,7 @@ jstring_ = {-# SCC "jstring_" #-} do
 
 -- Borrowed from aeson
 unescape :: Z.Parser ByteString
-unescape = toByteString <$> go mempty where
+unescape = B.toStrict <$> B.toLazyByteString <$> go mempty where
   go acc = do
     h <- Z.takeWhile (/=backslash)
     let rest = do
@@ -120,12 +120,12 @@ unescape = toByteString <$> go mempty where
           if slash /= backslash || escape == 255
             then fail "invalid array escape sequence"
             else do
-            let cont m = go (acc `mappend` fromByteString h `mappend` m)
+            let cont m = go (acc `mappend` B.byteString h `mappend` m)
                 {-# INLINE cont #-}
-            cont (fromWord8 escape)
+            cont (B.word8 escape)
     done <- Z.atEnd
     if done
-      then return (acc `mappend` fromByteString h)
+      then return (acc `mappend` B.byteString h)
       else rest
 
 doubleQuote, backslash :: Word8

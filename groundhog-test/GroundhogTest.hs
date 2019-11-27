@@ -74,8 +74,8 @@ import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
 import Control.Monad (liftM, forM_, unless)
 import Control.Monad.Catch (MonadCatch)
+import Control.Monad.Fail (MonadFail)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Logger (MonadLogger)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Control.Monad.Trans.Except (throwE)
@@ -101,21 +101,19 @@ import qualified Database.Groundhog.Postgresql.HStore as HStore
 import Database.Groundhog.MySQL
 #endif
 import qualified Data.Aeson as A
-import Data.ByteString.Char8 (unpack)
 import Data.Function (on)
 import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
 import Data.Maybe (fromMaybe, fromJust)
 import qualified Data.Map as Map
-import qualified Data.String.Utils as Utils
-import qualified Data.Text as Text
+import qualified Data.Text as TextStrict
+import qualified Data.Text.Lazy as Text
+import qualified Data.Text.Lazy.Builder as Text
 import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.Traversable as T
 import Data.Typeable (Typeable)
 import Data.Word
-import Test.Framework (defaultMain, testGroup, Test)
-import Test.Framework.Providers.HUnit
 import qualified Migration.Old as Old
 import qualified Migration.New as New
 import qualified Test.HUnit as H
@@ -398,13 +396,13 @@ testCond = do
   let (===) :: forall r a. (PrimitivePersistField a) => (String, [a]) -> Cond (Conn m) r -> m ()
       (query, vals) === cond = let
             Just (RenderS q v) = rend cond
-            equals = case backendName proxy of
+            equals = Text.pack $ case backendName proxy of
                "sqlite" -> " IS "
                "postgresql" -> " IS NOT DISTINCT FROM "
                "mysql" -> "<=>"
                _ -> "="
-            query' = Utils.replace " IS " equals query
-         in (query', map toPrimitivePersistValue vals) @=? (unpack $ fromUtf8 $ q, v [])
+            query' = Utf8 $ Text.fromLazyText $ Text.replace (Text.pack " IS ") equals $ Text.pack query
+         in (query', map toPrimitivePersistValue vals) @=? (q, v [])
 
   let intField f = f `asTypeOf` (undefined :: Field (Single (Int, Int)) c a)
       intNum = fromInteger :: Integer -> Expr db r Int
@@ -870,6 +868,7 @@ testJSON = do
 testTryAction :: ( MonadIO m
                  , MonadBaseControl IO m
                  , MonadCatch m
+                 , MonadFail m
                  , TryConnectionManager conn
                  , ConnectionManager conn
                  , PersistBackendConn conn
@@ -886,19 +885,19 @@ testTryAction c = do
   checkLeft result  -- should be (Left error)
 
   where
-    dbException :: (MonadIO m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
+    dbException :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     dbException = do
       let val = UniqueKeySample 1 2 (Just 3)
       migr val
       insert val
       insert val  -- should fail with uniqueness exception
 
-    throwException :: (MonadIO m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
+    throwException :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     throwException = do
       lift $ throwE TestException
       return ()
 
-    success :: (MonadIO m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
+    success :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     success = do
       return ()
 
@@ -1067,7 +1066,7 @@ testExpressionIndex = do
 
 testHStore :: (PersistBackend m, Conn m ~ Postgresql, MonadBaseControl IO m) => m ()
 testHStore = do
-  let val = Single (HStore.HStore $ Map.fromList [(Text.pack "k", Text.pack "v")])
+  let val = Single (HStore.HStore $ Map.fromList [(TextStrict.pack "k", TextStrict.pack "v")])
   migr val
   k <- insert val
   show (Just val) @=?? (liftM show $ get k) -- HStore does not have Eq, compare by show

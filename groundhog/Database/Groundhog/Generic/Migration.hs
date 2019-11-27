@@ -25,7 +25,6 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql (flatten, mainTableName, tableName)
 
-import Control.Applicative (Applicative)
 import Control.Arrow ((***), (&&&))
 import Control.Monad (liftM, when)
 import Control.Monad.Trans.Class (lift)

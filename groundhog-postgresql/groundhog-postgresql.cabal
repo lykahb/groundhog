@@ -20,7 +20,6 @@ library
                    , postgresql-simple        >= 0.3       && < 0.7
                    , postgresql-libpq         >= 0.6.1
                    , bytestring               >= 0.9
-                   , blaze-builder            >= 0.3       && < 0.5
                    , transformers             >= 0.2.1     && < 0.6
                    , groundhog                >= 0.10      && < 0.11
                    , monad-control            >= 0.3       && < 1.1
@@ -33,9 +32,6 @@ library
                    , vector                   >= 0.10     && < 0.13
                    , resourcet                >= 1.1.2
 
-    -- See https://prime.haskell.org/wiki/Libraries/Proposals/SemigroupMonoid#Writingcompatiblecode
-    if !impl(ghc >= 8.0)
-      build-depends: semigroups
 
     exposed-modules: Database.Groundhog.Postgresql
                      Database.Groundhog.Postgresql.Array
