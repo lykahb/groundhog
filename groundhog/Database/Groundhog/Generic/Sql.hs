@@ -27,6 +27,7 @@ module Database.Groundhog.Generic.Sql
     , RenderConfig(..)
     , StringLike(..)
     , fromString
+    , (<>)
     , function
     , operator
     , parens
@@ -44,7 +45,7 @@ import Database.Groundhog.Instances ()
 import qualified Data.Text.Lazy.Builder as B
 import Data.Maybe (mapMaybe, maybeToList)
 import Data.String
-import Data.Semigroup (Semigroup)
+import Data.Semigroup (Semigroup(..))
 
 import Database.Groundhog.Expression
 
