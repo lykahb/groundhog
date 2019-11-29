@@ -116,8 +116,6 @@ import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.Traversable as T
 import Data.Typeable (Typeable)
 import Data.Word
-import Test.Framework (defaultMain, testGroup, Test)
-import Test.Framework.Providers.HUnit
 import qualified Migration.Old as Old
 import qualified Migration.New as New
 import qualified Test.HUnit as H
@@ -405,8 +403,7 @@ testCond = do
                "postgresql" -> " IS NOT DISTINCT FROM "
                "mysql" -> "<=>"
                _ -> "="
-            query' = case q of
-              Utf8 queryText -> Utf8 $ Text.fromLazyText $ Text.replace (Text.pack " IS ") equals $ Text.toLazyText queryText
+            query' = Utf8 $ Text.fromLazyText $ Text.replace (Text.pack " IS ") equals $ Text.pack query
          in (query', map toPrimitivePersistValue vals) @=? (q, v [])
 
   let intField f = f `asTypeOf` (undefined :: Field (Single (Int, Int)) c a)

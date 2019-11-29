@@ -14,7 +14,6 @@ import Control.Monad (forM_)
 import Control.Monad.Fail (MonadFail)
 import Control.Monad.Catch (MonadCatch)
 import Control.Monad.IO.Class (MonadIO(..))
-import Control.Monad.Logger (MonadLogger)
 import Control.Monad.Trans.Control (MonadBaseControl)
 
 #if WITH_SQLITE
