@@ -108,7 +108,7 @@ import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
 import Data.Maybe (fromMaybe, fromJust)
 import qualified Data.Map as Map
--- import qualified Data.Text as Text
+import qualified Data.Text as TextStrict
 import qualified Data.Text.Lazy as Text
 import qualified Data.Text.Lazy.Builder as Text
 import qualified Data.Time as Time
@@ -1071,7 +1071,7 @@ testExpressionIndex = do
 
 testHStore :: (PersistBackend m, Conn m ~ Postgresql, MonadBaseControl IO m) => m ()
 testHStore = do
-  let val = Single (HStore.HStore $ Map.fromList [(Text.pack "k", Text.pack "v")])
+  let val = Single (HStore.HStore $ Map.fromList [(TextStrict.pack "k", TextStrict.pack "v")])
   migr val
   k <- insert val
   show (Just val) @=?? (liftM show $ get k) -- HStore does not have Eq, compare by show

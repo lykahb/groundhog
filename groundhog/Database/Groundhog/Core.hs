@@ -116,6 +116,7 @@ import Data.Text.Lazy.Encoding (encodeUtf8)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, zonedTimeToLocalTime, zonedTimeZone)
 import Data.String (IsString)
+import Data.Semigroup (Semigroup)
 import GHC.Exts (Constraint)
 
 -- | Only instances of this class can be persisted in a database
