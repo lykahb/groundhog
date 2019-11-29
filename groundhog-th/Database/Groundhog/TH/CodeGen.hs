@@ -229,7 +229,6 @@ mkAutoKeyPrimitivePersistFieldInstance def = case thAutoKey def of
     let context = paramsContext (thTypeParams def) (thConstructors def >>= thConstrFields)
     let decs = [toPrim', fromPrim']
     sequence [ return $ instanceD' context (AppT (ConT ''PrimitivePersistField) keyType) decs
-             , return $ instanceD' context (AppT (ConT ''NeverNull) keyType) []
              , mkDefaultPurePersistFieldInstance context keyType
              , mkDefaultSinglePersistFieldInstance context keyType]
   _ -> return []
@@ -321,7 +320,6 @@ mkUniqueKeysPrimitiveOrPurePersistFieldInstances def = do
         fromPrim' <- funD 'fromPrimitivePersistValue [clause [varP x] (normalB [| $(conE conName) (fromPrimitivePersistValue $(varE x)) |]) []]
         let decs = [toPrim', fromPrim']
         sequence [ return $ instanceD' context (AppT (ConT ''PrimitivePersistField) uniqKeyType) decs
-                 , return $ instanceD' context (AppT (ConT ''NeverNull) uniqKeyType) []
                  , mkDefaultPurePersistFieldInstance context uniqKeyType
                  , mkDefaultSinglePersistFieldInstance context uniqKeyType]
       else mkPurePersistFieldInstance uniqKeyType conName (thUniqueKeyFields unique) context

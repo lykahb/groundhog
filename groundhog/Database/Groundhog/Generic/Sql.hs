@@ -146,7 +146,7 @@ instance IsString (RenderS db r) where
 instance StringLike (RenderS db r) where
   fromChar c = RenderS (fromChar c) id
 
--- Has bad performance. This instance exists only for testing purposes
+-- Has bad performance. This instance exists for testing purposes and migration
 instance StringLike String where
   fromChar c = [c]
 
