@@ -23,11 +23,10 @@ module Database.Groundhog.Generic.Sql
     , flatten
     , RenderS(..)
     , Utf8(..)
-    , RenderConfig(..)
     , fromUtf8
+    , RenderConfig(..)
     , StringLike(..)
     , fromString
-    , (<>)
     , function
     , operator
     , parens
@@ -42,19 +41,14 @@ module Database.Groundhog.Generic.Sql
 import Database.Groundhog.Core
 import Database.Groundhog.Generic (isSimple)
 import Database.Groundhog.Instances ()
-import qualified Blaze.ByteString.Builder.Char.Utf8 as B
+import qualified Data.Text.Lazy.Builder as B
 import Data.Maybe (mapMaybe, maybeToList)
-#if !(MIN_VERSION_base(4,8,0))
-import Data.Monoid hiding ((<>))
-#endif
 import Data.String
 
 import Database.Groundhog.Expression
 
--- rely on semigroups package providing Semigroup prior to base-4.9
-import Data.Semigroup as Sem
 
-class (Sem.Semigroup a, Monoid a, IsString a) => StringLike a where
+class (Semigroup a, Monoid a, IsString a) => StringLike a where
   fromChar :: Char -> a
 
 data RenderS db r = RenderS {
@@ -62,20 +56,8 @@ data RenderS db r = RenderS {
   , getValues :: [PersistValue] -> [PersistValue]
 }
 
-instance Sem.Semigroup Utf8 where
-  (Utf8 a) <> (Utf8 b) = Utf8 (a <> b)
-
-instance Monoid Utf8 where
-  mempty = Utf8 mempty
-#if !(MIN_VERSION_base(4,11,0))
-  mappend = (<>)
-#endif
-
-instance IsString Utf8 where
-  fromString = Utf8 . B.fromString
-
 instance StringLike Utf8 where
-  fromChar = Utf8 . B.fromChar
+  fromChar = Utf8 . B.singleton
 
 -- | Escape function, priority of the outer operator. The result is a list for the embedded data which may expand to several RenderS.
 newtype Snippet db r = Snippet (RenderConfig -> Int -> [RenderS db r])
@@ -147,7 +129,7 @@ renderPersistValue :: PersistValue -> RenderS db r
 renderPersistValue (PersistCustom s as) = RenderS s (as++)
 renderPersistValue a = RenderS (fromChar '?') (a:)
 
-instance Sem.Semigroup (RenderS db r) where
+instance Semigroup (RenderS db r) where
   (RenderS f1 g1) <> (RenderS f2 g2) = RenderS (f1 <> f2) (g1 . g2)
 
 instance Monoid (RenderS db r) where
@@ -182,11 +164,6 @@ mkExpr snippet = Expr $ ExprRaw typ snippet where
   proxy = undefined :: proxy db
   typ = dbType proxy (undefined :: a)
 
-#if !MIN_VERSION_base(4, 5, 0)
-{-# INLINABLE (<>) #-}
-(<>) :: Monoid m => m -> m -> m
-(<>) = mappend
-#endif
 
 {-# INLINABLE renderCond #-}
 -- | Renders conditions for SQL backend. Returns Nothing if the fields don't have any columns.

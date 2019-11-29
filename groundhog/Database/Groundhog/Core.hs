@@ -25,7 +25,7 @@ module Database.Groundhog.Core
   , UniqueMarker
   , HFalse
   , HTrue
-  , ZT (..) -- ZonedTime wrapper
+  , ZT(..) -- ZonedTime wrapper
   , Utf8(..)
   , fromUtf8
   , delim
@@ -97,9 +97,8 @@ module Database.Groundhog.Core
   , runDbConn'
   ) where
 
-import Blaze.ByteString.Builder (Builder, fromByteString, toByteString)
-import Control.Applicative (Applicative)
 import Control.Exception.Safe (MonadCatch, SomeException(..), Exception, tryAny)
+import Control.Monad.Fail (MonadFail)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Trans.Control (MonadBaseControl (..))
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
@@ -108,11 +107,15 @@ import Control.Monad.Trans.State (StateT(..))
 import Control.Monad.Reader (MonadReader(..))
 import Data.Acquire (Acquire)
 import Data.ByteString.Char8 (ByteString)
+import Data.ByteString.Lazy (toStrict)
 import Data.Int (Int64)
 import Data.Map (Map)
 import Data.Text (Text)
+import Data.Text.Lazy.Builder (Builder, fromText, toLazyText)
+import Data.Text.Lazy.Encoding (encodeUtf8)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, zonedTimeToLocalTime, zonedTimeZone)
+import Data.String (IsString)
 import GHC.Exts (Constraint)
 
 -- | Only instances of this class can be persisted in a database
@@ -473,17 +476,14 @@ data EmbeddedDef' str dbType = EmbeddedDef Bool [(str, dbType)] deriving (Eq, Sh
 
 type EmbeddedDef = EmbeddedDef' String DbType
 
--- | Datatype for incremental building SQL queries
 newtype Utf8 = Utf8 Builder
-instance Eq Utf8 where
-  a == b = fromUtf8 a == fromUtf8 b
-instance Show Utf8 where
-  show = show . fromUtf8
-instance Read Utf8 where
-  readsPrec prec str = map (\(a, b) -> (Utf8 $ fromByteString a, b)) $ readsPrec prec str
+  deriving (Eq, Ord, Show, Semigroup, Monoid, IsString)
 
 fromUtf8 :: Utf8 -> ByteString
-fromUtf8 (Utf8 a) = toByteString a
+fromUtf8 (Utf8 s) = toStrict $ encodeUtf8 $ toLazyText s
+
+instance Read Utf8 where
+  readsPrec prec str = map (\(a, b) -> (Utf8 $ fromText a, b)) $ readsPrec prec str
 
 -- | A raw value which can be stored in any backend and can be marshalled to
 -- and from a 'PersistField'.

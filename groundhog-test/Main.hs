@@ -11,6 +11,7 @@ import Test.Framework (defaultMain, testGroup, Test)
 import Test.Framework.Providers.HUnit (testCase)
 
 import Control.Monad (forM_)
+import Control.Monad.Fail (MonadFail)
 import Control.Monad.Catch (MonadCatch)
 import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Logger (MonadLogger)
@@ -135,6 +136,7 @@ mkTryTestSuite :: ( ExtractConnection conn conn
                   , PersistBackendConn conn
                   , TryConnectionManager conn
                   , MonadCatch m
+                  , MonadFail m
                   , MonadBaseControl IO m
                   , MonadIO m)
                => ((conn -> m ()) -> IO ()) -> [Test]
