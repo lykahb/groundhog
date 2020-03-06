@@ -44,7 +44,7 @@ import Language.Haskell.TH.Quote
 import Control.Applicative
 import Control.Monad (forM, forM_, when, unless, liftM2)
 import Data.Char (isUpper, isLower, isSpace, isDigit, toUpper, toLower)
-import Data.List (nub, (\\))
+import Data.List (nub, (\\), intercalate)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.String
 import Data.Text.Encoding (encodeUtf8)
@@ -197,6 +197,7 @@ lowerCaseSuffixNamingStyle = suffixNamingStyle {
 -- The datatypes and their generation options are defined via YAML configuration parsed by quasiquoter 'groundhog'.
 mkPersist :: CodegenConfig -> PersistDefinitions -> Q [Dec]
 mkPersist CodegenConfig{..} PersistDefinitions{..} = do
+  checkEnabledLanguageExtensions
   let duplicates = notUniqueBy id $
         map psDataName psEntities ++ map psEmbeddedName psEmbeddeds ++ map psPrimitiveName psPrimitives
   unless (null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
@@ -600,6 +601,25 @@ parseDefinitions s = do
       _ -> fail $ show err
     Right (_, Left err) -> fail err
     Right (_, Right result') -> lift (result' :: PersistDefinitions)
+
+checkEnabledLanguageExtensions :: Q ()
+checkEnabledLanguageExtensions = do
+  exts <- extsEnabled
+  let missingExtensions = map show (requiredLanguageExtensions \\ exts)
+  unless (null missingExtensions)
+    $ fail
+    $ "Groundhog requires that you enable additionally the following language extensions: "
+    <> intercalate ", " missingExtensions
+
+requiredLanguageExtensions :: [Extension]
+requiredLanguageExtensions =
+  [ GADTs
+  , TypeFamilies
+  , TemplateHaskell
+  , QuasiQuotes
+  , FlexibleInstances
+  , StandaloneDeriving
+  ]
 
 defaultMkEntityDecs :: [THEntityDef] -> Q [Dec]
 defaultMkEntityDecs = fmap concat . mapM (\def -> do
