@@ -609,7 +609,7 @@ checkEnabledLanguageExtensions = do
   unless (null missingExtensions)
     $ fail
     $ "Groundhog requires that you enable additionally the following language extensions: "
-    <> intercalate ", " missingExtensions
+    ++ intercalate ", " missingExtensions
 
 requiredLanguageExtensions :: [Extension]
 requiredLanguageExtensions =
