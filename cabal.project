@@ -1,0 +1,11 @@
+packages:
+  ./examples/
+  ./groundhog/
+  ./groundhog-inspector/
+  ./groundhog-postgresql/
+  ./groundhog-sqlite/
+  ./groundhog-th/
+  ./groundhog-test/
+
+constraints:
+  groundhog-test +mysql +sqlite +postgresql
