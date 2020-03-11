@@ -618,7 +618,6 @@ requiredLanguageExtensions =
   , TemplateHaskell
   , QuasiQuotes
   , FlexibleInstances
-  , StandaloneDeriving
   ]
 
 defaultMkEntityDecs :: [THEntityDef] -> Q [Dec]
