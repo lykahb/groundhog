@@ -9,35 +9,35 @@ addons:
   apt:
     packages:
     - libgmp-dev
-  postgresql: "12.2"
 
 services:
 - mysql
+- postgresql
 
 matrix:
   include:
-  - env: STACK_YAML="stack-ghc-8.0.yaml"
+  - env: GHC-VER=8.0.2 STACK_YAML="stack-ghc-8.0.yaml"
     addons:
       apt:
         sources:
           - hvr-ghc
         packages:
           - ghc-8.0.2
-  - env: STACK_YAML="stack-ghc-8.2.yaml"
+  - env: GHC-VER=8.2.2 STACK_YAML="stack-ghc-8.2.yaml"
     addons:
       apt:
         sources:
           - hvr-ghc
         packages:
           - ghc-8.2.2
-  - env: STACK_YAML="stack-ghc-8.4.yaml"
+  - env: GHC-VER=8.4.3 STACK_YAML="stack-ghc-8.4.yaml"
     addons:
       apt:
         sources:
           - hvr-ghc
         packages:
           - ghc-8.4.3
-  - env: STACK_YAML="stack-ghc-8.6.yaml"
+  - env: GHC-VER=8.6 STACK_YAML="stack-ghc-8.6.yaml"
     addons:
       apt:
         sources:
@@ -45,7 +45,7 @@ matrix:
         packages:
           - ghc-8.6
   # ghc-8.8
-  - env: STACK_YAML="stack-ghc-8.8.yaml"
+  - env: GHC-VER=8.8.3 STACK_YAML="stack-ghc-8.8.yaml"
     addons:
       apt:
         sources:
@@ -58,6 +58,7 @@ before_install:
 # Download and unpack the stack executable
 - mkdir -p ~/.local/bin
 - export PATH=$HOME/.local/bin:$PATH
+- export PATH=/opt/ghc/$GHCVER/bin:$PATH
 - travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
 
 before_script:
