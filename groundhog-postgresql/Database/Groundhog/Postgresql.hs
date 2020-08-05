@@ -373,7 +373,7 @@ migTriggerOnDelete tName deletes = do
             else [DropFunction funcName, addFunction]
         _ -> [] -- ignore same name functions which don't return a trigger.
 
-      trigBody = "EXECUTE PROCEDURE " ++ withSchema funcName ++ "()"
+      trigBody = "EXECUTE FUNCTION " ++ withSchema funcName ++ "()"
       addTrigger = AddTriggerOnDelete trigName tName trigBody
       (trigExisted, trigMig) = case trig of
         Nothing | null deletes -> (False, [])
@@ -404,7 +404,7 @@ migTriggerOnUpdate tName dels = forM dels $ \(fieldName, del) -> do
             else [DropFunction funcName, addFunction]
         _ -> []
 
-      trigBody = "EXECUTE PROCEDURE " ++ withSchema funcName ++ "()"
+      trigBody = "EXECUTE FUNCTION " ++ withSchema funcName ++ "()"
       addTrigger = AddTriggerOnUpdate trigName tName (Just fieldName) trigBody
       (trigExisted, trigMig) = case trig of
         Nothing   -> (False, [addTrigger])
