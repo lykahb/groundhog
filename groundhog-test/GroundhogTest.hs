@@ -1033,14 +1033,15 @@ testSchemaAnalysisPostgresql :: (PersistBackend m, Conn m ~ Postgresql) => m ()
 testSchemaAnalysisPostgresql = do
   let val = Single (Single "abc")
   migr val
-  let action = "EXECUTE FUNCTION \"myFunction\"()"
+  let action = "EXECUTE PROCEDURE \"myFunction\"()"
   executeRaw False "CREATE OR REPLACE FUNCTION \"myFunction\"() RETURNS trigger AS $$ BEGIN RETURN NEW;END; $$ LANGUAGE plpgsql" []
   executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW " ++ action) []
   ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
   ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
   trigSql <- analyzeTrigger (Nothing, "myTrigger")
   let trigSql' = maybe (error "No trigger found") id trigSql
-  liftIO $ action `isInfixOf` trigSql' H.@? "Trigger does not contain action statement"
+  -- use function name instead of action because Postgres 11 returns different action with "EXECUTE FUNCTION"
+  liftIO $ "\"myFunction\"()" `isInfixOf` trigSql' H.@? "Trigger does not contain action statement"
   func <- analyzeFunction (Nothing, "myFunction")
   let (args, ret, body) = fromMaybe (error "No function found") func
   Just [] @=? args

@@ -373,14 +373,16 @@ migTriggerOnDelete tName deletes = do
             else [DropFunction funcName, addFunction]
         _ -> [] -- ignore same name functions which don't return a trigger.
 
-      trigBody = "EXECUTE FUNCTION " ++ withSchema funcName ++ "()"
+      trigBody = "EXECUTE PROCEDURE " ++ withSchema funcName ++ "()"
+      -- starting from version 11 postgresql returns EXECUTE FUNCTION
+      trigBody11 = "EXECUTE FUNCTION " ++ withSchema funcName ++ "()"
       addTrigger = AddTriggerOnDelete trigName tName trigBody
       (trigExisted, trigMig) = case trig of
         Nothing | null deletes -> (False, [])
         Nothing   -> (False, [addTrigger])
         Just body -> (True, if null deletes -- remove old trigger if a datatype earlier had fields of ephemeral types
           then [DropTrigger trigName tName]
-          else if body == trigBody
+          else if body == trigBody || body == trigBody11
             then []
             -- this can happen when an ephemeral field was added or removed.
             else [DropTrigger trigName tName, addTrigger])
@@ -404,11 +406,13 @@ migTriggerOnUpdate tName dels = forM dels $ \(fieldName, del) -> do
             else [DropFunction funcName, addFunction]
         _ -> []
 
-      trigBody = "EXECUTE FUNCTION " ++ withSchema funcName ++ "()"
+      trigBody = "EXECUTE PROCEDURE " ++ withSchema funcName ++ "()"
+      -- starting from version 11 postgresql returns EXECUTE FUNCTION
+      trigBody11 = "EXECUTE FUNCTION " ++ withSchema funcName ++ "()"
       addTrigger = AddTriggerOnUpdate trigName tName (Just fieldName) trigBody
       (trigExisted, trigMig) = case trig of
         Nothing   -> (False, [addTrigger])
-        Just body -> (True, if body == trigBody
+        Just body -> (True, if body == trigBody || body == trigBody11
             then []
             -- this can happen when an ephemeral field was added or removed.
             else [DropTrigger trigName tName, addTrigger])

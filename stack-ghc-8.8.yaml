@@ -13,4 +13,5 @@ packages:
 - groundhog-th/
 - groundhog-test/
 extra-deps:
+- direct-sqlite-2.3.26
 resolver: lts-16.8
