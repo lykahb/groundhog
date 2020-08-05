@@ -1,6 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -61,7 +62,7 @@ where
 
 import Control.Applicative ((<|>))
 import qualified Control.Exception as E
-import Control.Monad (forM_, liftM, unless)
+import Control.Monad (forM_, unless)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Control (MonadBaseControl, control, restoreM)
 import Control.Monad.Trans.Reader (ReaderT (..), ask, runReaderT)
@@ -78,7 +79,7 @@ import System.IO (hPutStrLn, stderr)
 
 -- | Produce the migrations but not execute them. Fails when an unsafe migration occurs.
 createMigration :: Monad m => Migration m -> m NamedMigrations
-createMigration m = liftM snd $ runStateT m Map.empty
+createMigration m = snd <$> runStateT m Map.empty
 
 -- | Returns either a list of errors in migration or a list of queries
 getQueries ::
@@ -88,15 +89,14 @@ getQueries ::
   Either [String] [String]
 getQueries _ (Left errs) = Left errs
 getQueries runUnsafe (Right migs) =
-  ( if runUnsafe || null unsafe
-      then Right $ map (\(_, _, query) -> query) migs'
-      else
-        Left $
-          [ "Database migration: manual intervention required.",
-            "The following actions are considered unsafe:"
-          ]
-            ++ map (\(_, _, query) -> query) unsafe
-  )
+  if runUnsafe || null unsafe
+    then Right $ map (\(_, _, query) -> query) migs'
+    else
+      Left $
+        [ "Database migration: manual intervention required.",
+          "The following actions are considered unsafe:"
+        ]
+          ++ map (\(_, _, query) -> query) unsafe
   where
     migs' = sortBy (compare `on` \(_, i, _) -> i) migs
     unsafe = filter (\(isUnsafe, _, _) -> isUnsafe) migs'
@@ -215,10 +215,9 @@ applyDbTypeSettings (PSFieldDef _ _ dbTypeName _ Nothing def psRef _) typ = case
   DbEmbedded emb ref -> DbEmbedded emb (applyReferencesSettings psRef ref)
   t -> t
 applyDbTypeSettings (PSFieldDef _ _ _ _ (Just subs) _ psRef _) typ =
-  ( case typ of
-      DbEmbedded (EmbeddedDef _ fields) ref -> DbEmbedded (uncurry EmbeddedDef $ go subs fields) (applyReferencesSettings psRef ref)
-      t -> error $ "applyDbTypeSettings: expected DbEmbedded, got " ++ show t
-  )
+  case typ of
+    DbEmbedded (EmbeddedDef _ fields) ref -> DbEmbedded (uncurry EmbeddedDef $ go subs fields) (applyReferencesSettings psRef ref)
+    t -> error $ "applyDbTypeSettings: expected DbEmbedded, got " ++ show t
   where
     go [] fs = (False, fs)
     go st [] = error $ "applyDbTypeSettings: embedded datatype does not have expected fields: " ++ show st
@@ -235,7 +234,7 @@ applyReferencesSettings :: Maybe (Maybe ((Maybe String, String), [String]), Mayb
 applyReferencesSettings Nothing ref = ref
 applyReferencesSettings (Just (parent, onDel, onUpd)) (Just (parent', onDel', onUpd')) = Just (maybe parent' Right parent, onDel <|> onDel', onUpd <|> onUpd')
 applyReferencesSettings (Just (Just parent, onDel, onUpd)) Nothing = Just (Right parent, onDel, onUpd)
-applyReferencesSettings _ Nothing = error $ "applyReferencesSettings: expected type with reference, got Nothing"
+applyReferencesSettings _ Nothing = error "applyReferencesSettings: expected type with reference, got Nothing"
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
 primToPersistValue a = return (toPrimitivePersistValue a :)
@@ -357,21 +356,21 @@ firstRow s = liftIO $ with s id
 streamToList :: MonadIO m => RowStream a -> m [a]
 streamToList s = liftIO $ with s go
   where
-    go next = next >>= maybe (return []) (\a -> liftM (a :) (go next))
+    go next = next >>= maybe (return []) (\a -> fmap (a :) (go next))
 
 mapStream :: PersistBackendConn conn => (a -> Action conn b) -> RowStream a -> Action conn (RowStream b)
 mapStream f s = do
   conn <- ask
   let apply next =
-        next >>= \a -> case a of
+        next >>= \case
           Nothing -> return Nothing
-          Just a' -> liftM Just $ runReaderT (f a') conn
+          Just a' -> Just <$> runReaderT (f a') conn
   return $ fmap apply s
 
 joinStreams :: [Action conn (RowStream a)] -> Action conn (RowStream a)
 joinStreams streams = do
   conn <- ask
-  var <- liftIO $ newIORef $ ((return Nothing, const $ return ()), streams)
+  var <- liftIO $ newIORef ((return Nothing, const $ return ()), streams)
   return $
     Acquire $ \restore -> do
       let joinedNext = do

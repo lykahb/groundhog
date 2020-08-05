@@ -50,4 +50,4 @@ instance MonadBase IO MyMonad where
 
 instance PersistBackend MyMonad where
   type Conn MyMonad = Sqlite
-  getConnection = liftM getConnPool ask
+  getConnection = asks getConnPool

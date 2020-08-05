@@ -35,7 +35,7 @@ do
   -- Use mapping configuration to generate mapping declarations
   mappingDecs <- defaultMkEntityDecs thEntities
   migrateFunction <- mkMigrateFunction "migrateAll" thEntities
-  return $ concat (map (uncurry (:)) $ Map.elems decs) ++ mappingDecs ++ migrateFunction
+  return $ (concatMap (uncurry (:)) $ Map.elems decs) ++ mappingDecs ++ migrateFunction
 
 deriving instance Show Customer
 

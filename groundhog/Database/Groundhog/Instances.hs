@@ -4,7 +4,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -16,6 +15,8 @@ import qualified Data.ByteString.Base64 as B64
 import Data.ByteString.Char8 (ByteString, unpack)
 import qualified Data.ByteString.Lazy.Char8 as Lazy
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.Maybe (fromMaybe)
+import qualified Data.Scientific
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
@@ -25,8 +26,6 @@ import Data.Time.LocalTime (ZonedTime, utc, utcToZonedTime, zonedTimeToUTC)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Database.Groundhog.Core
 import Database.Groundhog.Generic (getUniqueFields, primFromPersistValue, primFromPurePersistValues, primFromSinglePersistValue, primToPersistValue, primToPurePersistValues, primToSinglePersistValue)
-
-import qualified Data.Scientific
 
 instance (PersistField a', PersistField b') => Embedded (a', b') where
   data Selector (a', b') constr where
@@ -586,7 +585,7 @@ instance EntityConstr v c => Projection (c (ConstructorMarker v)) v where
   type ProjectionRestriction (c (ConstructorMarker v)) r = r ~ RestrictionHolder v c
   projectionExprs c = result
     where
-      result = ((map ExprField chains) ++)
+      result = (map ExprField chains ++)
       chains = map (\f -> (f, [])) $ constrParams constr
       e = entityDef db ((undefined :: c (ConstructorMarker v) -> v) c)
       cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
@@ -604,7 +603,7 @@ instance
   type ProjectionRestriction (u (UniqueMarker v)) (RestrictionHolder v' c) = v ~ v'
   projectionExprs u = result
     where
-      result = ((map ExprField chains) ++)
+      result = (map ExprField chains ++)
       uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
       chains = map (\f -> (f, [])) $ getUniqueFields uDef
       constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
@@ -666,7 +665,7 @@ instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) a whe
     where
       chain = ((name, dbType db k), [])
       -- if it is Nothing, the name would not be used because the type will be () with no columns
-      name = maybe "will_be_ignored" id $ constrAutoKeyName $ constructors e !! cNum
+      name = fromMaybe "will_be_ignored" $ constrAutoKeyName $ constructors e !! cNum
       k = (undefined :: AutoKeyField v c -> AutoKey v) a
 
       e = entityDef db ((undefined :: AutoKeyField v c -> v) a)
@@ -708,7 +707,7 @@ instance A.FromJSON PersistValue where
         then PersistInt64 $ floor n
         else PersistDouble $ fromRational $ toRational n
   parseJSON (A.Bool b) = return $ PersistBool b
-  parseJSON A.Null = return $ PersistNull
+  parseJSON A.Null = return PersistNull
   parseJSON a = fail $ "parseJSON PersistValue: unexpected " ++ show a
 
 instance A.ToJSON PersistValue where
@@ -728,7 +727,7 @@ instance A.ToJSON PersistValue where
   toJSON a@(PersistCustom _ _) = error $ "toJSON: unexpected " ++ show a
 
 instance Read (Key v u) => A.FromJSON (Key v u) where
-  parseJSON a = fmap read $ A.parseJSON a
+  parseJSON a = read <$> A.parseJSON a
 
 instance Show (Key v u) => A.ToJSON (Key v u) where
   toJSON k = A.toJSON $ show k

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -191,19 +192,19 @@ data PSAutoKeyDef = PSAutoKeyDef
   deriving (Eq, Show)
 
 instance Lift PSPrimitiveDef where
-  lift (PSPrimitiveDef {..}) = [|PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveConverter)|]
+  lift PSPrimitiveDef {..} = [|PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveConverter)|]
 
 instance Lift PersistDefinitions where
-  lift (PersistDefinitions {..}) = [|PersistDefinitions $(lift psEntities) $(lift psEmbeddeds) $(lift psPrimitives)|]
+  lift PersistDefinitions {..} = [|PersistDefinitions $(lift psEntities) $(lift psEmbeddeds) $(lift psPrimitives)|]
 
 instance Lift PSEntityDef where
-  lift (PSEntityDef {..}) = [|PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psEntitySchema) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors)|]
+  lift PSEntityDef {..} = [|PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psEntitySchema) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors)|]
 
 instance Lift PSEmbeddedDef where
-  lift (PSEmbeddedDef {..}) = [|PSEmbeddedDef $(lift psEmbeddedName) $(lift psDbEmbeddedName) $(lift psEmbeddedFields)|]
+  lift PSEmbeddedDef {..} = [|PSEmbeddedDef $(lift psEmbeddedName) $(lift psDbEmbeddedName) $(lift psEmbeddedFields)|]
 
 instance Lift PSConstructorDef where
-  lift (PSConstructorDef {..}) = [|PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psDbAutoKeyName) $(lift psConstrFields) $(lift psConstrUniques)|]
+  lift PSConstructorDef {..} = [|PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psDbAutoKeyName) $(lift psConstrFields) $(lift psConstrUniques)|]
 
 instance Lift PSUniqueDef where
   lift (PSUniqueDef name typ fields) = [|PSUniqueDef $(lift name) $(lift typ) $(lift fields)|]
@@ -221,13 +222,13 @@ instance Lift ReferenceActionType where
   lift SetDefault = [|SetDefault|]
 
 instance Lift (PSFieldDef String) where
-  lift (PSFieldDef {..}) = [|PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) $(lift psFieldConverter)|]
+  lift PSFieldDef {..} = [|PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) $(lift psFieldConverter)|]
 
 instance Lift PSUniqueKeyDef where
-  lift (PSUniqueKeyDef {..}) = [|PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef)|]
+  lift PSUniqueKeyDef {..} = [|PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef)|]
 
 instance Lift PSAutoKeyDef where
-  lift (PSAutoKeyDef {..}) = [|PSAutoKeyDef $(lift psAutoKeyConstrName) $(lift psAutoKeyIsDef)|]
+  lift PSAutoKeyDef {..} = [|PSAutoKeyDef $(lift psAutoKeyConstrName) $(lift psAutoKeyIsDef)|]
 
 instance FromJSON PersistDefinitions where
   {- it allows omitting parts of the settings file. All these forms are possible:
@@ -239,19 +240,18 @@ instance FromJSON PersistDefinitions where
           entity: name
   -}
   parseJSON value =
-    ( case value of
-        Object v -> do
-          defs <- v .:? "definitions"
-          case defs of
-            Just (Array arr) -> Fold.foldrM go initial arr
-            Nothing -> go value initial
-            Just _ -> mzero
-        Array arr -> Fold.foldrM go initial arr
-        _ -> mzero
-    )
+    case value of
+      Object v -> do
+        defs <- v .:? "definitions"
+        case defs of
+          Just (Array arr) -> Fold.foldrM go initial arr
+          Nothing -> go value initial
+          Just _ -> mzero
+      Array arr -> Fold.foldrM go initial arr
+      _ -> mzero
     where
       initial = PersistDefinitions [] [] []
-      go obj p@(PersistDefinitions {..}) = flip (withObject "definition") obj $ \v -> case () of
+      go obj p@PersistDefinitions {..} = flip (withObject "definition") obj $ \v -> case () of
         _ | H.member "entity" v -> (\x -> p {psEntities = x : psEntities}) <$> parseJSON obj
         _ | H.member "embedded" v -> (\x -> p {psEmbeddeds = x : psEmbeddeds}) <$> parseJSON obj
         _ | H.member "primitive" v -> (\x -> p {psPrimitives = x : psPrimitives}) <$> parseJSON obj
@@ -277,7 +277,7 @@ instance FromJSON PSConstructorDef where
 instance FromJSON PSUniqueDef where
   parseJSON = withObject "unique" $ \v -> do
     fields <- v .: "fields"
-    fields' <- forM fields $ \f -> case f of
+    fields' <- forM fields $ \case
       Object expr -> Right <$> expr .: "expr"
       field -> Left <$> parseJSON field
     PSUniqueDef <$> v .: "name" <*> v .:? "type" <*> pure fields'

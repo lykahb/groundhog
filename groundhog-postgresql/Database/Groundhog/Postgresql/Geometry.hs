@@ -62,7 +62,7 @@ data Path
   | OpenPath [Point]
   deriving (Eq, Show)
 
-data Polygon = Polygon [Point] deriving (Eq, Show)
+newtype Polygon = Polygon [Point] deriving (Eq, Show)
 
 data Circle = Circle Point Double deriving (Eq, Show)
 
@@ -89,7 +89,7 @@ instance PersistField Point where
   persistName _ = "Point"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "point"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "point"]) False Nothing Nothing
 
 instance PrimitivePersistField Line where
   toPrimitivePersistValue (Line (Point x1 y1) (Point x2 y2)) = toPrimitivePersistValue $ show ((x1, y1), (x2, y2))
@@ -99,7 +99,7 @@ instance PersistField Line where
   persistName _ = "Line"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "line"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "line"]) False Nothing Nothing
 
 instance PrimitivePersistField Lseg where
   toPrimitivePersistValue (Lseg (Point x1 y1) (Point x2 y2)) = toPrimitivePersistValue $ show ((x1, y1), (x2, y2))
@@ -109,7 +109,7 @@ instance PersistField Lseg where
   persistName _ = "Lseg"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "lseg"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "lseg"]) False Nothing Nothing
 
 instance PrimitivePersistField Box where
   toPrimitivePersistValue (Box (Point x1 y1) (Point x2 y2)) = toPrimitivePersistValue $ show ((x1, y1), (x2, y2))
@@ -119,7 +119,7 @@ instance PersistField Box where
   persistName _ = "Box"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "box"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "box"]) False Nothing Nothing
 
 showPath :: Char -> Char -> [Point] -> ShowS
 showPath open close [] s = open : close : s
@@ -143,7 +143,7 @@ instance PersistField Path where
   persistName _ = "Path"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "path"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "path"]) False Nothing Nothing
 
 instance PrimitivePersistField Polygon where
   toPrimitivePersistValue (Polygon ps) = toPrimitivePersistValue $ showPath '(' ')' ps ""
@@ -153,7 +153,7 @@ instance PersistField Polygon where
   persistName _ = "Polygon"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "polygon"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "polygon"]) False Nothing Nothing
 
 instance PrimitivePersistField Circle where
   toPrimitivePersistValue (Circle (Point x1 y1) r) = toPrimitivePersistValue $ show ((x1, y1), r)
@@ -163,7 +163,7 @@ instance PersistField Circle where
   persistName _ = "Circle"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "circle"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "circle"]) False Nothing Nothing
 
 class BoxLineLseg a
 

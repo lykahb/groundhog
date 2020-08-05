@@ -38,7 +38,7 @@ migration = runMigration $ do
   migrate (undefined :: Customer)
 
 insertCustomer :: (MonadIO m, PersistBackendConn conn) => Customer -> TryAction TestException m conn (Key Customer BackendSpecific)
-insertCustomer c = insert c
+insertCustomer = insert
 
 insertFails :: (MonadIO m, PersistBackendConn conn) => TryAction TestException m conn (Key Customer BackendSpecific)
 insertFails = do

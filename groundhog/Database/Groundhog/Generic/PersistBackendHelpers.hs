@@ -29,9 +29,8 @@ module Database.Groundhog.Generic.PersistBackendHelpers
   )
 where
 
-import Control.Monad (liftM)
 import Data.Either (rights)
-import Data.Maybe (catMaybes, fromJust, mapMaybe)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, mapMaybe)
 import Database.Groundhog.Core (PersistBackendConn)
 import Database.Groundhog.Core hiding (PersistBackendConn (..))
 import qualified Database.Groundhog.Core as Core
@@ -55,7 +54,7 @@ get RenderConfig {..} queryFunc (k :: Key v BackendSpecific) = do
       let query = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> " WHERE " <> fromJust (constrId esc constr) <> "=?"
       x <- queryFunc query [toPrimitivePersistValue k] >>= firstRow
       case x of
-        Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0 : xs
+        Just xs -> fmap (Just . fst) $ fromEntityPersistValues $ PersistInt64 0 : xs
         Nothing -> return Nothing
     else do
       let query = "SELECT discr FROM " <> mainTableName esc e <> " WHERE id=?"
@@ -68,7 +67,7 @@ get RenderConfig {..} queryFunc (k :: Key v BackendSpecific) = do
               cQuery = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> " WHERE " <> fromJust (constrId esc constr) <> "=?"
           x2 <- queryFunc cQuery [toPrimitivePersistValue k] >>= firstRow
           case x2 of
-            Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ discr : xs
+            Just xs -> fmap (Just . fst) $ fromEntityPersistValues $ discr : xs
             Nothing -> fail "Missing entry in constructor table"
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
         Nothing -> return Nothing
@@ -110,7 +109,7 @@ selectStream conf@RenderConfig {..} queryFunc preColumns noLimit options = doSel
     distinctClause = if dist then "DISTINCT " else mempty
     RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
     whereClause = maybe "" (" WHERE " <>) cond'
-    doSelectQuery = queryFunc query (binds []) >>= mapStream (\xs -> liftM fst $ fromEntityPersistValues $ (toPrimitivePersistValue cNum) : xs)
+    doSelectQuery = queryFunc query (binds []) >>= mapStream (\xs -> fmap fst $ fromEntityPersistValues $ toPrimitivePersistValue cNum : xs)
     cNum = entityConstrNum (undefined :: proxy v) (undefined :: c a)
     constr = constructors e !! cNum
 
@@ -163,7 +162,7 @@ getBy conf@RenderConfig {..} queryFunc (k :: Key v (Unique u)) = do
       query = "SELECT " <> fields <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
   x <- queryFunc query (vals []) >>= firstRow
   case x of
-    Just xs -> liftM (Just . fst) $ fromEntityPersistValues $ PersistInt64 0 : xs
+    Just xs -> fmap (Just . fst) $ fromEntityPersistValues $ PersistInt64 0 : xs
     Nothing -> return Nothing
 
 project ::
@@ -205,7 +204,7 @@ projectStream conf@RenderConfig {..} queryFunc preColumns noLimit p options = do
     distinctClause = if dist then "DISTINCT " else mempty
     RenderS query binds = "SELECT " <> distinctClause <> preColumns options <> fields <> " FROM " <> RenderS (tableName esc e constr) id <> whereClause <> orders <> lim
     whereClause = maybe "" (" WHERE " <>) cond'
-    doSelectQuery = queryFunc query (binds []) >>= mapStream (liftM fst . projectionResult p)
+    doSelectQuery = queryFunc query (binds []) >>= mapStream (fmap fst . projectionResult p)
     constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
 
 count ::
@@ -220,13 +219,14 @@ count conf@RenderConfig {..} queryFunc cond = do
       proxy = undefined :: proxy conn
       cond' = renderCond conf cond
       constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
-      query = "SELECT COUNT(*) FROM " <> tableName esc e constr <> whereClause where
-      whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
-  x <- queryFunc query (maybe [] (flip getValues []) cond') >>= firstRow
+      query = "SELECT COUNT(*) FROM " <> tableName esc e constr <> whereClause
+        where
+          whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
+  x <- queryFunc query (maybe [] (`getValues` []) cond') >>= firstRow
   case x of
     Just [num] -> return $ fromPrimitivePersistValue num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
-    Nothing -> fail $ "COUNT returned no rows"
+    Nothing -> fail "COUNT returned no rows"
 
 replace ::
   forall conn r v.
@@ -255,7 +255,7 @@ replace RenderConfig {..} queryFunc execFunc insertIntoConstructorTable k v = do
     then execFunc updateQuery (updsVals [k'])
     else do
       let query = "SELECT discr FROM " <> mainTableName esc e <> " WHERE id=?"
-      x <- queryFunc query [k'] >>= liftM (fmap $ fromPrimitivePersistValue . head) . firstRow
+      x <- queryFunc query [k'] >>= fmap (fmap $ fromPrimitivePersistValue . head) . firstRow
       case x of
         Just discr -> do
           let cName = tableName esc e constr
@@ -284,7 +284,7 @@ replaceBy ::
   v ->
   Action conn ()
 replaceBy conf@RenderConfig {..} execFunc u v = do
-  uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
+  uniques <- toPersistValues (extractUnique v `asTypeOf` (undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
   vals <- toEntityPersistValues' v
   let e = entityDef proxy (undefined :: v)
       proxy = undefined :: proxy conn
@@ -313,8 +313,9 @@ update conf@RenderConfig {..} execFunc upds cond = do
     Just upds' -> do
       let cond' = renderCond conf cond
           constr = constructors e !! entityConstrNum (undefined :: proxy v) (undefined :: c a)
-          query = "UPDATE " <> tableName esc e constr <> " SET " <> whereClause where
-          whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
+          query = "UPDATE " <> tableName esc e constr <> " SET " <> whereClause
+            where
+              whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
       execFunc query (getValues upds' <> maybe mempty getValues cond' $ [])
     Nothing -> return ()
 
@@ -355,7 +356,7 @@ insertByAll RenderConfig {..} queryFunc manyNulls v = do
       constr = constructors e !! constructorNum
       uniqueDefs = constrUniques constr
 
-      query = "SELECT " <> maybe "1" id (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
+      query = "SELECT " <> fromMaybe "1" (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
       conds = catMaybes $ zipWith (\uFields (_, uVals) -> checkNulls uVals $ intercalateS " AND " $ mkUniqueCond uFields uVals) (mapMaybe f uniqueDefs) uniques
         where
           f u@(UniqueDef _ _ uFields) =
@@ -363,14 +364,14 @@ insertByAll RenderConfig {..} queryFunc manyNulls v = do
               then Just $ foldr (flatten esc) [] $ getUniqueFields u
               else Nothing
       -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
-      checkNulls uVals x = if manyNulls && any (== PersistNull) (uVals []) then Nothing else Just x
+      checkNulls uVals x = if manyNulls && elem PersistNull (uVals []) then Nothing else Just x
       RenderS cond vals = intercalateS " OR " conds
   if null conds
-    then liftM Right $ Core.insert v
+    then Right <$> Core.insert v
     else do
       x <- queryFunc query (vals []) >>= firstRow
       case x of
-        Nothing -> liftM Right $ Core.insert v
+        Nothing -> Right <$> Core.insert v
         Just xs -> return $ Left $ fst $ fromPurePersistValues xs
 
 deleteBy ::
@@ -420,7 +421,7 @@ countAll RenderConfig {..} queryFunc (_ :: v) = do
   case x of
     Just [num] -> return $ fromPrimitivePersistValue num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
-    Nothing -> fail $ "COUNT returned no rows"
+    Nothing -> fail "COUNT returned no rows"
 
 insertBy ::
   forall conn v u.
@@ -432,22 +433,22 @@ insertBy ::
   v ->
   Action conn (Either (AutoKey v) (AutoKey v))
 insertBy conf@RenderConfig {..} queryFunc manyNulls u v = do
-  uniques <- toPersistValues $ (extractUnique v `asTypeOf` ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u))
+  uniques <- toPersistValues (extractUnique v `asTypeOf` (undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
   let e = entityDef proxy v
       proxy = undefined :: proxy conn
       uFields = renderChain conf (fieldChain proxy u) []
       RenderS cond vals = intercalateS " AND " $ mkUniqueCond uFields uniques
       -- skip condition if any value is NULL. It allows to insert many values with duplicate unique key
-      checkNulls uVals = manyNulls && any (== PersistNull) (uVals [])
+      checkNulls uVals = manyNulls && elem PersistNull (uVals [])
       -- this is safe because unique keys exist only for entities with one constructor
       constr = head $ constructors e
-      query = "SELECT " <> maybe "1" id (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
+      query = "SELECT " <> fromMaybe "1" (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
   if checkNulls uniques
-    then liftM Right $ Core.insert v
+    then fmap Right $ Core.insert v
     else do
       x <- queryFunc query (vals []) >>= firstRow
       case x of
-        Nothing -> liftM Right $ Core.insert v
+        Nothing -> Right <$> Core.insert v
         Just [k] -> return $ Left $ fst $ fromPurePersistValues [k]
         Just xs -> fail $ "unexpected query result: " ++ show xs
 
@@ -455,7 +456,7 @@ constrId :: (Utf8 -> Utf8) -> ConstructorDef -> Maybe Utf8
 constrId escape = fmap (escape . fromString) . constrAutoKeyName
 
 toEntityPersistValues' :: (PersistBackendConn conn, PersistEntity v) => v -> Action conn [PersistValue]
-toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
+toEntityPersistValues' = fmap ($ []) . toEntityPersistValues
 
 mkUniqueCond :: [Utf8] -> ([PersistValue] -> [PersistValue]) -> [RenderS conn r]
 mkUniqueCond u vals = zipWith f u (vals [])

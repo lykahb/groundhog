@@ -1,9 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Database.Groundhog.MySQL
@@ -125,7 +125,7 @@ instance SchemaAnalyzer MySQL where
       Just result' -> Just (Just [DbOther (OtherTypeDef [Left param_list])], if ret == "" then Nothing else Just $ read' ret, src)
         where
           (param_list, ret, src) = fst . fromPurePersistValues $ result'
-  getMigrationPack = liftM (migrationPack . fromJust) getCurrentSchema
+  getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
 
 withMySQLPool ::
   (MonadBaseControl IO m, MonadIO m) =>
@@ -206,7 +206,7 @@ insert' v = do
   let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue (head vals)
 
-  liftM fst $
+  fmap fst $
     if isSimple (constructors e)
       then do
         let constr = head $ constructors e
@@ -279,7 +279,7 @@ getList' k = do
   let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType proxy (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRaw' query [toPrimitivePersistValue k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
+  queryRaw' query [toPrimitivePersistValue k] >>= mapStream (fmap fst . fromPersistValues) >>= streamToList
 
 getLastInsertId :: Action MySQL PersistValue
 getLastInsertId = do
@@ -310,7 +310,7 @@ delim' :: Utf8
 delim' = fromChar delim
 
 toEntityPersistValues' :: PersistEntity v => v -> Action MySQL [PersistValue]
-toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
+toEntityPersistValues' = fmap ($ []) . toEntityPersistValues
 
 --- MIGRATION
 
@@ -517,7 +517,7 @@ showAlterTable _ table (AlterColumn col alts) = change ++ updates'
             )
           ]
         f _ = []
-    (updates, other) = partition (\a -> case a of UpdateValue _ -> True; _ -> False) alts
+    (updates, other) = partition (\case UpdateValue _ -> True; _ -> False) alts
 showAlterTable _ table (AddUnique (UniqueDef uName UniqueConstraint cols)) =
   [ ( False,
       defaultPriority,
@@ -574,10 +574,7 @@ showAlterTable _ table (DropConstraint uName) =
 showAlterTable _ _ (DropIndex uName) =
   [ ( False,
       defaultPriority,
-      concat
-        [ "DROP INDEX ",
-          escape uName
-        ]
+      "DROP INDEX " ++ escape uName
     )
   ]
 showAlterTable currentSchema table (AddReference (Reference tName columns onDelete onUpdate)) =
@@ -610,22 +607,21 @@ showAlterTable _ table (DropReference name) =
 
 readSqlType :: String -> String -> (Maybe Int, Maybe Int, Maybe Int) -> DbTypePrimitive
 readSqlType typ colTyp (_, numeric_precision, numeric_scale) =
-  ( case typ of
-      _ | typ `elem` ["int", "short", "mediumint"] -> DbInt32
-      _ | typ `elem` ["long", "longlong", "bigint"] -> DbInt64
-      "float" | numAttrs == (Just 12, Nothing) -> DbReal
-      "double" | numAttrs == (Just 22, Nothing) -> DbReal
-      "decimal" | numAttrs == (Just 10, Just 0) -> DbReal
-      "newdecimal" | numAttrs == (Just 10, Just 0) -> DbReal
-      -- varchar, varstring, string always have length, so skip to colTyp
-      _ | typ `elem` ["text", "tinytext", "mediumtext", "longtext"] -> DbString
-      -- skip varbinary
-      _ | typ `elem` ["blob", "tinyblob", "mediumblob", "longblob"] -> DbBlob
-      "time" -> DbTime
-      _ | typ `elem` ["datetime", "timestamp"] -> DbDayTime
-      _ | typ `elem` ["date", "newdate", "year"] -> DbDay
-      _ -> DbOther $ OtherTypeDef [Left colTyp]
-  )
+  case typ of
+    _ | typ `elem` ["int", "short", "mediumint"] -> DbInt32
+    _ | typ `elem` ["long", "longlong", "bigint"] -> DbInt64
+    "float" | numAttrs == (Just 12, Nothing) -> DbReal
+    "double" | numAttrs == (Just 22, Nothing) -> DbReal
+    "decimal" | numAttrs == (Just 10, Just 0) -> DbReal
+    "newdecimal" | numAttrs == (Just 10, Just 0) -> DbReal
+    -- varchar, varstring, string always have length, so skip to colTyp
+    _ | typ `elem` ["text", "tinytext", "mediumtext", "longtext"] -> DbString
+    -- skip varbinary
+    _ | typ `elem` ["blob", "tinyblob", "mediumblob", "longblob"] -> DbBlob
+    "time" -> DbTime
+    _ | typ `elem` ["datetime", "timestamp"] -> DbDayTime
+    _ | typ `elem` ["date", "newdate", "year"] -> DbDay
+    _ -> DbOther $ OtherTypeDef [Left colTyp]
   where
     numAttrs = (numeric_precision, numeric_scale)
 
@@ -645,7 +641,7 @@ showSqlType t = case t of
 
 compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
-compareUniqs (UniqueDef name1 _ cols1) (UniqueDef name2 _ cols2) = fromMaybe True (liftM2 (==) name1 name2) && haveSameElems (==) cols1 cols2
+compareUniqs (UniqueDef name1 _ cols1) (UniqueDef name2 _ cols2) = (Just False /= liftM2 (==) name1 name2) && haveSameElems (==) cols1 cols2
 
 compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs currentSchema (_, Reference (sch1, tbl1) pairs1 onDel1 onUpd1) (_, Reference (sch2, tbl2) pairs2 onDel2 onUpd2) =
@@ -714,7 +710,7 @@ queryRaw' query vals = do
                   let converted = convert row
                    in converted `seq` go (acc . (converted :))
         -- TODO: this variable is ugly. Switching to pipes or conduit might help
-        rowsVar <- flip finally (MySQLBase.freeResult result) (go id) >>= newIORef
+        rowsVar <- finally (go id) (MySQLBase.freeResult result) >>= newIORef
         return $ do
           rows <- readIORef rowsVar
           case rows of

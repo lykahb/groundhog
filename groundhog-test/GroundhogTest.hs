@@ -77,14 +77,14 @@ module GroundhogTest
     testHStore,
 #endif
 #if WITH_MYSQL
-    , testSchemaAnalysisMySQL
+    testSchemaAnalysisMySQL
 #endif
   )
 where
 
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
-import Control.Monad (forM_, liftM, unless)
+import Control.Monad (fmap, forM_, unless, when)
 import Control.Monad.Catch (MonadCatch)
 import Control.Monad.Fail (MonadFail)
 import Control.Monad.IO.Class (MonadIO (..))
@@ -302,7 +302,7 @@ migr v = do
   let afterMigration = filter (/= Right []) (Map.elems m2)
   liftIO $
     unless (null afterMigration) $
-      H.assertFailure $ ("first migration: " ++ show (Map.elems m1) ++ "\nsecond migration:" ++ show afterMigration)
+      H.assertFailure $ "first migration: " ++ show (Map.elems m1) ++ "\nsecond migration:" ++ show afterMigration
 
 (@=?) :: (Eq a, Show a, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
@@ -376,8 +376,8 @@ testInsert = do
   Just multi @=?? (insert multi >>= get)
   insert_ val
   insert_ multi
-  [val, val] @=?? liftM (map snd) selectAll
-  [multi, multi] @=?? liftM (map snd) selectAll
+  [val, val] @=?? fmap (map snd) selectAll
+  [multi, multi] @=?? fmap (map snd) selectAll
 
 -- There is a weird bug in GHC 7.4.1 which causes program to hang if there is a type class constraint which is not used. See ticket 7126. It may arise with maybes
 -- instance (PersistField a, NeverNull a) => PersistField (Maybe a) where -- OK
@@ -461,9 +461,9 @@ testCond = do
   --  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + liftExpr SingleField >=. liftExpr SingleField - 2)
 
   -- test parentheses
-  ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
+  ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === Not (Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
   ("single=? AND (?<? OR ?<?)", [0, 1, 2, 3, 4 :: Int]) === (SingleField ==. (0 :: Int) &&. (1 :: Int, 3 :: Int) <. (2 :: Int, 4 :: Int))
-  ("NOT (single=? AND (single=single OR single<single))", [0 :: Int]) === (Not $ SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField <. SingleField))
+  ("NOT (single=? AND (single=single OR single<single))", [0 :: Int]) === Not (SingleField ==. (0 :: Int) &&. (SingleField ==. SingleField ||. SingleField <. SingleField))
 
   -- test empty conditions
   ("single#val0=? AND single#val1=?", ["abc", "def"]) === (SingleField ==. ("abc", "def") &&. (() ==. () ||. ((), ()) <. ((), ())))
@@ -887,11 +887,10 @@ testNoColumns = do
 testNoKeys :: PersistBackend m => m ()
 testNoKeys = do
   let val = NoKeys 1 2
-  m <- liftM Map.elems $ createMigration $ migrate val
-  let queries = concat $ map (either (const "") (concat . map (\(_, _, q) -> q))) m
-  if " KEY " `isInfixOf` queries
-    then fail $ "Unexpected migration result: " ++ show m
-    else return ()
+  m <- fmap Map.elems $ createMigration $ migrate val
+  let queries = concatMap (either (const "") (concatMap (\(_, _, q) -> q))) m
+  when (" KEY " `isInfixOf` queries) $
+    fail $ "Unexpected migration result: " ++ show m
   migr val
   [val] @=?? (insert val >> select CondEmpty)
 
@@ -955,7 +954,7 @@ testFloating = do
   migr val
   k <- insert val
   let expected @=??~ expr = do
-        actual <- liftM head $ project expr $ AutoKeyField ==. k
+        actual <- fmap head $ project expr $ AutoKeyField ==. k
         liftIO $ unless (abs (expected - actual) < 0.0001) $ expected @=? actual
   180 @=??~ degrees SingleField
   pi @=??~ radians (degrees SingleField)
@@ -1014,8 +1013,8 @@ testSchemaAnalysisSqlite = do
   migr val
   let action = "select * from \"Single#String\";"
   executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW BEGIN " ++ action ++ " END") []
-  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
+  ["Single#Single#String", "Single#String"] @=?? fmap sort (listTables Nothing)
+  ["myTrigger"] @=?? fmap sort (listTableTriggers (Nothing, "Single#String"))
   sql <- analyzeTrigger (Nothing, "myTrigger")
   let sql' = maybe (error "No trigger found") id sql
   liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
@@ -1080,8 +1079,8 @@ testSchemaAnalysisPostgresql = do
   let action = "EXECUTE PROCEDURE \"myFunction\"()"
   executeRaw False "CREATE OR REPLACE FUNCTION \"myFunction\"() RETURNS trigger AS $$ BEGIN RETURN NEW;END; $$ LANGUAGE plpgsql" []
   executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW " ++ action) []
-  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
+  ["Single#Single#String", "Single#String"] @=?? fmap sort (listTables Nothing)
+  ["myTrigger"] @=?? fmap sort (listTableTriggers (Nothing, "Single#String"))
   trigSql <- analyzeTrigger (Nothing, "myTrigger")
   let trigSql' = maybe (error "No trigger found") id trigSql
   -- use function name instead of action because Postgres 11 returns different action with "EXECUTE FUNCTION"
@@ -1114,7 +1113,7 @@ testHStore = do
   let val = Single (HStore.HStore $ Map.fromList [(TextStrict.pack "k", TextStrict.pack "v")])
   migr val
   k <- insert val
-  show (Just val) @=?? (liftM show $ get k) -- HStore does not have Eq, compare by show
+  show (Just val) @=?? (fmap show $ get k) -- HStore does not have Eq, compare by show
   [True] @=?? project (HStore.exist SingleField "k") (AutoKeyField ==. k)
 #endif
 
@@ -1125,8 +1124,8 @@ testSchemaAnalysisMySQL = do
   migr val
   let action = "delete from `Single#String`;"
   executeRaw' ("CREATE TRIGGER `myTrigger` AFTER DELETE ON `Single#String` FOR EACH ROW BEGIN " ++ action ++ " END") []
-  ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)
-  ["myTrigger"] @=?? liftM sort (listTableTriggers (Nothing, "Single#String"))
+  ["Single#Single#String", "Single#String"] @=?? fmap sort (listTables Nothing)
+  ["myTrigger"] @=?? fmap sort (listTableTriggers (Nothing, "Single#String"))
   sql <- analyzeTrigger (Nothing, "myTrigger")
   let sql' = maybe (error "No trigger found") id sql
   liftIO $ action `isInfixOf` sql' H.@? "Trigger does not contain action statement"
@@ -1167,4 +1166,4 @@ checkLeft e = case e of
 checkRight :: (MonadIO m, Show a) => Either a b -> m ()
 checkRight e = case e of
   Right _ -> return ()
-  Left e -> liftIO $ H.assertFailure ("caught unexpected exception: " ++ show e)
+  Left err -> liftIO $ H.assertFailure ("caught unexpected exception: " ++ show err)

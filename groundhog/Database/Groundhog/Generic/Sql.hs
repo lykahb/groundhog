@@ -105,25 +105,24 @@ prerenderExpr conf (Expr e) = Expr $ ExprRaw typ $ Snippet $ \_ _ -> prerendered
 mkExprWithConf :: (SqlDb db, PersistField a) => (RenderConfig -> Int -> Expr db r a) -> Expr db r a
 mkExprWithConf f = expr
   where
-    expr = mkExpr $ Snippet $ \conf p -> [renderExprPriority conf p $ toExpr $ (f conf p) `asTypeOf` expr]
+    expr = mkExpr $ Snippet $ \conf p -> [renderExprPriority conf p $ toExpr $ f conf p `asTypeOf` expr]
 
 renderExpr :: SqlDb db => RenderConfig -> UntypedExpr db r -> RenderS db r
-renderExpr conf expr = renderExprPriority conf 0 expr
+renderExpr conf = renderExprPriority conf 0
 
 renderExprPriority :: SqlDb db => RenderConfig -> Int -> UntypedExpr db r -> RenderS db r
 renderExprPriority conf p expr =
-  ( case expr of
-      ExprRaw _ (Snippet f) -> explicitHead (f conf p)
-      ExprField f ->
-        let fs = renderChain conf f []
-         in RenderS (explicitHead fs) id
-      ExprPure a ->
-        let vals = toPurePersistValues a
-         in renderPersistValue $ explicitHead (vals [])
-      ExprCond a -> case renderCondPriority conf p a of
-        Nothing -> error "renderExprPriority: empty condition"
-        Just x -> x
-  )
+  case expr of
+    ExprRaw _ (Snippet f) -> explicitHead (f conf p)
+    ExprField f ->
+      let fs = renderChain conf f []
+       in RenderS (explicitHead fs) id
+    ExprPure a ->
+      let vals = toPurePersistValues a
+       in renderPersistValue $ explicitHead (vals [])
+    ExprCond a -> case renderCondPriority conf p a of
+      Nothing -> error "renderExprPriority: empty condition"
+      Just x -> x
   where
     explicitHead :: [a] -> a
     explicitHead xs = case xs of
@@ -132,15 +131,13 @@ renderExprPriority conf p expr =
 
 renderExprExtended :: SqlDb db => RenderConfig -> Int -> UntypedExpr db r -> [RenderS db r]
 renderExprExtended conf p expr =
-  ( case expr of
-      ExprRaw _ (Snippet f) -> f conf p
-      ExprField f -> map (flip RenderS id) $ renderChain conf f []
-      ExprPure a ->
-        let vals = toPurePersistValues a []
-         in map renderPersistValue vals
-      ExprCond a -> maybeToList $ renderCondPriority conf p a
-  )
-  where
+  case expr of
+    ExprRaw _ (Snippet f) -> f conf p
+    ExprField f -> map (`RenderS` id) $ renderChain conf f []
+    ExprPure a ->
+      let vals = toPurePersistValues a []
+       in map renderPersistValue vals
+    ExprCond a -> maybeToList $ renderCondPriority conf p a
 
 renderPersistValue :: PersistValue -> RenderS db r
 renderPersistValue (PersistCustom s as) = RenderS s (as ++)
@@ -171,7 +168,7 @@ parens :: Int -> Int -> RenderS db r -> RenderS db r
 parens p1 p2 expr = if p1 < p2 then fromChar '(' <> expr <> fromChar ')' else expr
 
 operator :: (SqlDb db, Expression db r a, Expression db r b) => Int -> String -> a -> b -> Snippet db r
-operator pr op = \a b -> Snippet $ \conf p ->
+operator pr op a b = Snippet $ \conf p ->
   [parens pr p $ renderExprPriority conf pr (toExpr a) <> fromString op <> renderExprPriority conf pr (toExpr b)]
 
 function :: SqlDb db => String -> [UntypedExpr db r] -> Snippet db r
@@ -191,14 +188,14 @@ renderCond ::
   RenderConfig ->
   Cond db r ->
   Maybe (RenderS db r)
-renderCond conf cond = renderCondPriority conf 0 cond
+renderCond conf = renderCondPriority conf 0
 
 flattenNullables :: DbType -> [Bool]
 flattenNullables typ = go typ []
   where
     go :: DbType -> [Bool] -> [Bool]
-    go typ acc = case typ of
-      DbEmbedded (EmbeddedDef _ ts) _ -> foldr go acc $ map snd ts
+    go t acc = case t of
+      DbEmbedded (EmbeddedDef _ ts) _ -> foldr (go . snd) acc ts
       DbList _ _ -> False : acc
       DbTypePrimitive _ nullable _ _ -> nullable : acc
 
@@ -217,20 +214,19 @@ renderCondPriority conf@RenderConfig {..} priority cond = go cond priority
     go (And a b) p = perhaps andP p " AND " a b
     go (Or a b) p = perhaps orP p " OR " a b
     go (Not CondEmpty) _ = Just "(1=0)" -- special case for False
-    go (Not a) p = fmap (\a' -> parens notP p $ "NOT " <> a') $ go a notP
+    go (Not a) p = (\a' -> parens notP p $ "NOT " <> a') <$> go a notP
     go (Compare compOp f1 f2) p =
-      ( case compOp of
-          Eq -> renderCompOps andP " AND " 37 ops f1 f2
-            where
-              ops = map (\isNull -> if isNull then equalsOperator else (\a b -> a <> fromChar '=' <> b)) eitherNullable
-          Ne -> renderCompOps andP " OR " 50 ops f1 f2
-            where
-              ops = map (\isNull -> if isNull then notEqualsOperator else (\a b -> a <> "<>" <> b)) eitherNullable
-          Gt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '>' <> b) f1 f2
-          Lt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '<' <> b) f1 f2
-          Ge -> renderComp orP " OR " 38 (\a b -> a <> ">=" <> b) f1 f2
-          Le -> renderComp orP " OR " 38 (\a b -> a <> "<=" <> b) f1 f2
-      )
+      case compOp of
+        Eq -> renderCompOps andP " AND " 37 ops f1 f2
+          where
+            ops = map (\isNull -> if isNull then equalsOperator else (\a b -> a <> fromChar '=' <> b)) eitherNullable
+        Ne -> renderCompOps andP " OR " 50 ops f1 f2
+          where
+            ops = map (\isNull -> if isNull then notEqualsOperator else (\a b -> a <> "<>" <> b)) eitherNullable
+        Gt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '>' <> b) f1 f2
+        Lt -> renderComp orP " OR " 38 (\a b -> a <> fromChar '<' <> b) f1 f2
+        Ge -> renderComp orP " OR " 38 (\a b -> a <> ">=" <> b) f1 f2
+        Le -> renderComp orP " OR " 38 (\a b -> a <> "<=" <> b) f1 f2
       where
         proxy = undefined :: proxy db
 
@@ -240,7 +236,7 @@ renderCondPriority conf@RenderConfig {..} priority cond = go cond priority
           ExprRaw t _ -> flattenNullables t
           ExprField ((_, t), _) -> flattenNullables t
           ExprPure a -> flattenNullables $ dbType proxy a
-          ExprCond a -> [False]
+          ExprCond _ -> [False]
 
         renderZip opP op expr1 expr2 = zipWith op expr1' expr2'
           where
@@ -289,10 +285,9 @@ examples of prefixes
 {-# INLINEABLE renderChain #-}
 renderChain :: RenderConfig -> FieldChain -> [Utf8] -> [Utf8]
 renderChain RenderConfig {..} (f, prefix) acc =
-  ( case prefix of
-      ((name, EmbeddedDef False _) : fs) -> flattenP esc (Just $ goP (fromString name) fs) f acc
-      _ -> flatten esc f acc
-  )
+  case prefix of
+    ((name, EmbeddedDef False _) : fs) -> flattenP esc (Just $ goP (fromString name) fs) f acc
+    _ -> flatten esc f acc
   where
     goP p ((name, EmbeddedDef False _) : fs) = goP (fromString name <> fromChar delim <> p) fs
     goP p _ = p
@@ -308,7 +303,7 @@ defaultShowPrim (PersistDay x) = show x
 defaultShowPrim (PersistTimeOfDay x) = show x
 defaultShowPrim (PersistUTCTime x) = show x
 defaultShowPrim (PersistZonedTime x) = show x
-defaultShowPrim (PersistNull) = "NULL"
+defaultShowPrim PersistNull = "NULL"
 defaultShowPrim (PersistCustom _ _) = error "Unexpected PersistCustom"
 
 {-# INLINEABLE renderOrders #-}
@@ -333,7 +328,7 @@ renderFields escape = commasJoin . foldr (flatten escape) []
 
 {-# SPECIALIZE flatten :: (Utf8 -> Utf8) -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
 flatten :: StringLike s => (s -> s) -> (String, DbType) -> ([s] -> [s])
-flatten escape (fname, typ) acc = flattenP escape Nothing (fname, typ) acc
+flatten escape = flattenP escape Nothing
 
 {-# SPECIALIZE flattenP :: (Utf8 -> Utf8) -> Maybe Utf8 -> (String, DbType) -> ([Utf8] -> [Utf8]) #-}
 flattenP :: StringLike s => (s -> s) -> Maybe s -> (String, DbType) -> ([s] -> [s])
@@ -344,7 +339,7 @@ flattenP escape prefix (fname, typ) acc = go typ
       _ -> escape fullName : acc
     fullName = case prefix of
       Nothing -> fromString fname
-      Just prefix -> prefix <> fromChar delim <> fromString fname
+      Just prefix' -> prefix' <> fromChar delim <> fromString fname
     handleEmb (EmbeddedDef False ts) = foldr (flattenP escape (Just fullName)) acc ts
     handleEmb (EmbeddedDef True ts) = foldr (flattenP escape Nothing) acc ts
 
@@ -362,10 +357,9 @@ intercalateS a (x : xs) = x <> go xs
 {-# INLINEABLE renderUpdates #-}
 renderUpdates :: SqlDb db => RenderConfig -> [Update db r] -> Maybe (RenderS db r)
 renderUpdates conf upds =
-  ( case mapMaybe go upds of
-      [] -> Nothing
-      xs -> Just $ commasJoin xs
-  )
+  case mapMaybe go upds of
+    [] -> Nothing
+    xs -> Just $ commasJoin xs
   where
     go (Update field expr) = guard $ commasJoin $ zipWith (\f1 f2 -> f1 <> fromChar '=' <> f2) fs (rend expr)
       where

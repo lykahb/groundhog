@@ -1,7 +1,7 @@
 flags:
   groundhog-test:
-    mysql: false
-    sqlite: false
+    mysql: true
+    sqlite: true
     postgresql: true
 extra-package-dbs: []
 packages:

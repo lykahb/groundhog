@@ -43,7 +43,7 @@ main = do
       ++ "import Data.Int (Int32, Int64)\n"
       ++ "import Data.Time (Day, TimeOfDay, UTCTime)\n"
       ++ "import Data.Time.LocalTime (ZonedTime)\n"
-      ++ unlines (map showData $ concat $ map (uncurry (:)) $ Map.elems decs)
+      ++ unlines (map showData $ concatMap (uncurry (:)) $ Map.elems decs)
   let mappings' = Map.intersectionWith (minimizeMapping suffixNamingStyle . fst) decs mappings
   let serializedMappings = showMappings $ Map.elems mappings'
   --  B.putStrLn serializedMappings
@@ -56,5 +56,5 @@ cleanMySQL = do
         executeRaw True ("drop database if exists " ++ schema) []
         executeRaw True ("create database " ++ schema) []
   mapM_ recreate ["test", "myschema"]
-  executeRaw True ("use test") []
+  executeRaw True "use test" []
   executeRaw True "SET FOREIGN_KEY_CHECKS = 1" []

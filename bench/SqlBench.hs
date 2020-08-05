@@ -55,13 +55,11 @@ flatten esc (fname, typ) acc = case typ of
   _ -> esc (fromString fname) : acc
 
 flattenP :: StringLike s => (s -> s) -> s -> (String, DbType) -> ([s] -> [s])
-flattenP esc prefix (fname, typ) acc =
-  ( case typ of
-      DbEmbedded emb -> case emb of
-        EmbeddedDef False ts -> foldr (flattenP esc fullName) acc ts
-        EmbeddedDef True ts -> foldr (flatten esc) acc ts
-      _ -> esc fullName : acc
-  )
+flattenP esc prefix (fname, typ) acc = case typ of
+  DbEmbedded emb -> case emb of
+    EmbeddedDef False ts -> foldr (flattenP esc fullName) acc ts
+    EmbeddedDef True ts -> foldr (flatten esc) acc ts
+  _ -> esc fullName : acc
   where
     fullName = prefix <> fromChar '$' <> fromString fname
 
@@ -104,11 +102,9 @@ mkPrefix1 = go
 type FieldChain2 = ((String, DbType), [(String, EmbeddedDef)])
 
 renderField2 :: (StringLike s) => (s -> s) -> FieldChain2 -> [s] -> [s]
-renderField2 esc (f, prefix) acc =
-  ( case prefix of
-      ((name, EmbeddedDef False _) : fs) -> flattenP esc (goP (fromString name) fs) f acc
-      _ -> flatten esc f acc
-  )
+renderField2 esc (f, prefix) acc = case prefix of
+  ((name, EmbeddedDef False _) : fs) -> flattenP esc (goP (fromString name) fs) f acc
+  _ -> flatten esc f acc
   where
     goP acc [] = acc
     goP acc ((name, typ) : fs) = case typ of

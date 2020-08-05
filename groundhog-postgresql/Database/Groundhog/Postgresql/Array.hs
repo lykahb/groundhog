@@ -67,7 +67,7 @@ instance (ArrayElem a, PrimitivePersistField a) => PersistField (Array a) where
   dbType p a = DbTypePrimitive (arrayType p a) False Nothing Nothing
 
 arrayType :: (DbDescriptor db, ArrayElem a, PrimitivePersistField a) => proxy db -> Array a -> DbTypePrimitive
-arrayType p a = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"]
+arrayType p a = DbOther $ OtherTypeDef [Right elemType, Left "[]"]
   where
     elemType = case dbType p ((undefined :: Array a -> a) a) of
       DbTypePrimitive t _ _ _ -> t

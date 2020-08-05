@@ -8,7 +8,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LiberalTypeSynonyms #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 -- Required for Projection'
 {-# LANGUAGE UndecidableInstances #-}
@@ -390,7 +389,7 @@ class (DbDescriptor conn, ConnectionManager conn) => PersistBackendConn conn whe
     m (RowStream a)
 
   -- | Check database schema and create migrations for the entity and the entities it contains
-  migrate :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> Migration (m)
+  migrate :: (PersistEntity v, PersistBackend m, Conn m ~ conn) => v -> Migration m
 
   -- | Execute raw query
   executeRaw ::
@@ -548,7 +547,7 @@ data DbType
 type ParentTableReference = (Either (EntityDef, Maybe String) ((Maybe String, String), [String]), Maybe ReferenceActionType, Maybe ReferenceActionType)
 
 -- | Stores a database type. The list contains two kinds of tokens for the type string. Backend will choose a string representation for DbTypePrimitive's, and the string literals will go to the type as-is. As the final step, these tokens are concatenated. For example, @[Left \"varchar(50)\"]@ will become a string with max length and @[Right DbInt64, Left \"[]\"]@ will become integer[] in PostgreSQL.
-newtype OtherTypeDef' str = OtherTypeDef ([Either str (DbTypePrimitive' str)]) deriving (Eq, Show)
+newtype OtherTypeDef' str = OtherTypeDef [Either str (DbTypePrimitive' str)] deriving (Eq, Show)
 
 type OtherTypeDef = OtherTypeDef' String
 
@@ -682,15 +681,15 @@ runDb f = getConnection >>= liftIO . withConn (runReaderT f)
 
 -- | Runs action within connection. It can handle a simple connection, a pool of them, etc.
 runDbConn :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
-runDbConn f cm = extractConn (liftIO . withConn (runReaderT f)) cm
+runDbConn f = extractConn (liftIO . withConn (runReaderT f))
 
 -- | Runs TryAction within connection.
 runTryDbConn :: (MonadIO m, MonadBaseControl IO m, MonadCatch m, TryConnectionManager conn, ExtractConnection cm conn, Exception e) => TryAction e m conn a -> cm -> m (Either SomeException a)
-runTryDbConn f cm = extractConn (tryWithConn (runReaderT f) tryExceptT) cm
+runTryDbConn f = extractConn (tryWithConn (runReaderT f) tryExceptT)
 
 -- | Tries Action within connection.
 runTryDbConn' :: (MonadIO m, MonadBaseControl IO m, MonadCatch m, TryConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m (Either SomeException a)
-runTryDbConn' f cm = extractConn (liftIO . tryWithConn (runReaderT f) tryAny) cm
+runTryDbConn' f = extractConn (liftIO . tryWithConn (runReaderT f) tryAny)
 
 -- | It helps to run database operations within an application monad. Unlike `runDb` it does not wrap action in transaction
 runDb' :: PersistBackend m => Action (Conn m) a -> m a
@@ -705,7 +704,7 @@ runDb' f = getConnection >>= liftIO . runReaderT f
 --   runDbConn' (insert_ value) conn
 -- @
 runDbConn' :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
-runDbConn' f cm = extractConn (liftIO . runReaderT f) cm
+runDbConn' f = extractConn (liftIO . runReaderT f)
 
 -- | It helps to run 'withConnSavepoint' within a monad. Make sure that transaction is open
 withSavepoint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, Savepoint (Conn m)) => String -> m a -> m a

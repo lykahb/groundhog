@@ -25,14 +25,14 @@ module Database.Groundhog.Generic.Migration
 where
 
 import Control.Arrow ((&&&), (***))
-import Control.Monad (liftM, when)
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (gets, modify)
 import Data.Either (lefts)
 import Data.Function (on)
 import Data.List (group, intercalate)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isNothing, mapMaybe)
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql (flatten, mainTableName, tableName)
@@ -128,14 +128,13 @@ data MigrationPack conn = MigrationPack
   }
 
 mkColumns :: DbTypePrimitive -> (String, DbType) -> ([Column] -> [Column])
-mkColumns listAutoKeyType field = go "" field
+mkColumns listAutoKeyType = go ""
   where
     go prefix (fname, typ) acc =
-      ( case typ of
-          DbEmbedded (EmbeddedDef flag ts) _ -> foldr (go prefix') acc ts where prefix' = if flag then "" else prefix ++ fname ++ [delim]
-          DbList _ _ -> Column fullName False listAutoKeyType Nothing : acc
-          DbTypePrimitive t nullable def _ -> Column fullName nullable t def : acc
-      )
+      case typ of
+        DbEmbedded (EmbeddedDef flag ts) _ -> foldr (go prefix') acc ts where prefix' = if flag then "" else prefix ++ fname ++ [delim]
+        DbList _ _ -> Column fullName False listAutoKeyType Nothing : acc
+        DbTypePrimitive t nullable def _ -> Column fullName nullable t def : acc
       where
         fullName = prefix ++ fname
 
@@ -152,7 +151,7 @@ mkReferences autoKeyType field = concat $ traverseDbType f field
           keyName = case constructors e of
             [cDef] -> fromMaybe (error "mkReferences: autokey name is Nothing") $ constrAutoKeyName cDef
             _ -> "id"
-      Left (e, (Just uName)) -> Reference (entitySchema e, entityName e) (zipWith' (,) cols (map colName parentColumns)) onDel onUpd
+      Left (e, Just uName) -> Reference (entitySchema e, entityName e) (zipWith' (,) cols (map colName parentColumns)) onDel onUpd
         where
           cDef = case constructors e of
             [cDef'] -> cDef'
@@ -169,14 +168,13 @@ traverseDbType :: (DbType -> [String] -> a) -> (String, DbType) -> [a]
 traverseDbType f field = snd $ go "" field
   where
     go prefix (fname, typ) =
-      ( case typ of
-          t@(DbEmbedded (EmbeddedDef flag ts) _) -> (cols, f t cols : xs)
-            where
-              prefix' = if flag then "" else prefix ++ fname ++ [delim]
-              (cols, xs) = concatMap' (go prefix') ts
-          t@(DbList _ _) -> ([name], [f t [name]])
-          t@(DbTypePrimitive _ _ _ _) -> ([name], [f t [name]])
-      )
+      case typ of
+        t@(DbEmbedded (EmbeddedDef flag ts) _) -> (cols, f t cols : xs)
+          where
+            prefix' = if flag then "" else prefix ++ fname ++ [delim]
+            (cols, xs) = concatMap' (go prefix') ts
+        t@DbList {} -> ([name], [f t [name]])
+        t@DbTypePrimitive {} -> ([name], [f t [name]])
       where
         name = prefix ++ fname
         concatMap' g xs = concat *** concat $ unzip $ map g xs
@@ -213,7 +211,7 @@ migrateRecursively migS migE migL v = result
       f ("entity " ++ mainTableName id e) (migE e) (mapM_ go (allSubtypes e))
     f name mig cont = do
       a <- gets (Map.lookup name)
-      when (a == Nothing) $
+      when (isNothing a) $
         lift mig >>= modify . Map.insert name >> cont
 
 migrateSchema :: SchemaAnalyzer conn => MigrationPack conn -> String -> Action conn SingleMigration
@@ -242,7 +240,7 @@ migrateEntity m@MigrationPack {..} e = do
             return $
               Left
                 ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
-        _ -> liftM snd $ migConstr e $ head constrs
+        _ -> fmap snd $ migConstr e $ head constrs
     else do
       mainStructure <- analyzeTable (entitySchema e, name)
       let constrTable c = name ++ [delim] ++ constrName c
@@ -350,13 +348,12 @@ migrateUniq u1@(UniqueDef _ _ cols1) u2@(UniqueDef _ _ cols2) =
 
 dropUnique :: UniqueDefInfo -> AlterTable
 dropUnique (UniqueDef name typ _) =
-  ( case typ of
-      UniqueConstraint -> DropConstraint name'
-      UniqueIndex -> DropIndex name'
-      UniquePrimary _ -> DropConstraint name'
-  )
+  case typ of
+    UniqueConstraint -> DropConstraint name'
+    UniqueIndex -> DropIndex name'
+    UniquePrimary _ -> DropConstraint name'
   where
-    name' = fromMaybe (error $ "dropUnique: constraint which should be dropped does not have a name") name
+    name' = fromMaybe (error "dropUnique: constraint which should be dropped does not have a name") name
 
 defaultMigConstr :: (SchemaAnalyzer conn, PersistBackendConn conn) => MigrationPack conn -> EntityDef -> ConstructorDef -> Action conn (Bool, SingleMigration)
 defaultMigConstr m@MigrationPack {..} e constr = do
@@ -367,7 +364,7 @@ defaultMigConstr m@MigrationPack {..} e constr = do
   tableStructure <- analyzeTable qualifiedCName
   let dels = concatMap (mkDeletes escape) $ constrParams constr
   (triggerExisted, delTrigger) <- migTriggerOnDelete qualifiedCName dels
-  updTriggers <- liftM (concatMap snd) $ migTriggerOnUpdate qualifiedCName dels
+  updTriggers <- concatMap snd <$> migTriggerOnUpdate qualifiedCName dels
 
   let (expectedTableStructure, (addTable, addInAlters)) =
         ( case constrAutoKeyName constr of
@@ -410,8 +407,8 @@ defaultMigConstr m@MigrationPack {..} e constr = do
       allErrs =
         if constrExisted == triggerExisted || (constrExisted && null dels)
           then migErrs
-          else ["Both trigger and constructor table must exist: " ++ show qualifiedCName] ++ migErrs
-  return $
+          else ("Both trigger and constructor table must exist: " ++ show qualifiedCName) : migErrs
+  return
     ( constrExisted,
       if null allErrs
         then mergeMigrations $ map showAlterDb $ mig ++ delTrigger ++ updTriggers

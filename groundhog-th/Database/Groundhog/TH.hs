@@ -223,11 +223,11 @@ mkPersist CodegenConfig {..} PersistDefinitions {..} = do
     either error id . validateEmbedded . applyEmbeddedSettings e . mkTHEmbeddedDef namingStyle <$> getDecl (psEmbeddedName e)
   primitives <- forM psPrimitives $ \e ->
     applyPrimitiveSettings e . mkTHPrimitiveDef namingStyle <$> getDecl (psPrimitiveName e)
-  let mkEntityDecs' = maybe id (\name -> (mkMigrateFunction name :)) migrationFunction $ mkEntityDecs
+  let mkEntityDecs' = maybe id (\name -> (mkMigrateFunction name :)) migrationFunction mkEntityDecs
   fmap concat $ sequence $ map ($ entities) mkEntityDecs' ++ map ($ embeddeds) mkEmbeddedDecs ++ map ($ primitives) mkPrimitiveDecs
 
 applyEntitySettings :: NamingStyle -> PSEntityDef -> THEntityDef -> THEntityDef
-applyEntitySettings style PSEntityDef {..} def@(THEntityDef {..}) =
+applyEntitySettings style PSEntityDef {..} def@THEntityDef {..} =
   def
     { thDbEntityName = fromMaybe thDbEntityName psDbEntityName,
       thEntitySchema = psEntitySchema,
@@ -237,10 +237,10 @@ applyEntitySettings style PSEntityDef {..} def@(THEntityDef {..}) =
     }
   where
     thAutoKey' = maybe thAutoKey (liftM2 applyAutoKeySettings thAutoKey) psAutoKey
-    thConstructors' = maybe thConstructors'' (f thConstructors'') $ psConstructors
+    thConstructors' = maybe thConstructors'' (f thConstructors'') psConstructors
       where
         thConstructors'' = map checkAutoKey thConstructors
-        checkAutoKey cDef@(THConstructorDef {..}) = cDef {thDbAutoKeyName = thAutoKey' >> thDbAutoKeyName}
+        checkAutoKey cDef@THConstructorDef {..} = cDef {thDbAutoKeyName = thAutoKey' >> thDbAutoKeyName}
 
     mkUniqueKey' = mkUniqueKey style (nameBase thDataName) (head thConstructors')
     f = foldr $ replaceOne "constructor" psConstrName (nameBase . thConstrName) applyConstructorSettings
@@ -262,14 +262,14 @@ mkUniqueKey style@NamingStyle {..} dName cDef@THConstructorDef {..} PSUniqueKeyD
     uniqueFields = mkFieldsForUniqueKey style dName key cDef
 
 applyAutoKeySettings :: THAutoKeyDef -> PSAutoKeyDef -> THAutoKeyDef
-applyAutoKeySettings def@(THAutoKeyDef {..}) PSAutoKeyDef {..} =
+applyAutoKeySettings def@THAutoKeyDef {..} PSAutoKeyDef {..} =
   def
     { thAutoKeyConstrName = fromMaybe thAutoKeyConstrName psAutoKeyConstrName,
       thAutoKeyIsDef = fromMaybe thAutoKeyIsDef psAutoKeyIsDef
     }
 
 applyConstructorSettings :: PSConstructorDef -> THConstructorDef -> THConstructorDef
-applyConstructorSettings PSConstructorDef {..} def@(THConstructorDef {..}) =
+applyConstructorSettings PSConstructorDef {..} def@THConstructorDef {..} =
   def
     { thPhantomConstrName = fromMaybe thPhantomConstrName psPhantomConstrName,
       thDbConstrName = fromMaybe thDbConstrName psDbConstrName,
@@ -282,7 +282,7 @@ applyConstructorSettings PSConstructorDef {..} def@(THConstructorDef {..}) =
     convertUnique (PSUniqueDef uName uType uFields) = THUniqueDef uName (fromMaybe UniqueConstraint uType) uFields
 
 applyFieldSettings :: PSFieldDef String -> THFieldDef -> THFieldDef
-applyFieldSettings PSFieldDef {..} def@(THFieldDef {..}) =
+applyFieldSettings PSFieldDef {..} def@THFieldDef {..} =
   def
     { thDbFieldName = fromMaybe thDbFieldName psDbFieldName,
       thExprName = fromMaybe thExprName psExprName,
@@ -294,7 +294,7 @@ applyFieldSettings PSFieldDef {..} def@(THFieldDef {..}) =
     }
 
 applyEmbeddedSettings :: PSEmbeddedDef -> THEmbeddedDef -> THEmbeddedDef
-applyEmbeddedSettings PSEmbeddedDef {..} def@(THEmbeddedDef {..}) =
+applyEmbeddedSettings PSEmbeddedDef {..} def@THEmbeddedDef {..} =
   def
     { thDbEmbeddedName = fromMaybe thDbEmbeddedName psDbEmbeddedName,
       thEmbeddedFields = maybe thEmbeddedFields (f thEmbeddedFields) psEmbeddedFields
@@ -303,7 +303,7 @@ applyEmbeddedSettings PSEmbeddedDef {..} def@(THEmbeddedDef {..}) =
     f = foldr $ replaceOne "field" psFieldName thFieldName applyFieldSettings
 
 applyPrimitiveSettings :: PSPrimitiveDef -> THPrimitiveDef -> THPrimitiveDef
-applyPrimitiveSettings PSPrimitiveDef {..} def@(THPrimitiveDef {..}) =
+applyPrimitiveSettings PSPrimitiveDef {..} def@THPrimitiveDef {..} =
   def
     { thPrimitiveDbName = fromMaybe thPrimitiveDbName psPrimitiveDbName,
       thPrimitiveConverter = mkName psPrimitiveConverter
@@ -414,7 +414,7 @@ mkTHEntityDef NamingStyle {..} dec = THEntityDef dName (mkDbEntityName dName') N
             fName' = nameBase fName
 
 mkTHEmbeddedDef :: NamingStyle -> Dec -> THEmbeddedDef
-mkTHEmbeddedDef (NamingStyle {..}) dec = THEmbeddedDef dName cName (mkDbEntityName dName') typeVars fields
+mkTHEmbeddedDef NamingStyle {..} dec = THEmbeddedDef dName cName (mkDbEntityName dName') typeVars fields
   where
     (dName, typeVars, cons) = fromDataD dec
     dName' = nameBase dName
@@ -437,15 +437,15 @@ mkTHEmbeddedDef (NamingStyle {..}) dec = THEmbeddedDef dName cName (mkDbEntityNa
         fName' = nameBase fName
 
 mkTHPrimitiveDef :: NamingStyle -> Dec -> THPrimitiveDef
-mkTHPrimitiveDef (NamingStyle {..}) dec = THPrimitiveDef dName (mkDbEntityName dName') 'showReadConverter
+mkTHPrimitiveDef NamingStyle {..} dec = THPrimitiveDef dName (mkDbEntityName dName') 'showReadConverter
   where
     dName = case dec of
 #if MIN_VERSION_template_haskell(2, 11, 0)
-      DataD _ dName _ _ _ _ -> dName
-      NewtypeD _ dName _ _ _ _ -> dName
+      DataD _ name _ _ _ _ -> name
+      NewtypeD _ name _ _ _ _ -> name
 #else
-      DataD _ dName _ _ _ -> dName
-      NewtypeD _ dName _ _ _ -> dName
+      DataD _ name _ _ _ -> name
+      NewtypeD _ name _ _ _ -> name
 #endif
       _ -> error $ "Only datatypes and newtypes can be declared as primitive: " ++ show dec
     dName' = nameBase dName
@@ -663,74 +663,59 @@ defaultMkEntityDecs :: [THEntityDef] -> Q [Dec]
 defaultMkEntityDecs =
   fmap concat
     . mapM
-      ( \def -> do
-          --runIO (print def)
-          decs <-
-            fmap concat $
-              sequence $
-                map
-                  ($ def)
-                  [ mkEntityPhantomConstructors,
-                    mkEntityPhantomConstructorInstances,
-                    mkAutoKeyPersistFieldInstance,
-                    mkAutoKeyPrimitivePersistFieldInstance,
-                    mkEntityUniqueKeysPhantoms,
-                    mkUniqueKeysIsUniqueInstances,
-                    mkUniqueKeysEmbeddedInstances,
-                    mkUniqueKeysPersistFieldInstances,
-                    mkUniqueKeysPrimitiveOrPurePersistFieldInstances,
-                    mkKeyEqShowInstances,
-                    mkEntityPersistFieldInstance,
-                    mkEntitySinglePersistFieldInstance,
-                    mkPersistEntityInstance,
-                    mkEntityNeverNullInstance
-                  ]
-          --runIO $ putStrLn $ pprint decs
-          return decs
+      ( \def ->
+          concat
+            <$> mapM
+              ($ def)
+              [ mkEntityPhantomConstructors,
+                mkEntityPhantomConstructorInstances,
+                mkAutoKeyPersistFieldInstance,
+                mkAutoKeyPrimitivePersistFieldInstance,
+                mkEntityUniqueKeysPhantoms,
+                mkUniqueKeysIsUniqueInstances,
+                mkUniqueKeysEmbeddedInstances,
+                mkUniqueKeysPersistFieldInstances,
+                mkUniqueKeysPrimitiveOrPurePersistFieldInstances,
+                mkKeyEqShowInstances,
+                mkEntityPersistFieldInstance,
+                mkEntitySinglePersistFieldInstance,
+                mkPersistEntityInstance,
+                mkEntityNeverNullInstance
+              ]
       )
 
 defaultMkEmbeddedDecs :: [THEmbeddedDef] -> Q [Dec]
 defaultMkEmbeddedDecs =
   fmap concat
     . mapM
-      ( \def -> do
-          --runIO (print def)
-          decs <-
-            fmap concat $
-              sequence $
-                map
-                  ($ def)
-                  [ mkEmbeddedPersistFieldInstance,
-                    mkEmbeddedPurePersistFieldInstance,
-                    mkEmbeddedInstance
-                  ]
-          --  runIO $ putStrLn $ pprint decs
-          return decs
+      ( \def ->
+          concat
+            <$> mapM
+              ($ def)
+              [ mkEmbeddedPersistFieldInstance,
+                mkEmbeddedPurePersistFieldInstance,
+                mkEmbeddedInstance
+              ]
       )
 
 defaultMkPrimitiveDecs :: [THPrimitiveDef] -> Q [Dec]
 defaultMkPrimitiveDecs =
   fmap concat
     . mapM
-      ( \def -> do
-          --runIO (print def)
-          decs <-
-            fmap concat $
-              sequence $
-                map
-                  ($ def)
-                  [ mkPrimitivePersistFieldInstance,
-                    mkPrimitivePrimitivePersistFieldInstance
-                  ]
-          --  runIO $ putStrLn $ pprint decs
-          return decs
+      ( \def ->
+          concat
+            <$> mapM
+              ($ def)
+              [ mkPrimitivePersistFieldInstance,
+                mkPrimitivePrimitivePersistFieldInstance
+              ]
       )
 
 fromDataD :: InstanceDec -> (Name, [TyVarBndr], [Con])
-fromDataD d = case d of
+fromDataD dec = case dec of
 #if MIN_VERSION_template_haskell(2, 11, 0)
   (DataD _ dName typeVars _ constrs _) -> (dName, typeVars, constrs)
 #else
   (DataD _ dName typeVars constrs _) -> (dName, typeVars, constrs)
 #endif
-  d -> error $ "Only datatypes can be processed: " ++ show d
+  _ -> error $ "Only datatypes can be processed: " ++ show dec

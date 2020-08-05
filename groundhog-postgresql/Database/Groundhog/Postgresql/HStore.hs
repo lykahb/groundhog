@@ -30,9 +30,7 @@ module Database.Groundhog.Postgresql.HStore
   )
 where
 
-import Control.Applicative
 import Data.Aeson (Value)
-import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as B (toStrict)
 import qualified Data.Map as Map
 import Data.String
@@ -53,7 +51,7 @@ instance PersistField HStore where
   persistName _ = "HStore"
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
-  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef $ [Left "hstore"]) False Nothing Nothing
+  dbType _ _ = DbTypePrimitive (DbOther $ OtherTypeDef [Left "hstore"]) False Nothing Nothing
 
 instance PrimitivePersistField HStore where
   toPrimitivePersistValue (HStore a) = PersistCustom "E?::hstore" [toPrimitivePersistValue $ T.decodeUtf8 $ B.toStrict $ toLazyByteString (toHStore (HStoreMap a))]

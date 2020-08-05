@@ -45,5 +45,5 @@ cleanMySQL = do
         executeRaw True ("drop database if exists " ++ schema) []
         executeRaw True ("create database " ++ schema) []
   mapM_ recreate ["test", "myschema"]
-  executeRaw True ("use test") []
+  executeRaw True "use test" []
   executeRaw True "SET FOREIGN_KEY_CHECKS = 1" []

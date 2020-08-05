@@ -1,11 +1,11 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Database.Groundhog.Sqlite
@@ -261,7 +261,7 @@ analyzeTable' (Nothing, tName) = do
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
         uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
-        sql <- queryRaw' ("select sql from sqlite_master where type = 'index' and name = ?") [toPrimitivePersistValue name] >>= firstRow
+        sql <- queryRaw' "select sql from sqlite_master where type = 'index' and name = ?" [toPrimitivePersistValue name] >>= firstRow
         let columnNames = map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
             uType =
               if sql == Just [PersistNull]
@@ -278,7 +278,7 @@ analyzeTable' (Nothing, tName) = do
               (children, parents) = unzip $ map (\(_, (_, _, pair, _)) -> pair) rows
           parents' <- case head parents of
             Nothing ->
-              analyzePrimaryKey foreignTable >>= \x -> case x of
+              analyzePrimaryKey foreignTable >>= \case
                 Just primaryCols -> return primaryCols
                 Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
             Just _ -> return $ map (fromMaybe (error "analyzeTable: all parents must be either NULL or values")) parents
@@ -370,10 +370,7 @@ showColumn :: Column -> String
 showColumn (Column name nullable typ def) = escape name ++ " " ++ showSqlType typ ++ rest
   where
     rest =
-      concat
-        [ if not nullable then " NOT NULL" else "",
-          maybe "" (" DEFAULT " ++) def
-        ]
+      (if not nullable then " NOT NULL" else "") ++ maybe "" (" DEFAULT " ++) def
 
 sqlReference :: Reference -> String
 sqlReference Reference {..} = "FOREIGN KEY(" ++ ourKey ++ ") REFERENCES " ++ escape (snd referencedTableName) ++ "(" ++ foreignKey ++ ")" ++ actions
@@ -405,7 +402,7 @@ insert' v = do
   let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue (head vals)
 
-  liftM fst $
+  fmap fst $
     if isSimple (constructors e)
       then do
         let constr = head $ constructors e
@@ -479,7 +476,7 @@ getList' k = do
       valuesName = mainName <> delim' <> "values"
       value = ("value", dbType proxy (undefined :: a))
       query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRawCached' query [toPrimitivePersistValue k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
+  queryRawCached' query [toPrimitivePersistValue k] >>= mapStream (fmap fst . fromPersistValues) >>= streamToList
 
 getLastInsertRowId :: Action Sqlite PersistValue
 getLastInsertRowId = do
@@ -495,7 +492,7 @@ bind stmt = go 1
     go i (x : xs) = do
       case x of
         PersistInt64 int64 -> S.bindInt64 stmt i int64
-        PersistText text -> S.bindText stmt i $ text
+        PersistText text -> S.bindText stmt i text
         PersistString text -> S.bindText stmt i $ T.pack text
         PersistDouble double -> S.bindDouble stmt i double
         PersistBool b -> S.bindInt64 stmt i $ if b then 1 else 0
@@ -540,8 +537,8 @@ runQuery getStmt close query vals = do
         x <- S.step stmt
         case x of
           S.Done -> return Nothing
-          S.Row -> fmap (Just . map pFromSql) $ S.columns stmt
-  return $ fmap mkNext $ mkAcquire open close
+          S.Row -> Just . map pFromSql <$> S.columns stmt
+  return $ mkNext <$> mkAcquire open close
 
 queryRaw', queryRawCached' :: Utf8 -> [PersistValue] -> Action Sqlite (RowStream [PersistValue])
 queryRaw' = runQuery getStatement S.finalize
@@ -552,7 +549,7 @@ pFromSql (S.SQLInteger i) = PersistInt64 i
 pFromSql (S.SQLFloat i) = PersistDouble i
 pFromSql (S.SQLText s) = PersistText s
 pFromSql (S.SQLBlob bs) = PersistByteString bs
-pFromSql (S.SQLNull) = PersistNull
+pFromSql S.SQLNull = PersistNull
 
 -- It is used to escape table names and columns, which can include only symbols allowed in Haskell datatypes and '$' delimiter. We need it mostly to support names that coincide with SQL keywords
 escape :: String -> String
@@ -578,7 +575,7 @@ delim' :: Utf8
 delim' = fromChar delim
 
 toEntityPersistValues' :: PersistEntity v => v -> Action Sqlite [PersistValue]
-toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
+toEntityPersistValues' = fmap ($ []) . toEntityPersistValues
 
 compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
@@ -609,15 +606,14 @@ showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
 showAlterDb (AlterTable (_, table) createTable (TableInfo oldCols _ _) (TableInfo newCols _ _) alts) = case mapM (showAlterTable table) alts of
   Just alts' -> Right alts'
   Nothing ->
-    ( Right
-        [ (False, defaultPriority, "CREATE TEMP TABLE " ++ escape tableTmp ++ "(" ++ columnsTmp ++ ")"),
-          (False, defaultPriority, copy (table, columnsTmp) (tableTmp, columnsTmp)),
-          (not (null oldOnlyColumns), defaultPriority, "DROP TABLE " ++ escape table),
-          (False, defaultPriority, createTable),
-          (False, defaultPriority, copy (tableTmp, columnsTmp) (table, columnsNew)),
-          (False, defaultPriority, "DROP TABLE " ++ escape tableTmp)
-        ]
-    )
+    Right
+      [ (False, defaultPriority, "CREATE TEMP TABLE " ++ escape tableTmp ++ "(" ++ columnsTmp ++ ")"),
+        (False, defaultPriority, copy (table, columnsTmp) (tableTmp, columnsTmp)),
+        (not (null oldOnlyColumns), defaultPriority, "DROP TABLE " ++ escape table),
+        (False, defaultPriority, createTable),
+        (False, defaultPriority, copy (tableTmp, columnsTmp) (table, columnsNew)),
+        (False, defaultPriority, "DROP TABLE " ++ escape tableTmp)
+      ]
     where
       tableTmp = table ++ "_backup"
       copy (from, fromCols) (to, toCols) = "INSERT INTO " ++ escape to ++ "(" ++ toCols ++ ") SELECT " ++ fromCols ++ " FROM " ++ escape from
@@ -689,10 +685,7 @@ showAlterTable _ (DropIndex uName) =
   Just
     ( False,
       defaultPriority,
-      concat
-        [ "DROP INDEX ",
-          escape uName
-        ]
+      "DROP INDEX " ++ escape uName
     )
 showAlterTable _ _ = Nothing
 

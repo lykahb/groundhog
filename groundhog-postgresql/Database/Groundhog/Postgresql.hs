@@ -3,7 +3,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Database.Groundhog.Postgresql
@@ -24,7 +23,7 @@ where
 
 import Control.Arrow (second, (***))
 import Control.Exception (throw)
-import Control.Monad (forM, liftM, liftM2, (>=>))
+import Control.Monad (forM, liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
@@ -134,10 +133,10 @@ instance SchemaAnalyzer Postgresql where
     let read' (typ, arr) = readSqlType typ (Nothing, Nothing, Nothing, Nothing, Nothing) arr
     return $ case result of
       [] -> Nothing
-      ((_, (ret, src)) : _) -> Just $ (Just $ map read' args, Just $ read' ret, src)
+      ((_, (ret, src)) : _) -> Just (Just $ map read' args, Just $ read' ret, src)
         where
           args = mapMaybe (\(typ, arr) -> fmap (\typ' -> (typ', arr)) typ) $ map fst result
-  getMigrationPack = liftM (migrationPack . fromJust) getCurrentSchema
+  getMigrationPack = fmap (migrationPack . fromJust) getCurrentSchema
 
 withPostgresqlPool ::
   (MonadBaseControl IO m, MonadIO m) =>
@@ -223,7 +222,7 @@ insert' v = do
   let e = entityDef proxy v
   let constructorNum = fromPrimitivePersistValue (head vals)
 
-  liftM fst $
+  fmap fst $
     if isSimple (constructors e)
       then do
         let constr = head $ constructors e
@@ -299,7 +298,7 @@ getList' k = do
   let valuesName = mainName <> delim' <> "values"
   let value = ("value", dbType proxy (undefined :: a))
   let query = "SELECT " <> renderFields escapeS [value] <> " FROM " <> escapeS valuesName <> " WHERE id=? ORDER BY ord"
-  queryRaw' query [toPrimitivePersistValue k] >>= mapStream (liftM fst . fromPersistValues) >>= streamToList
+  queryRaw' query [toPrimitivePersistValue k] >>= mapStream (fmap fst . fromPersistValues) >>= streamToList
 
 --TODO: consider removal
 getKey :: RowStream [PersistValue] -> Action Postgresql PersistValue
@@ -329,13 +328,13 @@ delim' :: Utf8
 delim' = fromChar delim
 
 toEntityPersistValues' :: PersistEntity v => v -> Action Postgresql [PersistValue]
-toEntityPersistValues' = liftM ($ []) . toEntityPersistValues
+toEntityPersistValues' = fmap ($ []) . toEntityPersistValues
 
 --- MIGRATION
 
 migrate' :: (PersistEntity v) => v -> Migration (Action Postgresql)
 migrate' v = do
-  migPack <- lift $ getMigrationPack
+  migPack <- lift getMigrationPack
   migrateRecursively (migrateSchema migPack) (migrateEntity migPack) (migrateList migPack) v
 
 migrationPack :: String -> GM.MigrationPack Postgresql
@@ -633,10 +632,7 @@ showAlterTable table (DropConstraint uName) =
 showAlterTable _ (DropIndex uName) =
   [ ( False,
       defaultPriority,
-      concat
-        [ "DROP INDEX ",
-          escape uName
-        ]
+      "DROP INDEX " ++ escape uName
     )
   ]
 showAlterTable table (AddReference (Reference tName columns onDelete onUpdate)) =
@@ -744,26 +740,25 @@ showAlterColumn table n (UpdateValue s) =
 -- | udt_name, character_maximum_length, numeric_precision, numeric_scale, datetime_precision, interval_type
 readSqlType :: String -> (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String) -> (Int, Maybe String) -> DbTypePrimitive
 readSqlType typ (character_maximum_length, numeric_precision, numeric_scale, datetime_precision, _) (array_ndims, array_elem) =
-  ( case typ of
-      "int4" -> DbInt32
-      "int8" -> DbInt64
-      "varchar" -> maybe DbString (dbOther . ("varchar" ++) . wrap . show) character_maximum_length
-      "numeric" -> dbOther $ "numeric" ++ maybe "" wrap attrs
-        where
-          attrs = liftM2 (\a b -> if b == 0 then show a else show a ++ ", " ++ show b) numeric_precision numeric_scale
-      "date" -> DbDay
-      "bool" -> DbBool
-      "time" -> mkDate DbTime "time"
-      "timestamp" -> mkDate DbDayTime "timestamp"
-      "timestamptz" -> mkDate DbDayTimeZoned "timestamptz"
-      "float4" -> DbReal
-      "float8" -> DbReal
-      "bytea" -> DbBlob
-      _ | array_ndims > 0 -> dbOther $ arr ++ concat (replicate array_ndims "[]")
-        where
-          arr = fromMaybe (error "readSqlType: array with elem type Nothing") array_elem
-      a -> dbOther a
-  )
+  case typ of
+    "int4" -> DbInt32
+    "int8" -> DbInt64
+    "varchar" -> maybe DbString (dbOther . ("varchar" ++) . wrap . show) character_maximum_length
+    "numeric" -> dbOther $ "numeric" ++ maybe "" wrap attrs
+      where
+        attrs = liftM2 (\a b -> if b == 0 then show a else show a ++ ", " ++ show b) numeric_precision numeric_scale
+    "date" -> DbDay
+    "bool" -> DbBool
+    "time" -> mkDate DbTime "time"
+    "timestamp" -> mkDate DbDayTime "timestamp"
+    "timestamptz" -> mkDate DbDayTimeZoned "timestamptz"
+    "float4" -> DbReal
+    "float8" -> DbReal
+    "bytea" -> DbBlob
+    _ | array_ndims > 0 -> dbOther $ arr ++ concat (replicate array_ndims "[]")
+      where
+        arr = fromMaybe (error "readSqlType: array with elem type Nothing") array_elem
+    a -> dbOther a
   where
     dbOther t = DbOther $ OtherTypeDef [Left t]
     wrap x = "(" ++ x ++ ")"
@@ -787,7 +782,7 @@ showSqlType t = case t of
 
 compareUniqs :: UniqueDefInfo -> UniqueDefInfo -> Bool
 compareUniqs (UniqueDef _ (UniquePrimary _) cols1) (UniqueDef _ (UniquePrimary _) cols2) = haveSameElems (==) cols1 cols2
-compareUniqs (UniqueDef name1 type1 cols1) (UniqueDef name2 type2 cols2) = fromMaybe True (liftM2 (==) name1 name2) && type1 == type2 && haveSameElems (==) cols1 cols2
+compareUniqs (UniqueDef name1 type1 cols1) (UniqueDef name2 type2 cols2) = (Just False /= liftM2 (==) name1 name2) && type1 == type2 && haveSameElems (==) cols1 cols2
 
 compareRefs :: String -> (Maybe String, Reference) -> (Maybe String, Reference) -> Bool
 compareRefs currentSchema (_, Reference (sch1, tbl1) pairs1 onDel1 onUpd1) (_, Reference (sch2, tbl2) pairs2 onDel2 onUpd2) =
@@ -875,7 +870,7 @@ queryRaw' query vals = do
           row <- atomicModifyIORef rowRef (\r -> (r + 1, r))
           if row == rowCount
             then return Nothing
-            else liftM Just $
+            else fmap Just $
               forM (zip getters [0 ..]) $ \(getter, col) -> do
                 mbs <- LibPQ.getvalue' ret row col
                 case mbs of
@@ -937,7 +932,7 @@ getGetter (PG.Oid oid) = case oid of
   2278 -> \_ _ -> return PersistNull
   _ -> \f dat -> fmap PersistByteString $ case dat of
     Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
-    Just str -> return $ copy $ str
+    Just str -> return $ copy str
 
 unBinary :: PG.Binary a -> a
 unBinary (PG.Binary x) = x
@@ -960,7 +955,7 @@ explicitType a = castType a t
 
 -- | Casts expression to a type. @castType value \"INT\"@ results in @value::INT@.
 castType :: (Expression Postgresql r a, PersistField a) => a -> String -> Expr Postgresql r a
-castType a t = mkExpr $ Snippet $ \conf _ -> ["(" <> renderExpr conf (toExpr a) <> ")::" <> fromString t] where
+castType a t = mkExpr $ Snippet $ \conf _ -> ["(" <> renderExpr conf (toExpr a) <> ")::" <> fromString t]
 
 -- | Distinct only on certain fields or expressions. For example, @select $ CondEmpty `distinctOn` (lower EmailField, IpField)@.
 distinctOn :: (db ~ Postgresql, HasSelectOptions a db r, HasDistinct a ~ HFalse, Projection' p db r p') => a -> p -> SelectOptions db r (HasLimit a) (HasOffset a) (HasOrder a) HTrue

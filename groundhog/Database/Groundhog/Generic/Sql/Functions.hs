@@ -128,7 +128,7 @@ instance (SqlDb db, PurePersistField a, Integral a) => Integral (Expr db r a) wh
                 )
               ]
               (x' `rem` y')
-      zero = 0 `asTypeOf` ((undefined :: Expr db r a -> a) x)
+      zero = 0 `asTypeOf` (undefined :: Expr db r a -> a) x
   toInteger = error "toInteger: instance Integral (Expr db r a) does not have implementation"
 
 case_ ::

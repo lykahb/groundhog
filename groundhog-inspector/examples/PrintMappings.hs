@@ -21,7 +21,7 @@ main = withSqliteConn ":memory:" $
     let decs = generateData defaultDataCodegenConfig defaultReverseNamingStyle tables
     mappings <- generateMapping defaultReverseNamingStyle tables
     -- Print datatype declarations
-    liftIO $ mapM_ (putStrLn . showData) $ concat $ map (uncurry (:)) $ Map.elems $ decs
+    liftIO $ mapM_ (putStrLn . showData) $ concatMap (uncurry (:)) $ Map.elems decs
     -- Remove parts of mapping that are defaults for the chosen naming style
     let mappings' = Map.intersectionWith (minimizeMapping suffixNamingStyle . fst) decs mappings
     -- Print mappings
