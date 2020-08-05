@@ -1,12 +1,20 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+
 import Control.Monad.IO.Class (liftIO)
-import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
+import Database.Groundhog.TH
 
 data Company = Company {name :: String, producedSkynetAndTerminator :: (Bool, Bool), headquarter :: Address, dataCentre :: Address, salesOffice :: Address} deriving (Eq, Show)
+
 data Address = Address {city :: String, zipCode :: String, street :: String} deriving (Eq, Show)
 
-mkPersist defaultCodegenConfig [groundhog|
+mkPersist
+  defaultCodegenConfig
+  [groundhog|
 definitions:
   - entity: Company
     constructors:
@@ -42,19 +50,20 @@ definitions:
                                         # Street is not mentioned so it will have default settings.
  |]
 
-main = withSqliteConn ":memory:" $ runDbConn $ do
-  let address = Address "Sunnyvale" "18144" "El Camino Real"
-  let company = Company "Cyberdyne Systems" (False, False) address address address
-  runMigration $ migrate company
-  k <- insert company
-  -- compare embedded data fields as a whole and compare their subfields individually
-  select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) >>= liftIO . print
-  -- after the Cyberdyne headquarter was destroyed by John Connor and T-800, the Skynet development was continued by Cyber Research Systems affiliated with Pentagon
-  let newAddress = Address "Washington" "20301" "1400 Defense Pentagon"
-  -- compare fields with an embedded value as a whole and update embedded field with a value
-  update [NameField =. "Cyber Research Systems", HeadquarterField =. newAddress] (NameField ==. "Cyberdyne Systems" &&. HeadquarterField ==. address)
-  -- update embedded field with another field as a whole. Separate subfields can be accessed individually for update via ~> as in the select above
-  update [DataCentreField =. HeadquarterField, SalesOfficeField =. HeadquarterField] (NameField ==. "Cyber Research Systems" &&. HeadquarterField ==. newAddress)
-  -- eventually the skynet was developed. To access the elements of tuple we use predefined selectors. In Tuple2_0Selector 2 is arity of the tuple, 0 is number of element in it
-  update [ProducedSkynetAndTerminatorField ~> Tuple2_0Selector =. True] (AutoKeyField ==. k)
-  select (HeadquarterField ~> ZipCodeSelector ==. "20301") >>= liftIO . print
+main = withSqliteConn ":memory:" $
+  runDbConn $ do
+    let address = Address "Sunnyvale" "18144" "El Camino Real"
+    let company = Company "Cyberdyne Systems" (False, False) address address address
+    runMigration $ migrate company
+    k <- insert company
+    -- compare embedded data fields as a whole and compare their subfields individually
+    select (DataCentreField ==. HeadquarterField &&. DataCentreField ~> ZipCodeSelector ==. HeadquarterField ~> ZipCodeSelector) >>= liftIO . print
+    -- after the Cyberdyne headquarter was destroyed by John Connor and T-800, the Skynet development was continued by Cyber Research Systems affiliated with Pentagon
+    let newAddress = Address "Washington" "20301" "1400 Defense Pentagon"
+    -- compare fields with an embedded value as a whole and update embedded field with a value
+    update [NameField =. "Cyber Research Systems", HeadquarterField =. newAddress] (NameField ==. "Cyberdyne Systems" &&. HeadquarterField ==. address)
+    -- update embedded field with another field as a whole. Separate subfields can be accessed individually for update via ~> as in the select above
+    update [DataCentreField =. HeadquarterField, SalesOfficeField =. HeadquarterField] (NameField ==. "Cyber Research Systems" &&. HeadquarterField ==. newAddress)
+    -- eventually the skynet was developed. To access the elements of tuple we use predefined selectors. In Tuple2_0Selector 2 is arity of the tuple, 0 is number of element in it
+    update [ProducedSkynetAndTerminatorField ~> Tuple2_0Selector =. True] (AutoKeyField ==. k)
+    select (HeadquarterField ~> ZipCodeSelector ==. "20301") >>= liftIO . print

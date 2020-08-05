@@ -1,15 +1,17 @@
-{-# LANGUAGE CPP, DeriveDataTypeable, RecordWildCards, FlexibleContexts #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
-import System.Console.CmdArgs
-import Control.Monad.Trans (MonadIO(..))
+import Control.Monad.Trans (MonadIO (..))
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.Map as Map
-
 import Database.Groundhog.Generic.Migration (SchemaAnalyzer)
-import Database.Groundhog.TH (suffixNamingStyle)
 import Database.Groundhog.Inspector
+import Database.Groundhog.TH (suffixNamingStyle)
+import System.Console.CmdArgs
 
 #if WITH_SQLITE
 import Database.Groundhog.Sqlite
@@ -37,12 +39,18 @@ databases =
   []
 
 sample :: Mode (CmdArgs Args)
-sample = cmdArgsMode $ Args { database = def &= argPos 0 &= typ (show databases) &= opt (head databases)
-              , connectionInfo = def &= argPos 1 &= typ "CONNECTION_STRING"
-              , schema = def &= help "schema" }
-         &= summary "groundhog-inspector"
-         &= details ["Pass a name of a database. The connection string is an argument to with*Conn. "
-           , "MySQL connection string is \"ConnectInfo {...}\""]
+sample =
+  cmdArgsMode $
+    Args
+      { database = def &= argPos 0 &= typ (show databases) &= opt (head databases),
+        connectionInfo = def &= argPos 1 &= typ "CONNECTION_STRING",
+        schema = def &= help "schema"
+      }
+      &= summary "groundhog-inspector"
+      &= details
+        [ "Pass a name of a database. The connection string is an argument to with*Conn. ",
+          "MySQL connection string is \"ConnectInfo {...}\""
+        ]
 
 analyze :: (PersistBackend m, SchemaAnalyzer (Conn m), MonadIO m) => Maybe String -> m ()
 analyze schema = do
@@ -59,7 +67,7 @@ analyze schema = do
 
 main :: IO ()
 main = do
-  Args{..} <- cmdArgsRun sample
+  Args {..} <- cmdArgsRun sample
   case database of
 #if WITH_SQLITE
     "sqlite" -> withSqliteConn connectionInfo $ runDbConn $ analyze schema

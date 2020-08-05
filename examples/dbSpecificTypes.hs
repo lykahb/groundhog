@@ -1,18 +1,24 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString.Char8 (unpack)
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
-import Database.Groundhog.TH
 import Database.Groundhog.Postgresql
+import Database.Groundhog.TH
 
-data Point = Point { pointX :: Int, pointY :: Int } deriving Show
+data Point = Point {pointX :: Int, pointY :: Int} deriving (Show)
 
 -- PostgreSQL keeps point in format "(x,y)". This instance relies on the correspondence between Haskell tuple format and PostgreSQL point format.
 instance PrimitivePersistField Point where
   toPrimitivePersistValue p (Point x y) = toPrimitivePersistValue p $ show (x, y)
-  fromPrimitivePersistValue p a = Point x y where
-    (x, y) = read $ fromPrimitivePersistValue p a
+  fromPrimitivePersistValue p a = Point x y
+    where
+      (x, y) = read $ fromPrimitivePersistValue p a
 
 instance PersistField Point where
   persistName _ = "Point"
@@ -29,9 +35,11 @@ instance PurePersistField Point where
   toPurePersistValues = primToPurePersistValues
   fromPurePersistValues = primFromPurePersistValues
 
-data MobilePhone = MobilePhone {number :: String, prepaidMoney :: String, location :: Point, ipAddress :: String} deriving Show
+data MobilePhone = MobilePhone {number :: String, prepaidMoney :: String, location :: Point, ipAddress :: String} deriving (Show)
 
-mkPersist defaultCodegenConfig [groundhog|
+mkPersist
+  defaultCodegenConfig
+  [groundhog|
 - entity: MobilePhone
   constructors:
     - name: MobilePhone

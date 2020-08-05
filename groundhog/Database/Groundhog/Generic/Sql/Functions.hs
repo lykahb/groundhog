@@ -1,21 +1,25 @@
-{-# LANGUAGE FlexibleContexts, TypeFamilies, OverloadedStrings, UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module has common SQL functions and operators which are supported in the most SQL databases
 module Database.Groundhog.Generic.Sql.Functions
-    ( like
-    , notLike
-    , in_
-    , notIn_
-    , lower
-    , upper
-    , case_
-    , SqlDb(..)
-    , cot
-    , atan2
-    , radians
-    , degrees
-    ) where
+  ( like,
+    notLike,
+    in_,
+    notIn_,
+    lower,
+    upper,
+    case_,
+    SqlDb (..),
+    cot,
+    atan2,
+    radians,
+    degrees,
+  )
+where
 
 import Data.Int (Int64)
 import Data.String
@@ -23,13 +27,19 @@ import Database.Groundhog.Core
 import Database.Groundhog.Expression
 import Database.Groundhog.Generic.Sql
 
-in_ :: (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
-    a -> [b] -> Cond db r
+in_ ::
+  (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
+  a ->
+  [b] ->
+  Cond db r
 in_ _ [] = Not CondEmpty
 in_ a bs = CondRaw $ Snippet $ \conf p -> [parens 45 p $ renderExpr conf (toExpr a) <> " IN (" <> commasJoin (map (renderExpr conf . toExpr) bs) <> ")"]
 
-notIn_ :: (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
-       a -> [b] -> Cond db r
+notIn_ ::
+  (SqlDb db, Expression db r a, Expression db r b, PrimitivePersistField b, Unifiable a b) =>
+  a ->
+  [b] ->
+  Cond db r
 notIn_ _ [] = CondEmpty
 notIn_ a bs = CondRaw $ Snippet $ \conf p -> [parens 45 p $ renderExpr conf (toExpr a) <> " NOT IN (" <> commasJoin (map (renderExpr conf . toExpr) bs) <> ")"]
 
@@ -77,9 +87,9 @@ instance (FloatingSqlDb db, PersistField a, Floating a) => Floating (Expr db r a
   asin x = mkExpr $ function "asin" [toExpr x]
   atan x = mkExpr $ function "atan" [toExpr x]
   acos x = mkExpr $ function "acos" [toExpr x]
-  sinh x = (exp x - exp (-x)) / 2
+  sinh x = (exp x - exp (- x)) / 2
   tanh x = (exp (2 * x) - 1) / (exp (2 * x) + 1)
-  cosh x = (exp x + exp (-x)) / 2
+  cosh x = (exp x + exp (- x)) / 2
   asinh x = log $ x + sqrt (x * x + 1)
   atanh x = log ((1 + x) / (1 - x)) / 2
   acosh x = log $ x + sqrt (x * x - 1)
@@ -99,32 +109,45 @@ instance (SqlDb db, PersistField a, Enum a) => Enum (Expr db r a) where
 
 instance (SqlDb db, PurePersistField a, Integral a) => Integral (Expr db r a) where
   quotRem x y = quotRem' x y
-  divMod x y = (div', mod') where
-    div' = mkExprWithConf $ \conf _ -> let
-             x' = prerenderExpr conf x
-             y' = prerenderExpr conf y
-       in case_ [ (x' >. zero &&. y' <. zero, (x' - y' - 1) `quot` y')
-                , (x' <. zero &&. y' >. zero, (x' - y' + 1) `quot` y')
-                ] (x' `quot` y')
-    mod' = mkExprWithConf $ \conf _ -> let
-             x' = prerenderExpr conf x
-             y' = prerenderExpr conf y
-       in case_ [ (x' >. zero &&. y' <. zero ||. x' <. zero &&. y' >. zero,
-                   case_ [((x' `rem` y') /=. zero, x' `rem` y' + y')] zero)
-                ] (x' `rem` y')
-    zero = 0 `asTypeOf` ((undefined :: Expr db r a -> a) x)
+  divMod x y = (div', mod')
+    where
+      div' = mkExprWithConf $ \conf _ ->
+        let x' = prerenderExpr conf x
+            y' = prerenderExpr conf y
+         in case_
+              [ (x' >. zero &&. y' <. zero, (x' - y' - 1) `quot` y'),
+                (x' <. zero &&. y' >. zero, (x' - y' + 1) `quot` y')
+              ]
+              (x' `quot` y')
+      mod' = mkExprWithConf $ \conf _ ->
+        let x' = prerenderExpr conf x
+            y' = prerenderExpr conf y
+         in case_
+              [ ( x' >. zero &&. y' <. zero ||. x' <. zero &&. y' >. zero,
+                  case_ [((x' `rem` y') /=. zero, x' `rem` y' + y')] zero
+                )
+              ]
+              (x' `rem` y')
+      zero = 0 `asTypeOf` ((undefined :: Expr db r a -> a) x)
   toInteger = error "toInteger: instance Integral (Expr db r a) does not have implementation"
 
-case_ :: (SqlDb db, ExpressionOf db r a a', ExpressionOf db r b a')
-      => [(Cond db r, a)] -- ^ Conditions
-      -> b          -- ^ It is returned when none of conditions is true
-      -> Expr db r a'
+case_ ::
+  (SqlDb db, ExpressionOf db r a a', ExpressionOf db r b a') =>
+  -- | Conditions
+  [(Cond db r, a)] ->
+  -- | It is returned when none of conditions is true
+  b ->
+  Expr db r a'
 case_ [] else_ = Expr $ toExpr else_
-case_ cases else_ = mkExpr $ Snippet $ \conf _ ->
-     ["case "
-  <> intercalateS (fromChar ' ') (map (rend conf) cases)
-  <> " else " <> renderExpr conf (toExpr else_)
-  <> " end"] where
-  rend conf (cond, a) = case renderCond conf cond of
-    Nothing -> error "case_: empty condition"
-    Just cond' -> "when " <> cond' <> " then " <> renderExpr conf (toExpr a)
+case_ cases else_ = mkExpr $
+  Snippet $ \conf _ ->
+    [ "case "
+        <> intercalateS (fromChar ' ') (map (rend conf) cases)
+        <> " else "
+        <> renderExpr conf (toExpr else_)
+        <> " end"
+    ]
+  where
+    rend conf (cond, a) = case renderCond conf cond of
+      Nothing -> error "case_: empty condition"
+      Just cond' -> "when " <> cond' <> " then " <> renderExpr conf (toExpr a)

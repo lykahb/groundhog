@@ -1,12 +1,19 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString.Char8 as BS
-import Database.Groundhog.TH
 import Database.Groundhog.Sqlite
+import Database.Groundhog.TH
 
 data User = User {name :: String, phoneNumber :: (String, String), bigAvatar :: BS.ByteString} deriving (Eq, Show)
 
-mkPersist defaultCodegenConfig [groundhog|
+mkPersist
+  defaultCodegenConfig
+  [groundhog|
 definitions:
   - entity: User
     keys:
@@ -19,16 +26,17 @@ definitions:
 |]
 
 main :: IO ()
-main = withSqliteConn ":memory:" $ runDbConn $ do
-  let jack = User "Jack" ("+380", "12-345-67-89") (BS.pack "BMP")
-      jill = User "Jill" ("+1", "98-765-43-12") (BS.pack "BMP")
-  runMigration $ migrate jack
-  mapM_ insert [jack, jill]
-  -- get usernames and phones. Only the required fields are fetched (phone in this case). Function project supports both regular and subfields. The expressions may have complex structure which includes SQL operators and functions
-  liftIO $ putStrLn "Uppercase usernames and phones"
-  phones <- project (upper ("username: " `append` NameField), PhoneNumberField ~> Tuple2_1Selector) $ (lower NameField `like` "ja%") `orderBy` [Asc AutoKeyField]
-  liftIO $ print phones
-  -- we can also use 'project' as a replacement for 'select' with extended options.
-  liftIO $ putStrLn "The special datatype 'AutoKeyField' projects to the entity autokey, unique key phantoms project to keys, and the constructor phantoms project to the data itself"
-  withIds <- project (AutoKeyField, Unique_name, UserConstructor) CondEmpty
-  liftIO $ print withIds
+main = withSqliteConn ":memory:" $
+  runDbConn $ do
+    let jack = User "Jack" ("+380", "12-345-67-89") (BS.pack "BMP")
+        jill = User "Jill" ("+1", "98-765-43-12") (BS.pack "BMP")
+    runMigration $ migrate jack
+    mapM_ insert [jack, jill]
+    -- get usernames and phones. Only the required fields are fetched (phone in this case). Function project supports both regular and subfields. The expressions may have complex structure which includes SQL operators and functions
+    liftIO $ putStrLn "Uppercase usernames and phones"
+    phones <- project (upper ("username: " `append` NameField), PhoneNumberField ~> Tuple2_1Selector) $ (lower NameField `like` "ja%") `orderBy` [Asc AutoKeyField]
+    liftIO $ print phones
+    -- we can also use 'project' as a replacement for 'select' with extended options.
+    liftIO $ putStrLn "The special datatype 'AutoKeyField' projects to the entity autokey, unique key phantoms project to keys, and the constructor phantoms project to the data itself"
+    withIds <- project (AutoKeyField, Unique_name, UserConstructor) CondEmpty
+    liftIO $ print withIds

@@ -1,23 +1,30 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances, StandaloneDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Main where
 
-import Database.Groundhog.Core
-import Database.Groundhog.TH
-import Database.Groundhog.Sqlite
 import Control.Exception.Safe
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Except
 import Control.Monad.Trans.Class
+import Control.Monad.Trans.Except
+import Database.Groundhog.Core
+import Database.Groundhog.Sqlite
+import Database.Groundhog.TH
 
-data Customer = Customer {customerName :: String, customerPhone :: String} deriving Show
+data Customer = Customer {customerName :: String, customerPhone :: String} deriving (Show)
 
 data TestException = TestException
-  deriving Show
+  deriving (Show)
 
 instance Exception TestException
 
-mkPersist defaultCodegenConfig [groundhog|
+mkPersist
+  defaultCodegenConfig
+  [groundhog|
 - entity: Customer               # Name of the datatype
   constructors:
     - name: Customer
@@ -28,7 +35,7 @@ mkPersist defaultCodegenConfig [groundhog|
 
 migration :: PersistBackendConn conn => Action conn ()
 migration = runMigration $ do
-    migrate (undefined :: Customer)
+  migrate (undefined :: Customer)
 
 insertCustomer :: (MonadIO m, PersistBackendConn conn) => Customer -> TryAction TestException m conn (Key Customer BackendSpecific)
 insertCustomer c = insert c

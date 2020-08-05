@@ -23,7 +23,7 @@ library
                    , mtl                      >= 2.0
                    , time                     >= 1.1.4
                    , attoparsec               >= 0.11
-                   , aeson                    >= 0.5
+                   , aeson                    >= 0.7
                    , scientific
                    , text                     >= 0.8
                    , containers               >= 0.2

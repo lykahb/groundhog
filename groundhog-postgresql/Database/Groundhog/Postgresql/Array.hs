@@ -1,49 +1,53 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, OverloadedStrings, UndecidableInstances, BangPatterns #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | See detailed documentation for PostgreSQL arrays at http://www.postgresql.org/docs/9.2/static/arrays.html and http://www.postgresql.org/docs/9.2/static/functions-array.html
 module Database.Groundhog.Postgresql.Array
-  (
-    Array(..)
-  , (!)
-  , (!:)
-  , append
-  , prepend
-  , arrayCat
-  , arrayDims
-  , arrayNDims
-  , arrayLower
-  , arrayUpper
-  , arrayLength
-  , arrayToString
-  , stringToArray
-  , any
-  , all
-  , (@>)
-  , (<@)
-  , overlaps
-  ) where
+  ( Array (..),
+    (!),
+    (!:),
+    append,
+    prepend,
+    arrayCat,
+    arrayDims,
+    arrayNDims,
+    arrayLower,
+    arrayUpper,
+    arrayLength,
+    arrayToString,
+    stringToArray,
+    any,
+    all,
+    (@>),
+    (<@),
+    overlaps,
+  )
+where
 
+import Control.Applicative
+import Control.Monad (mzero)
+import qualified Data.Aeson as A
+import qualified Data.Attoparsec.ByteString as A
+import Data.Attoparsec.ByteString.Char8
+import qualified Data.Attoparsec.Zepto as Z
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Builder as B
+import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString.Lazy as B (toStrict)
+import qualified Data.ByteString.Unsafe as B
+import Data.Monoid hiding ((<>))
+import Data.Traversable (traverse)
+import qualified Data.Vector as V
+import Data.Word
 import Database.Groundhog.Core
 import Database.Groundhog.Expression
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Sql hiding (append)
 import Database.Groundhog.Postgresql hiding (append)
-
-import Control.Applicative
-import Control.Monad (mzero)
-import qualified Data.Aeson as A
-import Data.Attoparsec.ByteString.Char8
-import qualified Data.Attoparsec.ByteString as A
-import qualified Data.Attoparsec.Zepto as Z
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as B (toStrict)
-import qualified Data.ByteString.Unsafe as B
-import qualified Data.ByteString.Builder as B
-import Data.Monoid hiding ((<>))
-import Data.Word
-import qualified Data.Vector as V
-import Data.Traversable (traverse)
 import Prelude hiding (all, any)
 
 -- | Represents PostgreSQL arrays
@@ -54,7 +58,7 @@ instance A.ToJSON a => A.ToJSON (Array a) where
 
 instance A.FromJSON a => A.FromJSON (Array a) where
   parseJSON (A.Array xs) = fmap (Array . V.toList) (traverse A.parseJSON xs)
-  parseJSON _            = mzero
+  parseJSON _ = mzero
 
 instance (ArrayElem a, PrimitivePersistField a) => PersistField (Array a) where
   persistName a = "Array" ++ delim : persistName ((undefined :: Array a -> a) a)
@@ -63,10 +67,11 @@ instance (ArrayElem a, PrimitivePersistField a) => PersistField (Array a) where
   dbType p a = DbTypePrimitive (arrayType p a) False Nothing Nothing
 
 arrayType :: (DbDescriptor db, ArrayElem a, PrimitivePersistField a) => proxy db -> Array a -> DbTypePrimitive
-arrayType p a = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"] where
-  elemType = case dbType p ((undefined :: Array a -> a) a) of
-    DbTypePrimitive t _ _ _ -> t
-    t -> error $ "arrayType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
+arrayType p a = DbOther $ OtherTypeDef $ [Right elemType, Left "[]"]
+  where
+    elemType = case dbType p ((undefined :: Array a -> a) a) of
+      DbTypePrimitive t _ _ _ -> t
+      t -> error $ "arrayType " ++ persistName a ++ ": expected DbTypePrimitive, got " ++ show t
 
 class ArrayElem a where
   parseElem :: Parser a
@@ -78,55 +83,65 @@ instance {-# OVERLAPPABLE #-} PrimitivePersistField a => ArrayElem a where
   parseElem = fmap (fromPrimitivePersistValue . PersistByteString) parseString
 
 instance (ArrayElem a, PrimitivePersistField a) => PrimitivePersistField (Array a) where
-  toPrimitivePersistValue (Array xs) = PersistCustom arr (vals []) where
-    arr = "ARRAY[" <> query <> "]::" <> fromString typ
-    RenderS query vals = commasJoin $ map (renderPersistValue . toPrimitivePersistValue) xs
-    typ = showSqlType $ arrayType (undefined :: p Postgresql) $ Array xs
-  fromPrimitivePersistValue a = parseHelper parser a where
-    dimensions = char '[' *> takeWhile1 (/= '=') *> char '='
-    parser = optional dimensions *> parseArr
+  toPrimitivePersistValue (Array xs) = PersistCustom arr (vals [])
+    where
+      arr = "ARRAY[" <> query <> "]::" <> fromString typ
+      RenderS query vals = commasJoin $ map (renderPersistValue . toPrimitivePersistValue) xs
+      typ = showSqlType $ arrayType (undefined :: p Postgresql) $ Array xs
+  fromPrimitivePersistValue a = parseHelper parser a
+    where
+      dimensions = char '[' *> takeWhile1 (/= '=') *> char '='
+      parser = optional dimensions *> parseArr
 
 parseString :: Parser ByteString
-parseString = (char '"' *> jstring_)
-          <|> takeWhile1 (\c -> c /= ',' && c /= '}')
+parseString =
+  (char '"' *> jstring_)
+    <|> takeWhile1 (\c -> c /= ',' && c /= '}')
 
 -- Borrowed from aeson
 jstring_ :: Parser ByteString
-jstring_ = {-# SCC "jstring_" #-} do
-  s <- A.scan False $ \s c -> if s then Just False
-                                   else if c == doubleQuote
-                                        then Nothing
-                                        else Just (c == backslash)
-  _ <- A.word8 doubleQuote
-  if backslash `B.elem` s
-    then case Z.parse unescape s of
-           Right r  -> return r
-           Left err -> fail err
-    else return s
+jstring_ =
+  {-# SCC "jstring_" #-}
+  do
+    s <- A.scan False $ \s c ->
+      if s
+        then Just False
+        else
+          if c == doubleQuote
+            then Nothing
+            else Just (c == backslash)
+    _ <- A.word8 doubleQuote
+    if backslash `B.elem` s
+      then case Z.parse unescape s of
+        Right r -> return r
+        Left err -> fail err
+      else return s
 {-# INLINE jstring_ #-}
 
 -- Borrowed from aeson
 unescape :: Z.Parser ByteString
-unescape = B.toStrict <$> B.toLazyByteString <$> go mempty where
-  go acc = do
-    h <- Z.takeWhile (/=backslash)
-    let rest = do
-          start <- Z.take 2
-          let !slash = B.unsafeHead start
-              !t = B.unsafeIndex start 1
-              escape = if t == doubleQuote || t == backslash
-                then t
-                else 255
-          if slash /= backslash || escape == 255
-            then fail "invalid array escape sequence"
-            else do
-            let cont m = go (acc `mappend` B.byteString h `mappend` m)
-                {-# INLINE cont #-}
-            cont (B.word8 escape)
-    done <- Z.atEnd
-    if done
-      then return (acc `mappend` B.byteString h)
-      else rest
+unescape = B.toStrict <$> B.toLazyByteString <$> go mempty
+  where
+    go acc = do
+      h <- Z.takeWhile (/= backslash)
+      let rest = do
+            start <- Z.take 2
+            let !slash = B.unsafeHead start
+                !t = B.unsafeIndex start 1
+                escape =
+                  if t == doubleQuote || t == backslash
+                    then t
+                    else 255
+            if slash /= backslash || escape == 255
+              then fail "invalid array escape sequence"
+              else do
+                let cont m = go (acc `mappend` B.byteString h `mappend` m)
+                    {-# INLINE cont #-}
+                cont (B.word8 escape)
+      done <- Z.atEnd
+      if done
+        then return (acc `mappend` B.byteString h)
+        else rest
 
 doubleQuote, backslash :: Word8
 doubleQuote = 34

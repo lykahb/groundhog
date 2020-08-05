@@ -1,28 +1,32 @@
-{-# LANGUAGE TypeFamilies, GADTs, TypeSynonymInstances, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, CPP, ConstraintKinds #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Database.Groundhog.Instances (Selector(..)) where
 
-import Database.Groundhog.Core
-import Database.Groundhog.Generic (primToPersistValue, primFromPersistValue, primToPurePersistValues, primFromPurePersistValues, primToSinglePersistValue, primFromSinglePersistValue, getUniqueFields)
+module Database.Groundhog.Instances (Selector (..)) where
 
 import qualified Data.Aeson as A
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Encoding.Error as T
 import Data.Bits (finiteBitSize)
+import qualified Data.ByteString.Base64 as B64
 import Data.ByteString.Char8 (ByteString, unpack)
 import qualified Data.ByteString.Lazy.Char8 as Lazy
-import qualified Data.ByteString.Base64 as B64
-import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Int (Int16, Int32, Int64, Int8)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.Text.Encoding.Error as T
+import qualified Data.Text.Lazy as TL
 import Data.Time (Day, TimeOfDay, UTCTime)
-import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC, utc, utcToZonedTime)
-import Data.Word (Word8, Word16, Word32, Word64)
-#if MIN_VERSION_aeson(0, 7, 0)
+import Data.Time.LocalTime (ZonedTime, utc, utcToZonedTime, zonedTimeToUTC)
+import Data.Word (Word16, Word32, Word64, Word8)
+import Database.Groundhog.Core
+import Database.Groundhog.Generic (getUniqueFields, primFromPersistValue, primFromPurePersistValues, primFromSinglePersistValue, primToPersistValue, primToPurePersistValues, primToSinglePersistValue)
+
 import qualified Data.Scientific
-#else
-import qualified Data.Attoparsec.Number as AN
-#endif
 
 instance (PersistField a', PersistField b') => Embedded (a', b') where
   data Selector (a', b') constr where
@@ -70,37 +74,37 @@ instance PurePersistField () where
 
 instance (PurePersistField a, PurePersistField b) => PurePersistField (a, b) where
   toPurePersistValues (a, b) = toPurePersistValues a . toPurePersistValues b
-  fromPurePersistValues xs = let
-    (a, rest0) = fromPurePersistValues xs
-    (b, rest1) = fromPurePersistValues rest0
-    in ((a, b), rest1)
+  fromPurePersistValues xs =
+    let (a, rest0) = fromPurePersistValues xs
+        (b, rest1) = fromPurePersistValues rest0
+     in ((a, b), rest1)
 
 instance (PurePersistField a, PurePersistField b, PurePersistField c) => PurePersistField (a, b, c) where
   toPurePersistValues (a, b, c) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c
-  fromPurePersistValues xs = let
-    (a, rest0) = fromPurePersistValues xs
-    (b, rest1) = fromPurePersistValues rest0
-    (c, rest2) = fromPurePersistValues rest1
-    in ((a, b, c), rest2)
+  fromPurePersistValues xs =
+    let (a, rest0) = fromPurePersistValues xs
+        (b, rest1) = fromPurePersistValues rest0
+        (c, rest2) = fromPurePersistValues rest1
+     in ((a, b, c), rest2)
 
 instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d) => PurePersistField (a, b, c, d) where
   toPurePersistValues (a, b, c, d) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c . toPurePersistValues d
-  fromPurePersistValues xs = let
-    (a, rest0) = fromPurePersistValues xs
-    (b, rest1) = fromPurePersistValues rest0
-    (c, rest2) = fromPurePersistValues rest1
-    (d, rest3) = fromPurePersistValues rest2
-    in ((a, b, c, d), rest3)
+  fromPurePersistValues xs =
+    let (a, rest0) = fromPurePersistValues xs
+        (b, rest1) = fromPurePersistValues rest0
+        (c, rest2) = fromPurePersistValues rest1
+        (d, rest3) = fromPurePersistValues rest2
+     in ((a, b, c, d), rest3)
 
 instance (PurePersistField a, PurePersistField b, PurePersistField c, PurePersistField d, PurePersistField e) => PurePersistField (a, b, c, d, e) where
   toPurePersistValues (a, b, c, d, e) = toPurePersistValues a . toPurePersistValues b . toPurePersistValues c . toPurePersistValues d . toPurePersistValues e
-  fromPurePersistValues xs = let
-    (a, rest0) = fromPurePersistValues xs
-    (b, rest1) = fromPurePersistValues rest0
-    (c, rest2) = fromPurePersistValues rest1
-    (d, rest3) = fromPurePersistValues rest2
-    (e, rest4) = fromPurePersistValues rest3
-    in ((a, b, c, d, e), rest4)
+  fromPurePersistValues xs =
+    let (a, rest0) = fromPurePersistValues xs
+        (b, rest1) = fromPurePersistValues rest0
+        (c, rest2) = fromPurePersistValues rest1
+        (d, rest3) = fromPurePersistValues rest2
+        (e, rest4) = fromPurePersistValues rest3
+     in ((a, b, c, d, e), rest4)
 
 instance PrimitivePersistField String where
   toPrimitivePersistValue s = PersistText (T.pack s)
@@ -227,11 +231,14 @@ instance PrimitivePersistField ZonedTime where
 
 instance PrimitivePersistField A.Value where
   toPrimitivePersistValue a = PersistByteString $ Lazy.toStrict $ A.encode a
-  fromPrimitivePersistValue x = (case x of
-    PersistString str -> decode' $ T.encodeUtf8 $ T.pack str
-    PersistText str -> decode' $ T.encodeUtf8 str
-    PersistByteString str -> decode' str
-    _ -> error $ "Expected Aeson.Value, received: " ++ show x) where
+  fromPrimitivePersistValue x =
+    ( case x of
+        PersistString str -> decode' $ T.encodeUtf8 $ T.pack str
+        PersistText str -> decode' $ T.encodeUtf8 str
+        PersistByteString str -> decode' str
+        _ -> error $ "Expected Aeson.Value, received: " ++ show x
+    )
+    where
       decode' str = case A.eitherDecode $ Lazy.fromStrict str of
         Right val -> val
         Left err -> error $ "Error decoding Aeson.Value: " ++ err
@@ -254,27 +261,49 @@ instance {-# OVERLAPPABLE #-} (PersistField a, PrimitivePersistField a) => Singl
   fromSinglePersistValue = primFromSinglePersistValue
 
 instance NeverNull String
+
 instance NeverNull T.Text
+
 instance NeverNull TL.Text
+
 instance NeverNull ByteString
+
 instance NeverNull Lazy.ByteString
+
 instance NeverNull Int
+
 instance NeverNull Int8
+
 instance NeverNull Int16
+
 instance NeverNull Int32
+
 instance NeverNull Int64
+
 instance NeverNull Word8
+
 instance NeverNull Word16
+
 instance NeverNull Word32
+
 instance NeverNull Word64
+
 instance NeverNull Double
+
 instance NeverNull Bool
+
 instance NeverNull Day
+
 instance NeverNull TimeOfDay
+
 instance NeverNull UTCTime
+
 instance NeverNull ZonedTime
+
 instance NeverNull A.Value
+
 instance PrimitivePersistField (Key v u) => NeverNull (Key v u)
+
 instance NeverNull (KeyForBackend db v)
 
 readHelper :: Read a => PersistValue -> String -> a
@@ -285,8 +314,8 @@ readHelper s errMessage = case s of
   _ -> error $ "readHelper: " ++ errMessage
   where
     readHelper' str = case reads str of
-      (a, _):_ -> a
-      _        -> error $ "readHelper: " ++ errMessage
+      (a, _) : _ -> a
+      _ -> error $ "readHelper: " ++ errMessage
 
 instance PersistField ByteString where
   persistName _ = "ByteString"
@@ -329,10 +358,10 @@ instance PersistField Int where
   toPersistValues = primToPersistValue
   fromPersistValues = primFromPersistValue
   dbType _ a = DbTypePrimitive (if finiteBitSize a == 32 then DbInt32 else DbInt64) False Nothing Nothing where
+
 #if !MIN_VERSION_base(4, 7, 0)
     finiteBitSize = bitSize
 #endif
-
 
 instance PersistField Int8 where
   persistName _ = "Int8"
@@ -423,10 +452,10 @@ instance PersistField ZonedTime where
 -- instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where -- HANGS
 instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
   persistName a = "Maybe" ++ delim : persistName ((undefined :: Maybe a -> a) a)
-  toPersistValues Nothing = return (PersistNull:)
+  toPersistValues Nothing = return (PersistNull :)
   toPersistValues (Just a) = toPersistValues a
   fromPersistValues [] = fail "fromPersistValues Maybe: empty list"
-  fromPersistValues (PersistNull:xs) = return (Nothing, xs)
+  fromPersistValues (PersistNull : xs) = return (Nothing, xs)
   fromPersistValues xs = fromPersistValues xs >>= \(x, xs') -> return (Just x, xs')
   dbType db a = case dbType db ((undefined :: Maybe a -> a) a) of
     DbTypePrimitive t _ def ref -> DbTypePrimitive t True def ref
@@ -438,7 +467,7 @@ instance {-# OVERLAPPABLE #-} (PersistField a) => PersistField [a] where
   persistName a = "List" ++ delim : delim : persistName ((undefined :: [] a -> a) a)
   toPersistValues l = insertList l >>= toPersistValues
   fromPersistValues [] = fail "fromPersistValues []: empty list"
-  fromPersistValues (x:xs) = getList (fromPrimitivePersistValue x) >>= \l -> return (l, xs)
+  fromPersistValues (x : xs) = getList (fromPrimitivePersistValue x) >>= \l -> return (l, xs)
   dbType db a = DbList (persistName a) $ dbType db ((undefined :: [] a -> a) a)
 
 instance PersistField () where
@@ -516,62 +545,70 @@ instance (DbDescriptor db, PersistEntity v, PersistField v) => PersistField (Key
 instance (EntityConstr v c, PersistField a) => Projection (Field v c a) a where
   type ProjectionDb (Field v c a) db = ()
   type ProjectionRestriction (Field v c a) r = r ~ RestrictionHolder v c
-  projectionExprs f = result where
-    result = (ExprField (fieldChain db f):)
-    db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
+  projectionExprs f = result
+    where
+      result = (ExprField (fieldChain db f) :)
+      db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
   projectionResult _ = fromPersistValues
 
 instance (EntityConstr v c, PersistField a) => Projection (SubField db v c a) a where
   type ProjectionDb (SubField db v c a) db' = db ~ db'
   type ProjectionRestriction (SubField db v c a) r = r ~ RestrictionHolder v c
-  projectionExprs f = result where
-    result = (ExprField (fieldChain db f):)
-    db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
+  projectionExprs f = result
+    where
+      result = (ExprField (fieldChain db f) :)
+      db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
   projectionResult _ = fromPersistValues
 
 instance PersistField a => Projection (Expr db r a) a where
   type ProjectionDb (Expr db r a) db' = db ~ db'
   type ProjectionRestriction (Expr db r a) r' = r ~ r'
-  projectionExprs (Expr e) = (e:)
+  projectionExprs (Expr e) = (e :)
   projectionResult _ = fromPersistValues
 
 instance a ~ Bool => Projection (Cond db r) a where
   type ProjectionDb (Cond db r) db' = db ~ db'
   type ProjectionRestriction (Cond db r) r' = r ~ r'
-  projectionExprs cond = (ExprCond cond:)
+  projectionExprs cond = (ExprCond cond :)
   projectionResult _ = fromPersistValues
 
 instance (EntityConstr v c, a ~ AutoKey v) => Projection (AutoKeyField v c) a where
   type ProjectionDb (AutoKeyField v c) db = ()
   type ProjectionRestriction (AutoKeyField v c) r = r ~ RestrictionHolder v c
-  projectionExprs f = result where
-    result = (ExprField (fieldChain db f):)
-    db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
+  projectionExprs f = result
+    where
+      result = (ExprField (fieldChain db f) :)
+      db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
   projectionResult _ = fromPersistValues
 
 instance EntityConstr v c => Projection (c (ConstructorMarker v)) v where
   type ProjectionDb (c (ConstructorMarker v)) db = ()
   type ProjectionRestriction (c (ConstructorMarker v)) r = r ~ RestrictionHolder v c
-  projectionExprs c = result where
-    result = ((map ExprField chains) ++)
-    chains = map (\f -> (f, [])) $ constrParams constr
-    e = entityDef db ((undefined :: c (ConstructorMarker v) -> v) c)
-    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
-    constr = constructors e !! cNum
-    db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
-  projectionResult c xs = toSinglePersistValue cNum >>= \cNum' -> fromEntityPersistValues (cNum':xs) where
-    cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
+  projectionExprs c = result
+    where
+      result = ((map ExprField chains) ++)
+      chains = map (\f -> (f, [])) $ constrParams constr
+      e = entityDef db ((undefined :: c (ConstructorMarker v) -> v) c)
+      cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
+      constr = constructors e !! cNum
+      db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
+  projectionResult c xs = toSinglePersistValue cNum >>= \cNum' -> fromEntityPersistValues (cNum' : xs)
+    where
+      cNum = entityConstrNum ((undefined :: c (ConstructorMarker v) -> proxy v) c) c
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u))
-      => Projection (u (UniqueMarker v)) k where
+instance
+  (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u)) =>
+  Projection (u (UniqueMarker v)) k
+  where
   type ProjectionDb (u (UniqueMarker v)) db = ()
   type ProjectionRestriction (u (UniqueMarker v)) (RestrictionHolder v' c) = v ~ v'
-  projectionExprs u = result where
-    result = ((map ExprField chains) ++)
-    uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
-    chains = map (\f -> (f, [])) $ getUniqueFields uDef
-    constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
-    db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
+  projectionExprs u = result
+    where
+      result = ((map ExprField chains) ++)
+      uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
+      chains = map (\f -> (f, [])) $ getUniqueFields uDef
+      constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
+      db = (undefined :: ([UntypedExpr db r] -> [UntypedExpr db r]) -> proxy db) result
   projectionResult _ = fromPersistValues
 
 instance (Projection a1 a1', Projection a2 a2') => Projection (a1, a2) (a1', a2') where
@@ -617,19 +654,23 @@ instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4
     return ((a, b, c, d, e), rest4)
 
 instance (EntityConstr v c, a ~ AutoKey v) => Assignable (AutoKeyField v c) a
+
 instance (EntityConstr v c, PersistField a) => Assignable (SubField db v c a) a
+
 instance (EntityConstr v c, PersistField a) => Assignable (Field v c a) a
+
 instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u)) => Assignable (u (UniqueMarker v)) k
 
 instance (EntityConstr v c, a ~ AutoKey v) => FieldLike (AutoKeyField v c) a where
-  fieldChain db a = chain where
-    chain = ((name, dbType db k), [])
-    -- if it is Nothing, the name would not be used because the type will be () with no columns
-    name = maybe "will_be_ignored" id $ constrAutoKeyName $ constructors e !! cNum
-    k = (undefined :: AutoKeyField v c -> AutoKey v) a
+  fieldChain db a = chain
+    where
+      chain = ((name, dbType db k), [])
+      -- if it is Nothing, the name would not be used because the type will be () with no columns
+      name = maybe "will_be_ignored" id $ constrAutoKeyName $ constructors e !! cNum
+      k = (undefined :: AutoKeyField v c -> AutoKey v) a
 
-    e = entityDef db ((undefined :: AutoKeyField v c -> v) a)
-    cNum = entityConstrNum ((undefined :: AutoKeyField v c -> proxy v) a) ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
+      e = entityDef db ((undefined :: AutoKeyField v c -> v) a)
+      cNum = entityConstrNum ((undefined :: AutoKeyField v c -> proxy v) a) ((undefined :: AutoKeyField v c -> c (ConstructorMarker v)) a)
 
 instance (EntityConstr v c, PersistField a) => FieldLike (SubField db v c a) a where
   fieldChain _ (SubField a) = a
@@ -637,33 +678,35 @@ instance (EntityConstr v c, PersistField a) => FieldLike (SubField db v c a) a w
 instance (EntityConstr v c, PersistField a) => FieldLike (Field v c a) a where
   fieldChain = entityFieldChain
 
-instance (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u))
-      => FieldLike (u (UniqueMarker v)) k where
-  fieldChain db u = chain where
-    uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
-    chain = (("will_be_ignored", DbEmbedded (EmbeddedDef True $ getUniqueFields uDef) Nothing), [])
-    constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
+instance
+  (PersistEntity v, IsUniqueKey k, k ~ Key v (Unique u)) =>
+  FieldLike (u (UniqueMarker v)) k
+  where
+  fieldChain db u = chain
+    where
+      uDef = constrUniques constr !! uniqueNum ((undefined :: u (UniqueMarker v) -> Key v (Unique u)) u)
+      chain = (("will_be_ignored", DbEmbedded (EmbeddedDef True $ getUniqueFields uDef) Nothing), [])
+      constr = head $ constructors (entityDef db ((undefined :: u (UniqueMarker v) -> v) u))
 
 instance (PersistEntity v, EntityConstr' (IsSumType v) c) => EntityConstr v c where
   entityConstrNum v = entityConstrNum' $ (undefined :: proxy v -> IsSumType v) v
+
 class EntityConstr' flag c where
   entityConstrNum' :: flag -> c (a :: * -> *) -> Int
+
 instance EntityConstr' HFalse c where
   entityConstrNum' _ _ = 0
+
 instance Constructor c => EntityConstr' HTrue c where
   entityConstrNum' _ = phantomConstrNum
 
 instance A.FromJSON PersistValue where
   parseJSON (A.String t) = return $ PersistText t
-#if MIN_VERSION_aeson(0, 7, 0)
-  parseJSON (A.Number n) = return $
-    if fromInteger (floor n) == n
-      then PersistInt64 $ floor n
-      else PersistDouble $ fromRational $ toRational n
-#else
-  parseJSON (A.Number (AN.I i)) = return $ PersistInt64 $ fromInteger i
-  parseJSON (A.Number (AN.D d)) = return $ PersistDouble d
-#endif
+  parseJSON (A.Number n) =
+    return $
+      if fromInteger (floor n) == n
+        then PersistInt64 $ floor n
+        else PersistDouble $ fromRational $ toRational n
   parseJSON (A.Bool b) = return $ PersistBool b
   parseJSON A.Null = return $ PersistNull
   parseJSON a = fail $ "parseJSON PersistValue: unexpected " ++ show a
@@ -673,12 +716,9 @@ instance A.ToJSON PersistValue where
   toJSON (PersistText t) = A.String t
   toJSON (PersistByteString b) = A.String $ T.decodeUtf8 $ B64.encode b
   toJSON (PersistInt64 i) = A.Number $ fromIntegral i
-  toJSON (PersistDouble d) = A.Number $
-#if MIN_VERSION_aeson(0, 7, 0)
-    Data.Scientific.fromFloatDigits d
-#else
-    AN.D d
-#endif
+  toJSON (PersistDouble d) =
+    A.Number $
+      Data.Scientific.fromFloatDigits d
   toJSON (PersistBool b) = A.Bool b
   toJSON (PersistTimeOfDay t) = A.String $ T.pack $ show t
   toJSON (PersistUTCTime u) = A.String $ T.pack $ show u

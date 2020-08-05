@@ -1,91 +1,96 @@
-{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, ScopedTypeVariables, FlexibleContexts, FlexibleInstances, StandaloneDeriving, EmptyDataDecls, CPP, DeriveDataTypeable #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 
-module GroundhogTest (
-      testSelect
-    , testSelectDistinct
-    , testCond
-    , testArith
-    , testProjectionSql
-    , testNumber
-    , testPersistSettings
-    , testEmbedded
-    , testInsert
-    , testMaybe
-    , testCount
-    , testUpdate
-    , testComparison
-    , testEncoding
-    , testDelete
-    , testDeleteBy
-    , testDeleteAll
-    , testReplaceSingle
-    , testReplaceMulti
-    , testReplaceBy
-    , testTuple
-    , testTupleList
-    , testMigrateAddColumnSingle
-    , testMigrateAddUniqueConstraint
-    , testMigrateDropUniqueConstraint
-    , testMigrateAddUniqueIndex
-    , testMigrateDropUniqueIndex
-    , testMigrateAddDropNotNull
-    , testMigrateAddConstructorToMany
-    , testMigrateChangeType
-    , testLongNames
-    , testReference
-    , testMaybeReference
-    , testUniqueKey
-    , testForeignKeyUnique
-    , testProjection
-    , testKeyNormalization
-    , testAutoKeyField
-    , testStringAutoKey
-    , testTime
-    , testPrimitiveData
-    , testConverter
-    , testNoColumns
-    , testNoKeys
-    , testJSON
-    , testTryAction
-    , testMigrateOrphanConstructors
-    , testSchemas
-    , testFloating
-    , testListTriggersOnDelete
-    , testListTriggersOnUpdate
-    , testSchemaAnalysis
+module GroundhogTest
+  ( testSelect,
+    testSelectDistinct,
+    testCond,
+    testArith,
+    testProjectionSql,
+    testNumber,
+    testPersistSettings,
+    testEmbedded,
+    testInsert,
+    testMaybe,
+    testCount,
+    testUpdate,
+    testComparison,
+    testEncoding,
+    testDelete,
+    testDeleteBy,
+    testDeleteAll,
+    testReplaceSingle,
+    testReplaceMulti,
+    testReplaceBy,
+    testTuple,
+    testTupleList,
+    testMigrateAddColumnSingle,
+    testMigrateAddUniqueConstraint,
+    testMigrateDropUniqueConstraint,
+    testMigrateAddUniqueIndex,
+    testMigrateDropUniqueIndex,
+    testMigrateAddDropNotNull,
+    testMigrateAddConstructorToMany,
+    testMigrateChangeType,
+    testLongNames,
+    testReference,
+    testMaybeReference,
+    testUniqueKey,
+    testForeignKeyUnique,
+    testProjection,
+    testKeyNormalization,
+    testAutoKeyField,
+    testStringAutoKey,
+    testTime,
+    testPrimitiveData,
+    testConverter,
+    testNoColumns,
+    testNoKeys,
+    testJSON,
+    testTryAction,
+    testMigrateOrphanConstructors,
+    testSchemas,
+    testFloating,
+    testListTriggersOnDelete,
+    testListTriggersOnUpdate,
+    testSchemaAnalysis,
 #if WITH_SQLITE
-    , testSchemaAnalysisSqlite
+    testSchemaAnalysisSqlite,
 #endif
 #if WITH_POSTGRESQL
-    , testSchemaAnalysisPostgresql
-    , testGeometry
-    , testArrays
-    , testSelectDistinctOn
-    , testExpressionIndex
-    , testHStore
+    testSchemaAnalysisPostgresql,
+    testGeometry,
+    testArrays,
+    testSelectDistinctOn,
+    testExpressionIndex,
+    testHStore,
 #endif
 #if WITH_MYSQL
     , testSchemaAnalysisMySQL
 #endif
-) where
+  )
+where
 
 import qualified Control.Exception as E
 import Control.Exception.Base (SomeException)
-import Control.Monad (liftM, forM_, unless)
+import Control.Monad (forM_, liftM, unless)
 import Control.Monad.Catch (MonadCatch)
 import Control.Monad.Fail (MonadFail)
-import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl, control)
 import Control.Monad.Trans.Except (throwE)
-import Database.Groundhog
-import Database.Groundhog.Core
-import Database.Groundhog.Generic
-import Database.Groundhog.Generic.Migration
-import Database.Groundhog.Generic.Sql
-import Database.Groundhog.Generic.Sql.Functions
-import Database.Groundhog.TH
 #if WITH_SQLITE
 import Database.Groundhog.Sqlite
 #endif
@@ -104,8 +109,8 @@ import qualified Data.Aeson as A
 import Data.Function (on)
 import Data.Int
 import Data.List (intercalate, isInfixOf, sort)
-import Data.Maybe (fromMaybe, fromJust)
 import qualified Data.Map as Map
+import Data.Maybe (fromJust, fromMaybe)
 import qualified Data.Text as TextStrict
 import qualified Data.Text.Lazy as Text
 import qualified Data.Text.Lazy.Builder as Text
@@ -114,28 +119,51 @@ import qualified Data.Time.Clock.POSIX as Time
 import qualified Data.Traversable as T
 import Data.Typeable (Typeable)
 import Data.Word
-import qualified Migration.Old as Old
+import Database.Groundhog
+import Database.Groundhog.Core
+import Database.Groundhog.Generic
+import Database.Groundhog.Generic.Migration
+import Database.Groundhog.Generic.Sql
+import Database.Groundhog.Generic.Sql.Functions
+import Database.Groundhog.TH
 import qualified Migration.New as New
+import qualified Migration.Old as Old
 import qualified Test.HUnit as H
 import Prelude hiding (catch)
 
 data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, word16 :: Word16, int32 :: Int32, word32 :: Word32, int64 :: Int64, word64 :: Word64} deriving (Eq, Show)
+
 data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
+
 data Single a = Single {single :: a} deriving (Eq, Show)
+
 data Multi a = First {first :: Int} | Second {second :: a} deriving (Eq, Show)
+
 data Settable = Settable {settable1 :: String, settable2 :: Maybe (Key (Single String) BackendSpecific), settableTuple :: (Int, (String, Maybe Int64))}
+
 data Keys = Keys {refDirect :: Single String, refKey :: DefaultKey (Single String), refDirectMaybe :: Maybe (Single String), refKeyMaybe :: Maybe (DefaultKey (Single String))}
+
 data EmbeddedSample = EmbeddedSample {embedded1 :: String, embedded2 :: (Int, Int)} deriving (Eq, Show)
-data UniqueKeySample = UniqueKeySample { uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Maybe Int } deriving (Eq, Show)
-data InCurrentSchema = InCurrentSchema { inCurrentSchema :: Maybe (Key InAnotherSchema BackendSpecific) }
-data InAnotherSchema = InAnotherSchema { inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific) }
+
+data UniqueKeySample = UniqueKeySample {uniqueKey1 :: Int, uniqueKey2 :: Int, uniqueKey3 :: Maybe Int} deriving (Eq, Show)
+
+data InCurrentSchema = InCurrentSchema {inCurrentSchema :: Maybe (Key InAnotherSchema BackendSpecific)}
+
+data InAnotherSchema = InAnotherSchema {inAnotherSchema :: Maybe (Key InCurrentSchema BackendSpecific)}
+
 data EnumTest = Enum1 | Enum2 | Enum3 deriving (Eq, Show, Enum)
+
 data ShowRead = ShowRead String Int deriving (Eq, Show, Read)
+
 newtype NotFieldInstance = NotFieldInstance String deriving (Eq, Show, Read)
-data ConverterTest = ConverterTest { convertedField :: NotFieldInstance} deriving (Eq, Show, Read)
+
+data ConverterTest = ConverterTest {convertedField :: NotFieldInstance} deriving (Eq, Show, Read)
+
 data NoColumns = NoColumns deriving (Eq, Show)
+
 data NoKeys = NoKeys Int Int deriving (Eq, Show)
-data ExpressionIndex = ExpressionIndex { expressionIndex :: Int } deriving (Eq, Show)
+
+data ExpressionIndex = ExpressionIndex {expressionIndex :: Int} deriving (Eq, Show)
 
 data TestException = TestException
   deriving (Show, Typeable)
@@ -144,18 +172,27 @@ instance E.Exception TestException
 
 -- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
 deriving instance Eq Keys
+
 deriving instance Show Keys
+
 deriving instance Eq Settable
+
 deriving instance Show Settable
+
 deriving instance Eq InCurrentSchema
+
 deriving instance Show InCurrentSchema
+
 deriving instance Eq InAnotherSchema
+
 deriving instance Show InAnotherSchema
 
 notFieldInstanceConverter :: (NotFieldInstance -> String, String -> NotFieldInstance)
 notFieldInstanceConverter = (\(NotFieldInstance s) -> s, NotFieldInstance)
 
-mkPersist defaultCodegenConfig [groundhog|
+mkPersist
+  defaultCodegenConfig
+  [groundhog|
 - entity: Number
 - entity: MaybeContext
 - entity: Single
@@ -242,9 +279,11 @@ mkPersist defaultCodegenConfig [groundhog|
           fields: [{expr: "(abs(\"expressionIndex\") + 1)" }]
 |]
 
-data HoldsUniqueKey = HoldsUniqueKey { foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column) } deriving (Eq, Show)
+data HoldsUniqueKey = HoldsUniqueKey {foreignUniqueKey :: Key UniqueKeySample (Unique Unique_key_one_column)} deriving (Eq, Show)
 
-mkPersist defaultCodegenConfig [groundhog|
+mkPersist
+  defaultCodegenConfig
+  [groundhog|
 - entity: HoldsUniqueKey
   keys:
     - name: foreignUniqueKey
@@ -261,9 +300,9 @@ migr v = do
   executeMigration m1
   m2 <- createMigration $ migrate v
   let afterMigration = filter (/= Right []) (Map.elems m2)
-  liftIO $ unless (null afterMigration) $
-    H.assertFailure $ ("first migration: " ++ show (Map.elems m1) ++ "\nsecond migration:" ++ show afterMigration)
-
+  liftIO $
+    unless (null afterMigration) $
+      H.assertFailure $ ("first migration: " ++ show (Map.elems m1) ++ "\nsecond migration:" ++ show afterMigration)
 
 (@=?) :: (Eq a, Show a, MonadIO m) => a -> a -> m ()
 expected @=? actual = liftIO $ expected H.@=? actual
@@ -296,9 +335,10 @@ testPersistSettings = do
   let queries = case m of
         Just (Right qs) -> intercalate ";" $ map (\(_, _, q) -> q) qs
         t -> fail $ "Unexpected migration result: " ++ show m
-      ref = if backendName proxy == "mysql"
-        then "(`thirdTupleElement`) REFERENCES `test`.`sqlsettable`(`settable_id`)"
-        else "(\"thirdTupleElement\") REFERENCES \"sqlsettable\"(\"settable_id\")"
+      ref =
+        if backendName proxy == "mysql"
+          then "(`thirdTupleElement`) REFERENCES `test`.`sqlsettable`(`settable_id`)"
+          else "(\"thirdTupleElement\") REFERENCES \"sqlsettable\"(\"settable_id\")"
       expectedNames = ["settable_id", "sqlsettable1", "firstTupleElement", "secondTupleElement", "thirdTupleElement", "someconstraint", "varchar(50)", ref]
       absent = filter (not . (`isInfixOf` queries)) expectedNames
   liftIO $ null absent H.@? ("Migration should contain " ++ show absent ++ ":\n" ++ queries)
@@ -388,19 +428,19 @@ testArith = do
   [(-6, -1)] @=?? project (quotRem (liftExpr SingleField - 20) 3) (AutoKeyField ==. k)
   [(-7, 2)] @=?? project (divMod (liftExpr SingleField - 20) 3) (AutoKeyField ==. k)
 
-testCond :: forall m db . (PersistBackend m, db ~ Conn m, SqlDb db) => m ()
+testCond :: forall m db. (PersistBackend m, db ~ Conn m, SqlDb db) => m ()
 testCond = do
   proxy <- phantomDb
-  let rend :: forall r . Cond (Conn m) r -> Maybe (RenderS (Conn m) r)
+  let rend :: forall r. Cond (Conn m) r -> Maybe (RenderS (Conn m) r)
       rend = renderCond $ RenderConfig id
   let (===) :: forall r a. (PrimitivePersistField a) => (String, [a]) -> Cond (Conn m) r -> m ()
-      (query, vals) === cond = let
-            Just (RenderS q v) = rend cond
+      (query, vals) === cond =
+        let Just (RenderS q v) = rend cond
             equals = Text.pack $ case backendName proxy of
-               "sqlite" -> " IS "
-               "postgresql" -> " IS NOT DISTINCT FROM "
-               "mysql" -> "<=>"
-               _ -> "="
+              "sqlite" -> " IS "
+              "postgresql" -> " IS NOT DISTINCT FROM "
+              "mysql" -> "<=>"
+              _ -> "="
             query' = Utf8 $ Text.fromLazyText $ Text.replace (Text.pack " IS ") equals $ Text.pack query
          in (query', map toPrimitivePersistValue vals) @=? (q, v [])
 
@@ -416,9 +456,9 @@ testCond = do
   ("?=single#val0 AND ?=single#val1", [1, 2 :: Int]) === ((1 :: Int, 2 :: Int) ==. SingleField)
   ("?=single+?*?", [1, 2, 3 :: Int]) === ((1 :: Int) ==. liftExpr SingleField + 2 * 3)
 
---  ("?-single=?", [1, 2 :: Int]) === (1 - liftExpr SingleField ==. (2 :: Int))
+  --  ("?-single=?", [1, 2 :: Int]) === (1 - liftExpr SingleField ==. (2 :: Int))
   ("?*single>single", [1 :: Int]) === (intNum 1 * liftExpr SingleField >. SingleField)
---  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + liftExpr SingleField >=. liftExpr SingleField - 2)
+  --  ("?+single>=single-?", [1, 2 :: Int]) === (intNum 1 + liftExpr SingleField >=. liftExpr SingleField - 2)
 
   -- test parentheses
   ("NOT (NOT single=? OR ?=? AND ?=?)", [0, 1, 2, 3, 4 :: Int]) === (Not $ Not (SingleField ==. (0 :: Int)) ||. (1 :: Int, 3 :: Int) ==. (2 :: Int, 4 :: Int))
@@ -474,7 +514,7 @@ testComparison = do
   [val1] @=? result1
   result2 <- select $ SingleField /=. (1 :: Int)
   [val2] @=? result2
-  result3 <- select $ SingleField <.  (2 :: Int)
+  result3 <- select $ SingleField <. (2 :: Int)
   [val1] @=? result3
   result4 <- select $ SingleField >. (1 :: Int)
   [val2] @=? result4
@@ -485,7 +525,7 @@ testComparison = do
 
 testEncoding :: PersistBackend m => m ()
 testEncoding = do
-  let val = Single $ "\x0001\x0081\x0801\x1001" ++ ['\1'..'\255']
+  let val = Single $ "\x0001\x0081\x0801\x1001" ++ ['\1' .. '\255']
   migr val
   k <- insert val
   val' <- get k
@@ -865,33 +905,33 @@ testJSON = do
   -- test conversion of Key to JSON
   A.Success k @=? A.fromJSON (A.toJSON k)
 
-testTryAction :: ( MonadIO m
-                 , MonadBaseControl IO m
-                 , MonadCatch m
-                 , MonadFail m
-                 , TryConnectionManager conn
-                 , ConnectionManager conn
-                 , PersistBackendConn conn
-                 , ExtractConnection conn conn)
-              => conn -> m ()
+testTryAction ::
+  ( MonadIO m,
+    MonadBaseControl IO m,
+    MonadCatch m,
+    MonadFail m,
+    TryConnectionManager conn,
+    ConnectionManager conn,
+    PersistBackendConn conn,
+    ExtractConnection conn conn
+  ) =>
+  conn ->
+  m ()
 testTryAction c = do
   result <- runTryDbConn success c
   checkRight result
 
   result <- runTryDbConn dbException c
-  checkLeft result  -- should be (Left error)
-
+  checkLeft result -- should be (Left error)
   result <- runTryDbConn throwException c
-  checkLeft result  -- should be (Left error)
-
+  checkLeft result -- should be (Left error)
   where
     dbException :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     dbException = do
       let val = UniqueKeySample 1 2 (Just 3)
       migr val
       insert val
-      insert val  -- should fail with uniqueness exception
-
+      insert val -- should fail with uniqueness exception
     throwException :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     throwException = do
       lift $ throwE TestException
@@ -918,14 +958,14 @@ testFloating = do
         actual <- liftM head $ project expr $ AutoKeyField ==. k
         liftIO $ unless (abs (expected - actual) < 0.0001) $ expected @=? actual
   180 @=??~ degrees SingleField
-  pi  @=??~ radians (degrees SingleField)
-  0   @=??~ sin (liftExpr SingleField)
-  (-1)@=??~ cos (liftExpr SingleField)
-  1   @=??~ tan (liftExpr SingleField / 4)
-  0   @=??~ cot (liftExpr SingleField / 2)
-  (pi/2) @=??~ asin (sin $ liftExpr SingleField / 2)
-  pi  @=??~ acos (cos $ liftExpr SingleField)
-  exp 2   @=??~ exp 2
+  pi @=??~ radians (degrees SingleField)
+  0 @=??~ sin (liftExpr SingleField)
+  (-1) @=??~ cos (liftExpr SingleField)
+  1 @=??~ tan (liftExpr SingleField / 4)
+  0 @=??~ cot (liftExpr SingleField / 2)
+  (pi / 2) @=??~ asin (sin $ liftExpr SingleField / 2)
+  pi @=??~ acos (cos $ liftExpr SingleField)
+  exp 2 @=??~ exp 2
   sqrt pi @=??~ sqrt (liftExpr SingleField)
   exp pi @=??~ exp (liftExpr SingleField)
   (pi ** 2) @=??~ (liftExpr SingleField ** 2)
@@ -946,15 +986,19 @@ testSchemaAnalysis = do
   singleInfo <- analyzeTable (Nothing, persistName val)
   uniqueInfo <- analyzeTable (Nothing, persistName (undefined :: UniqueKeySample))
   let match (TableInfo cols1 uniqs1 refs1) (TableInfo cols2 uniqs2 refs2) =
-           haveSameElems ((==) `on` \x -> x {colDefault = Nothing}) cols1 cols2
-        && haveSameElems ((==) `on` \x -> x {uniqueDefName = Just ""}) uniqs1 uniqs2
-        && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` (snd . referencedTableName)) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2 ) refs1 refs2
-      expectedSingleInfo = TableInfo [Column "id" False DbInt64 Nothing, Column "single#uniqueKey2" False DbInt64 Nothing, Column "single#uniqueKey3" True DbInt64 Nothing]
-        [UniqueDef Nothing (UniquePrimary True) [Left "id"]]
-        [(Nothing, Reference (Nothing, "UniqueKeySample") [("single#uniqueKey2","uniqueKey2"), ("single#uniqueKey3","uniqueKey3")] Nothing Nothing)]
-      expectedUniqueInfo = TableInfo [Column "uniqueKey1" False DbInt64 Nothing, Column "uniqueKey2" False DbInt64 Nothing, Column "uniqueKey3" True DbInt64 Nothing]
-        [UniqueDef Nothing UniqueConstraint [Left "uniqueKey1"], UniqueDef Nothing UniqueConstraint [Left "uniqueKey2",Left "uniqueKey3"], UniqueDef Nothing (UniquePrimary False) [Left "uniqueKey1", Left "uniqueKey2"]]
-        []
+        haveSameElems ((==) `on` \x -> x {colDefault = Nothing}) cols1 cols2
+          && haveSameElems ((==) `on` \x -> x {uniqueDefName = Just ""}) uniqs1 uniqs2
+          && haveSameElems (\(_, r1) (_, r2) -> ((==) `on` (snd . referencedTableName)) r1 r2 && (haveSameElems (==) `on` referencedColumns) r1 r2) refs1 refs2
+      expectedSingleInfo =
+        TableInfo
+          [Column "id" False DbInt64 Nothing, Column "single#uniqueKey2" False DbInt64 Nothing, Column "single#uniqueKey3" True DbInt64 Nothing]
+          [UniqueDef Nothing (UniquePrimary True) [Left "id"]]
+          [(Nothing, Reference (Nothing, "UniqueKeySample") [("single#uniqueKey2", "uniqueKey2"), ("single#uniqueKey3", "uniqueKey3")] Nothing Nothing)]
+      expectedUniqueInfo =
+        TableInfo
+          [Column "uniqueKey1" False DbInt64 Nothing, Column "uniqueKey2" False DbInt64 Nothing, Column "uniqueKey3" True DbInt64 Nothing]
+          [UniqueDef Nothing UniqueConstraint [Left "uniqueKey1"], UniqueDef Nothing UniqueConstraint [Left "uniqueKey2", Left "uniqueKey3"], UniqueDef Nothing (UniquePrimary False) [Left "uniqueKey1", Left "uniqueKey2"]]
+          []
 
   case singleInfo of
     Just t | match t expectedSingleInfo -> return ()
@@ -1099,9 +1143,10 @@ assertExc err m = do
   unless happened $ liftIO (H.assertFailure err)
 
 reescape :: DbDescriptor db => proxy db -> String -> String
-reescape proxy query = if backendName proxy == "mysql"
-  then map (\c -> if c == '"' then '`' else c) query
-  else query
+reescape proxy query =
+  if backendName proxy == "mysql"
+    then map (\c -> if c == '"' then '`' else c) query
+    else query
 
 executeRaw' :: PersistBackend m => String -> [PersistValue] -> m ()
 executeRaw' query vals = do
@@ -1112,7 +1157,6 @@ queryRaw' :: PersistBackend m => String -> [PersistValue] -> m (RowStream [Persi
 queryRaw' query vals = do
   proxy <- phantomDb
   queryRaw True (reescape proxy query) vals
-
 
 -- These helpers are useful for Either a SomeException since the exception is not Eq and cannot be compared
 checkLeft :: MonadIO m => Either a b -> m ()

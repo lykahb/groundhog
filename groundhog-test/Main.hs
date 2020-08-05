@@ -1,20 +1,20 @@
-{-# LANGUAGE FlexibleContexts, TypeFamilies, CPP #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- stack test --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite
 module Main where
 
-import GroundhogTest
-import Database.Groundhog.Generic.Sql
-import Database.Groundhog.Core
-
-import Test.Framework (defaultMain, testGroup, Test)
-import Test.Framework.Providers.HUnit (testCase)
-
 import Control.Monad (forM_)
-import Control.Monad.Fail (MonadFail)
 import Control.Monad.Catch (MonadCatch)
-import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad.Fail (MonadFail)
+import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Control (MonadBaseControl)
+import Database.Groundhog.Core
+import Database.Groundhog.Generic.Sql
+import GroundhogTest
+import Test.Framework (Test, defaultMain, testGroup)
+import Test.Framework.Providers.HUnit (testCase)
 
 #if WITH_SQLITE
 import Database.Groundhog.Sqlite
@@ -79,69 +79,78 @@ cleanMySQL = do
 #endif
 
 mkSqlTestSuite :: (PersistBackend m, SqlDb (Conn m)) => (m () -> IO ()) -> [Test]
-mkSqlTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testSelect", testSelect)
-  , ("testCond", testCond)
-  , ("testArith", testArith)
-  , ("testProjectionSql", testProjectionSql)
-  ]
+mkSqlTestSuite run =
+  map
+    (\(name, func) -> testCase name $ run func)
+    [ ("testSelect", testSelect),
+      ("testCond", testCond),
+      ("testArith", testArith),
+      ("testProjectionSql", testProjectionSql)
+    ]
 
 mkTestSuite :: (PersistBackend m, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
-mkTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testNumber", testNumber)
-  , ("testPersistSettings", testPersistSettings)
-  , ("testEmbedded", testEmbedded)
-  , ("testSelectDistinct", testSelectDistinct)
-  , ("testInsert", testInsert)
-  , ("testMaybe", testMaybe)
-  , ("testCount", testCount)
-  , ("testUpdate", testUpdate)
-  , ("testComparison", testComparison)
-  , ("testEncoding", testEncoding)
-  , ("testDelete", testDelete)
-  , ("testDeleteBy", testDeleteBy)
-  , ("testDeleteAll", testDeleteAll)
-  , ("testReplaceSingle", testReplaceSingle)
-  , ("testReplaceMulti", testReplaceMulti)
-  , ("testReplaceBy", testReplaceBy)
-  , ("testTuple", testTuple)
-  , ("testTupleList", testTupleList)
-  , ("testMigrateAddColumnSingle", testMigrateAddColumnSingle)
-  , ("testMigrateAddUniqueConstraint", testMigrateAddUniqueConstraint)
-  , ("testMigrateDropUniqueConstraint", testMigrateDropUniqueConstraint)
-  , ("testMigrateAddUniqueIndex", testMigrateAddUniqueIndex)
-  , ("testMigrateDropUniqueIndex", testMigrateDropUniqueIndex)
-  , ("testMigrateAddDropNotNull", testMigrateAddDropNotNull)
-  , ("testMigrateAddConstructorToMany", testMigrateAddConstructorToMany)
-  , ("testMigrateChangeType", testMigrateChangeType)
---  , ("testLongNames", testLongNames)
-  , ("testReference", testReference)
-  , ("testMaybeReference", testMaybeReference)
-  , ("testUniqueKey", testUniqueKey)
-  , ("testForeignKeyUnique", testForeignKeyUnique)
-  , ("testProjection", testProjection)
-  , ("testKeyNormalization", testKeyNormalization)
-  , ("testAutoKeyField", testAutoKeyField)
-  , ("testStringAutoKey", testStringAutoKey)
-  , ("testTime", testTime)
-  , ("testPrimitiveData", testPrimitiveData)
-  , ("testConverter", testConverter)
-  , ("testNoColumns", testNoColumns)
-  , ("testNoKeys", testNoKeys)
-  , ("testJSON", testJSON)
-  ]
+mkTestSuite run =
+  map
+    (\(name, func) -> testCase name $ run func)
+    [ ("testNumber", testNumber),
+      ("testPersistSettings", testPersistSettings),
+      ("testEmbedded", testEmbedded),
+      ("testSelectDistinct", testSelectDistinct),
+      ("testInsert", testInsert),
+      ("testMaybe", testMaybe),
+      ("testCount", testCount),
+      ("testUpdate", testUpdate),
+      ("testComparison", testComparison),
+      ("testEncoding", testEncoding),
+      ("testDelete", testDelete),
+      ("testDeleteBy", testDeleteBy),
+      ("testDeleteAll", testDeleteAll),
+      ("testReplaceSingle", testReplaceSingle),
+      ("testReplaceMulti", testReplaceMulti),
+      ("testReplaceBy", testReplaceBy),
+      ("testTuple", testTuple),
+      ("testTupleList", testTupleList),
+      ("testMigrateAddColumnSingle", testMigrateAddColumnSingle),
+      ("testMigrateAddUniqueConstraint", testMigrateAddUniqueConstraint),
+      ("testMigrateDropUniqueConstraint", testMigrateDropUniqueConstraint),
+      ("testMigrateAddUniqueIndex", testMigrateAddUniqueIndex),
+      ("testMigrateDropUniqueIndex", testMigrateDropUniqueIndex),
+      ("testMigrateAddDropNotNull", testMigrateAddDropNotNull),
+      ("testMigrateAddConstructorToMany", testMigrateAddConstructorToMany),
+      ("testMigrateChangeType", testMigrateChangeType),
+      --  , ("testLongNames", testLongNames)
+      ("testReference", testReference),
+      ("testMaybeReference", testMaybeReference),
+      ("testUniqueKey", testUniqueKey),
+      ("testForeignKeyUnique", testForeignKeyUnique),
+      ("testProjection", testProjection),
+      ("testKeyNormalization", testKeyNormalization),
+      ("testAutoKeyField", testAutoKeyField),
+      ("testStringAutoKey", testStringAutoKey),
+      ("testTime", testTime),
+      ("testPrimitiveData", testPrimitiveData),
+      ("testConverter", testConverter),
+      ("testNoColumns", testNoColumns),
+      ("testNoKeys", testNoKeys),
+      ("testJSON", testJSON)
+    ]
 
-mkTryTestSuite :: ( ExtractConnection conn conn
-                  , PersistBackendConn conn
-                  , TryConnectionManager conn
-                  , MonadCatch m
-                  , MonadFail m
-                  , MonadBaseControl IO m
-                  , MonadIO m)
-               => ((conn -> m ()) -> IO ()) -> [Test]
-mkTryTestSuite run = map (\(name, func) -> testCase name $ run func)
-  [ ("testTryAction", testTryAction)
-  ]
+mkTryTestSuite ::
+  ( ExtractConnection conn conn,
+    PersistBackendConn conn,
+    TryConnectionManager conn,
+    MonadCatch m,
+    MonadFail m,
+    MonadBaseControl IO m,
+    MonadIO m
+  ) =>
+  ((conn -> m ()) -> IO ()) ->
+  [Test]
+mkTryTestSuite run =
+  map
+    (\(name, func) -> testCase name $ run func)
+    [ ("testTryAction", testTryAction)
+    ]
 
 #if WITH_SQLITE
 sqliteTestSuite :: (PersistBackend m, Conn m ~ Sqlite, MonadBaseControl IO m) => (m () -> IO ()) -> [Test]
