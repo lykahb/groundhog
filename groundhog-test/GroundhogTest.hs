@@ -1033,7 +1033,7 @@ testSchemaAnalysisPostgresql :: (PersistBackend m, Conn m ~ Postgresql) => m ()
 testSchemaAnalysisPostgresql = do
   let val = Single (Single "abc")
   migr val
-  let action = "EXECUTE PROCEDURE \"myFunction\"()"
+  let action = "EXECUTE FUNCTION \"myFunction\"()"
   executeRaw False "CREATE OR REPLACE FUNCTION \"myFunction\"() RETURNS trigger AS $$ BEGIN RETURN NEW;END; $$ LANGUAGE plpgsql" []
   executeRaw False ("CREATE TRIGGER \"myTrigger\" AFTER DELETE ON \"Single#String\" FOR EACH ROW " ++ action) []
   ["Single#Single#String", "Single#String"] @=?? liftM sort (listTables Nothing)

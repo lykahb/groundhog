@@ -9,9 +9,6 @@ addons:
   apt:
     packages:
     - libgmp-dev
-    - cabal-install-1.24
-    sources:
-    - hvr-ghc
   postgresql: "9.4"
 
 services:
@@ -19,16 +16,42 @@ services:
 
 matrix:
   include:
-  # ghc-8.0.2
   - env: STACK_YAML="stack-ghc-8.0.yaml"
-  # ghc-8.2.2
+    addons:
+      apt:
+        sources:
+          - hvr-ghc
+        packages:
+          - ghc-8.0.2
   - env: STACK_YAML="stack-ghc-8.2.yaml"
-  # ghc-8.4.3
+    addons:
+      apt:
+        sources:
+          - hvr-ghc
+        packages:
+          - ghc-8.2.2
   - env: STACK_YAML="stack-ghc-8.4.yaml"
-  # ghc-8.6
+    addons:
+      apt:
+        sources:
+          - hvr-ghc
+        packages:
+          - ghc-8.4.3
   - env: STACK_YAML="stack-ghc-8.6.yaml"
+    addons:
+      apt:
+        sources:
+          - hvr-ghc
+        packages:
+          - ghc-8.6
   # ghc-8.8
-  - env: STACK_YAML="stack-nightly.yaml"
+  - env: STACK_YAML="stack-ghc-8.8.yaml"
+    addons:
+      apt:
+        sources:
+          - hvr-ghc
+        packages:
+          - ghc-8.8.3
 
 
 before_install:
@@ -43,8 +66,5 @@ before_script:
 - mysql --user=root < init_mysql.sql
 - cd ..
 
-# This line does all of the work: installs GHC if necessary, build the library,
-# executables, and test suites, and runs the test suites. --no-terminal works
-# around some quirks in Travis's terminal implementation.
 script:
-- stack test --no-terminal --install-ghc --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite
+- stack test --no-terminal --skip-ghc-check --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite
