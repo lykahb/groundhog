@@ -9,7 +9,7 @@ addons:
   apt:
     packages:
     - libgmp-dev
-  postgresql: "9.4"
+  postgresql: "12.2"
 
 services:
 - mysql
