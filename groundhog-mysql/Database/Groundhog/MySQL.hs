@@ -23,7 +23,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Arrow (first, second, (***))
-import Control.Monad (liftM, liftM2, (>=>))
+import Control.Monad (liftM2, (>=>))
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Control (MonadBaseControl)
@@ -40,7 +40,6 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
 import Data.List (groupBy, intercalate, intersect, isInfixOf, partition, stripPrefix)
 import Data.Maybe (fromJust, fromMaybe, isJust)
-import Data.Monoid hiding ((<>))
 import Data.Pool
 import Database.Groundhog
 import Database.Groundhog.Core
@@ -163,21 +162,21 @@ combine (MySQL.Query a) (MySQL.Query b) = MySQL.Query (B.append a b)
 instance Savepoint MySQL where
   withConnSavepoint name m (MySQL c) = do
     let name' = fromString name
-    liftIO $ MySQL.execute_ c $ "SAVEPOINT " `combine` name'
+    _ <- liftIO $ MySQL.execute_ c $ "SAVEPOINT " `combine` name'
     x <- onException m (liftIO $ MySQL.execute_ c $ "ROLLBACK TO SAVEPOINT " `combine` name')
-    liftIO $ MySQL.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
+    _ <- liftIO $ MySQL.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
     return x
 
 instance ConnectionManager MySQL where
   withConn f conn@(MySQL c) = do
-    liftIO $ MySQL.execute_ c "start transaction"
+    _ <- liftIO $ MySQL.execute_ c "start transaction"
     x <- onException (f conn) (liftIO $ MySQL.rollback c)
     liftIO $ MySQL.commit c
     return x
 
 instance TryConnectionManager MySQL where
   tryWithConn f g conn@(MySQL c) = do
-    liftIO $ MySQL.execute_ c "start transaction"
+    _ <- liftIO $ MySQL.execute_ c "start transaction"
     x <- g (f conn)
     case x of
       Left _ -> liftIO $ MySQL.rollback c

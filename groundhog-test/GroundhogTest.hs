@@ -99,7 +99,6 @@ import Database.Groundhog.Postgresql
 import Database.Groundhog.Postgresql.Array hiding (all, any, append)
 import qualified Database.Groundhog.Postgresql.Array as Arr
 import Database.Groundhog.Postgresql.Geometry hiding ((>>), (&&))
-import qualified Database.Groundhog.Postgresql.Geometry as Geo
 import qualified Database.Groundhog.Postgresql.HStore as HStore
 #endif
 #if WITH_MYSQL
@@ -116,22 +115,18 @@ import qualified Data.Text.Lazy as Text
 import qualified Data.Text.Lazy.Builder as Text
 import qualified Data.Time as Time
 import qualified Data.Time.Clock.POSIX as Time
-import qualified Data.Traversable as T
 import Data.Typeable (Typeable)
 import Data.Word
-import Database.Groundhog
 import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.Generic.Migration
 import Database.Groundhog.Generic.Sql
-import Database.Groundhog.Generic.Sql.Functions
 import Database.Groundhog.TH
 import qualified Migration.New as New
 import qualified Migration.Old as Old
 import qualified Test.HUnit as H
-import Prelude hiding (catch)
 
-data Number = Number {int :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, word16 :: Word16, int32 :: Int32, word32 :: Word32, int64 :: Int64, word64 :: Word64} deriving (Eq, Show)
+data Number = Number {intDefault :: Int, int8 :: Int8, word8 :: Word8, int16 :: Int16, word16 :: Word16, int32 :: Int32, word32 :: Word32, int64 :: Int64, word64 :: Word64} deriving (Eq, Show)
 
 data MaybeContext a = MaybeContext (Maybe a) deriving (Eq, Show)
 
@@ -334,7 +329,7 @@ testPersistSettings = do
   m <- fmap (Map.lookup "entity sqlsettable") $ createMigration $ migrate settable
   let queries = case m of
         Just (Right qs) -> intercalate ";" $ map (\(_, _, q) -> q) qs
-        t -> fail $ "Unexpected migration result: " ++ show m
+        _ -> fail $ "Unexpected migration result: " ++ show m
       ref =
         if backendName proxy == "mysql"
           then "(`thirdTupleElement`) REFERENCES `test`.`sqlsettable`(`settable_id`)"
@@ -508,8 +503,8 @@ testComparison = do
   let val1 = Single (1 :: Int)
   let val2 = Single (2 :: Int)
   migr val1
-  k1 <- insert val1
-  k2 <- insert val2
+  _ <- insert val1
+  _ <- insert val2
   result1 <- select $ SingleField ==. (1 :: Int)
   [val1] @=? result1
   result2 <- select $ SingleField /=. (1 :: Int)
@@ -550,7 +545,6 @@ testTupleList = do
 testListTriggersOnDelete :: PersistBackend m => m ()
 testListTriggersOnDelete = do
   migr (undefined :: Single (String, [[String]]))
-  proxy <- phantomDb
   k <- insert (Single ("", [["abc", "def"]]) :: Single (String, [[String]]))
   listKey' <- queryRaw' "select \"single#val1\" from \"Single#Tuple2##String#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
   let listKey = head $ fromJust listKey'
@@ -570,7 +564,6 @@ testListTriggersOnUpdate :: PersistBackend m => m ()
 testListTriggersOnUpdate = do
   let val = Single [["abc", "def"]]
   migr val
-  proxy <- phantomDb
   k <- insert val
   listKey' <- queryRaw' "select \"single\" from \"Single#List##List##String\" where id=?" [toPrimitivePersistValue k] >>= firstRow
   let listKey = head $ fromJust listKey'
@@ -589,7 +582,6 @@ testListTriggersOnUpdate = do
 testDelete :: PersistBackend m => m ()
 testDelete = do
   migr (undefined :: Multi String)
-  proxy <- phantomDb
   k <- insert $ Second "abc"
   delete $ SecondField ==. "abc"
   Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow)
@@ -598,7 +590,6 @@ testDelete = do
 testDeleteBy :: PersistBackend m => m ()
 testDeleteBy = do
   migr (undefined :: Multi String)
-  proxy <- phantomDb
   k <- insert $ Second "abc"
   deleteBy k
   Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow)
@@ -608,7 +599,6 @@ testDeleteAll :: PersistBackend m => m ()
 testDeleteAll = do
   let val = Second "abc"
   migr val
-  proxy <- phantomDb
   insert val
   deleteAll val
   Nothing @=?? (queryRaw' "SELECT * FROM \"Multi#String\"" [] >>= firstRow)
@@ -617,7 +607,6 @@ testDeleteAll = do
 testReplaceMulti :: PersistBackend m => m ()
 testReplaceMulti = do
   migr (undefined :: Single (Multi String))
-  proxy <- phantomDb
   -- we need Single to test that referenced value can be replaced
   k <- insert $ Single (Second "abc")
   valueKey' <- queryRaw' "SELECT \"single\" FROM \"Single#Multi#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
@@ -628,8 +617,8 @@ testReplaceMulti = do
   Just (Second "def") @=? replaced
 
   replace valueKey (First 5)
-  replaced <- get valueKey
-  Just (First 5) @=? replaced
+  replaced2 <- get valueKey
+  Just (First 5) @=? replaced2
   oldConstructor <- queryRaw' "SELECT * FROM \"Multi#String#Second\" WHERE id=?" [toPrimitivePersistValue valueKey] >>= firstRow
   Nothing @=? oldConstructor
 
@@ -638,7 +627,6 @@ testReplaceSingle = do
   -- we need Single to test that referenced value can be replaced
   let val = Single (Single "abc")
   migr val
-  proxy <- phantomDb
   k <- insert val
   valueKey' <- queryRaw' "SELECT \"single\" FROM \"Single#Single#String\" WHERE id=?" [toPrimitivePersistValue k] >>= firstRow
   let valueKey = fromPrimitivePersistValue $ head $ fromJust valueKey'
@@ -651,7 +639,7 @@ testReplaceBy = do
   let val = UniqueKeySample 1 2 (Just 3)
       replaced = UniqueKeySample 1 3 Nothing
   migr val
-  k <- insert val
+  _ <- insert val
   replaceBy Unique_key_one_column replaced
   Just replaced @=?? getBy (Unique_key_one_columnKey 1)
 
@@ -806,7 +794,7 @@ testProjectionSql = do
   let val = Single ("abc", 5 :: Int)
   migr val
   insert val
-  result <- project ("hello " `append` (upper $ SingleField ~> Tuple2_0Selector), liftExpr (SingleField ~> Tuple2_1Selector) + 1) (() ==. ())
+  result <- project ("hello " `append` upper (SingleField ~> Tuple2_0Selector), liftExpr (SingleField ~> Tuple2_1Selector) + 1) (() ==. ())
   [("hello ABC", 6 :: Int)] @=? result
 
 testKeyNormalization :: PersistBackend m => m ()
@@ -917,13 +905,13 @@ testTryAction ::
   conn ->
   m ()
 testTryAction c = do
-  result <- runTryDbConn success c
-  checkRight result
+  result1 <- runTryDbConn success c
+  checkRight result1
 
-  result <- runTryDbConn dbException c
-  checkLeft result -- should be (Left error)
-  result <- runTryDbConn throwException c
-  checkLeft result -- should be (Left error)
+  result2 <- runTryDbConn dbException c
+  checkLeft result2 -- should be (Left error)
+  result3 <- runTryDbConn throwException c
+  checkLeft result3 -- should be (Left error)
   where
     dbException :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     dbException = do

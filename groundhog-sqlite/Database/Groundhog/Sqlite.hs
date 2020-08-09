@@ -20,7 +20,7 @@ module Database.Groundhog.Sqlite
 where
 
 import Control.Arrow ((***))
-import Control.Monad (forM, liftM)
+import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Control.Monad.Trans.Reader (ask, runReaderT)

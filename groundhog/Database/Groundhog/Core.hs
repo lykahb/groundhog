@@ -706,6 +706,7 @@ runDb' f = getConnection >>= liftIO . runReaderT f
 runDbConn' :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
 runDbConn' f = extractConn (liftIO . runReaderT f)
 
+
 -- | It helps to run 'withConnSavepoint' within a monad. Make sure that transaction is open
 withSavepoint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, Savepoint (Conn m)) => String -> m a -> m a
 withSavepoint name m = getConnection >>= withConnSavepoint name m

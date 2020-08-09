@@ -231,12 +231,11 @@ instance PrimitivePersistField ZonedTime where
 instance PrimitivePersistField A.Value where
   toPrimitivePersistValue a = PersistByteString $ Lazy.toStrict $ A.encode a
   fromPrimitivePersistValue x =
-    ( case x of
-        PersistString str -> decode' $ T.encodeUtf8 $ T.pack str
-        PersistText str -> decode' $ T.encodeUtf8 str
-        PersistByteString str -> decode' str
-        _ -> error $ "Expected Aeson.Value, received: " ++ show x
-    )
+    case x of
+      PersistString str -> decode' $ T.encodeUtf8 $ T.pack str
+      PersistText str -> decode' $ T.encodeUtf8 str
+      PersistByteString str -> decode' str
+      _ -> error $ "Expected Aeson.Value, received: " ++ show x
     where
       decode' str = case A.eitherDecode $ Lazy.fromStrict str of
         Right val -> val

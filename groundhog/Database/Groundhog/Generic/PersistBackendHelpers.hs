@@ -444,7 +444,7 @@ insertBy conf@RenderConfig {..} queryFunc manyNulls u v = do
       constr = head $ constructors e
       query = "SELECT " <> fromMaybe "1" (constrId esc constr) <> " FROM " <> tableName esc e constr <> " WHERE " <> cond
   if checkNulls uniques
-    then fmap Right $ Core.insert v
+    then Right <$> Core.insert v
     else do
       x <- queryFunc query (vals []) >>= firstRow
       case x of

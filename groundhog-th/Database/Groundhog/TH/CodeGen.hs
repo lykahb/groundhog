@@ -868,27 +868,26 @@ instanceD' = InstanceD
 
 dataInstD' :: Cxt -> Name -> [Type] -> [Con] -> [Name] -> InstanceDec
 #if MIN_VERSION_template_haskell(2, 15, 0)
-dataInstD' cxt name types constrs derives =
-  DataInstD cxt Nothing typ Nothing constrs [DerivClause Nothing (map ConT derives)] where
+dataInstD' context name types constrs derives =
+  DataInstD context Nothing typ Nothing constrs [DerivClause Nothing (map ConT derives)] where
     typ = foldl AppT (ConT name) types
 #elif MIN_VERSION_template_haskell(2, 12, 0)
-dataInstD' cxt name types constrs derives =
-  DataInstD cxt name types Nothing constrs [DerivClause Nothing (map ConT derives)]
+dataInstD' context name types constrs derives =
+  DataInstD context name types Nothing constrs [DerivClause Nothing (map ConT derives)]
 #elif MIN_VERSION_template_haskell(2, 11, 0)
-dataInstD' cxt name types constrs derives =
-  DataInstD cxt name types Nothing constrs (map ConT derives)
+dataInstD' context name types constrs derives =
+  DataInstD context name types Nothing constrs (map ConT derives)
 #else
 dataInstD' = DataInstD
 #endif
 
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
-
 #if MIN_VERSION_template_haskell(2, 12, 0)
-dataD' cxt name types constrs derives =
-  DataD cxt name types Nothing constrs [DerivClause Nothing (map ConT derives)]
+dataD' context name types constrs derives =
+  DataD context name types Nothing constrs [DerivClause Nothing (map ConT derives)]
 #elif MIN_VERSION_template_haskell(2, 11, 0)
-dataD' cxt name types constrs derives =
-  DataD cxt name types Nothing constrs (map ConT derives)
+dataD' context name types constrs derives =
+  DataD context name types Nothing constrs (map ConT derives)
 #else
 dataD' = DataD
 #endif

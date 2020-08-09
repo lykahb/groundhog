@@ -479,14 +479,13 @@ showMappings = encodePretty' config
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
 
 #if MIN_VERSION_template_haskell(2, 12, 0)
-dataD' cxt name types constrs derives =
-  DataD cxt name types Nothing constrs [DerivClause Nothing (map ConT derives)]
+dataD' context name types constructors derives =
+  DataD context name types Nothing constructors [DerivClause Nothing (map ConT derives)]
 #elif MIN_VERSION_template_haskell(2, 11, 0)
-dataD' cxt name types constrs derives =
-  DataD cxt name types Nothing constrs (map ConT derives)
+dataD' context name types constructors derives =
+  DataD context name types Nothing constructors (map ConT derives)
 #else
-dataD' cxt name types constrs derives =
-  DataD cxt name types constrs derives
+dataD' = DataD
 #endif
 
 #if MIN_VERSION_template_haskell(2, 11, 0)

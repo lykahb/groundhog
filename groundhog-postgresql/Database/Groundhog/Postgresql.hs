@@ -179,9 +179,9 @@ combine (PG.Query a) (PG.Query b) = PG.Query (B.append a b)
 instance Savepoint Postgresql where
   withConnSavepoint name m (Postgresql c) = do
     let name' = fromString name
-    liftIO $ PG.execute_ c $ "SAVEPOINT " `combine` name'
+    _ <- liftIO $ PG.execute_ c $ "SAVEPOINT " `combine` name'
     x <- onException m (liftIO $ PG.execute_ c $ "ROLLBACK TO SAVEPOINT " `combine` name')
-    liftIO $ PG.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
+    _ <- liftIO $ PG.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
     return x
 
 instance ConnectionManager Postgresql where
@@ -209,7 +209,7 @@ instance ExtractConnection (Pool Postgresql) Postgresql where
 open' :: String -> IO Postgresql
 open' s = do
   conn <- PG.connectPostgreSQL $ pack s
-  PG.execute_ conn $ getStatement "SET client_min_messages TO WARNING"
+  _ <- PG.execute_ conn $ getStatement "SET client_min_messages TO WARNING"
   return $ Postgresql conn
 
 close' :: Postgresql -> IO ()
