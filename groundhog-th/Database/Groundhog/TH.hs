@@ -711,7 +711,11 @@ defaultMkPrimitiveDecs =
               ]
       )
 
+#if MIN_VERSION_template_haskell(2, 17, 0)
+fromDataD :: InstanceDec -> (Name, [TyVarBndr ()], [Con])
+#else
 fromDataD :: InstanceDec -> (Name, [TyVarBndr], [Con])
+#endif
 fromDataD dec = case dec of
 #if MIN_VERSION_template_haskell(2, 11, 0)
   (DataD _ dName typeVars _ constrs _) -> (dName, typeVars, constrs)

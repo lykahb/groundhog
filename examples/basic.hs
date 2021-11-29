@@ -13,8 +13,6 @@ data Customer = Customer {customerName :: String, phone :: String} deriving (Sho
 
 data Product = Product {productName :: String, quantity :: Int, customer :: DefaultKey Customer}
 
-deriving instance Show Product
-
 mkPersist
   defaultCodegenConfig
   [groundhog|
@@ -26,6 +24,8 @@ mkPersist
           dbName: name           # Set column name to "name" instead of "customerName"
 - entity: Product
 |]
+
+deriving instance Show Product
 
 main = withSqliteConn ":memory:" $
   runDbConn $ do

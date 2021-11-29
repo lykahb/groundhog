@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -49,7 +50,11 @@ data THEntityDef = THEntityDef
     thEntitySchema :: Maybe String,
     thAutoKey :: Maybe THAutoKeyDef,
     thUniqueKeys :: [THUniqueKeyDef],
+#if MIN_VERSION_template_haskell(2, 17, 0)
+    thTypeParams :: [TyVarBndr ()],
+#else
     thTypeParams :: [TyVarBndr],
+#endif
     thConstructors :: [THConstructorDef]
   }
   deriving (Eq, Show)
@@ -65,7 +70,11 @@ data THEmbeddedDef = THEmbeddedDef
     thEmbeddedConstructorName :: Name,
     -- | It is used only to set polymorphic part of name of its container
     thDbEmbeddedName :: String,
+#if MIN_VERSION_template_haskell(2, 17, 0)
+    thEmbeddedTypeParams :: [TyVarBndr ()],
+#else
     thEmbeddedTypeParams :: [TyVarBndr],
+#endif
     thEmbeddedFields :: [THFieldDef]
   }
   deriving (Eq, Show)

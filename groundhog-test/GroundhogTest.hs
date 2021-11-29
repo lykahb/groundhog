@@ -165,23 +165,6 @@ data TestException = TestException
 
 instance E.Exception TestException
 
--- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
-deriving instance Eq Keys
-
-deriving instance Show Keys
-
-deriving instance Eq Settable
-
-deriving instance Show Settable
-
-deriving instance Eq InCurrentSchema
-
-deriving instance Show InCurrentSchema
-
-deriving instance Eq InAnotherSchema
-
-deriving instance Show InAnotherSchema
-
 notFieldInstanceConverter :: (NotFieldInstance -> String, String -> NotFieldInstance)
 notFieldInstanceConverter = (\(NotFieldInstance s) -> s, NotFieldInstance)
 
@@ -288,6 +271,23 @@ mkPersist
       - name: foreignUniqueKey
         fields: [foreignUniqueKey]
 |]
+
+-- cannot use ordinary deriving because it runs before mkPersist and requires (Single String) to be an instance of PersistEntity
+deriving instance Eq Keys
+
+deriving instance Show Keys
+
+deriving instance Eq Settable
+
+deriving instance Show Settable
+
+deriving instance Eq InCurrentSchema
+
+deriving instance Show InCurrentSchema
+
+deriving instance Eq InAnotherSchema
+
+deriving instance Show InAnotherSchema
 
 migr :: (PersistEntity v, PersistBackend m) => v -> m ()
 migr v = do

@@ -275,7 +275,7 @@ generateData' DataCodegenConfig {..} ReverseNamingStyle {..} tables tName tInfo 
     uniquePhantoms = if generateUniqueKeysPhantoms then map mkPhantom uniqueKeys else []
       where
         entity = ConT $ mkName $ mkEntityName tName
-        mkPhantom u = dataD' [] name [PlainTV v] [c] []
+        mkPhantom u = dataD' [] name [plainTV v] [c] []
           where
             v = mkName "v"
             name = mkName $ mkUniqueKeyPhantomName tName u
@@ -476,7 +476,11 @@ showMappings = encodePretty' config
     config = defConfig {confIndent = Spaces 4, confCompare = keyOrder keys}
     keys = ["entity", "name", "dbName", "schema", "autoKey", "keyDbName", "type", "embeddedType", "columns", "keys", "fields", "uniques"]
 
+#if MIN_VERSION_template_haskell(2, 17, 0)
+dataD' :: Cxt -> Name -> [TyVarBndr ()] -> [Con] -> [Name] -> InstanceDec
+#else
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
+#endif
 
 #if MIN_VERSION_template_haskell(2, 12, 0)
 dataD' context name types constructors derives =

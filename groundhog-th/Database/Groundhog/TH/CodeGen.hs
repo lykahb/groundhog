@@ -38,7 +38,8 @@ import Database.Groundhog.Core
 import Database.Groundhog.Generic
 import Database.Groundhog.TH.Settings
 import qualified GHC.Read as R
-import Language.Haskell.TH
+import Language.Haskell.TH hiding (TyVarBndr)
+import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax (Lift (..))
 import qualified Text.ParserCombinators.ReadPrec as R
 import qualified Text.Read.Lex as R
@@ -50,7 +51,7 @@ mkEmbeddedPersistFieldInstance def = do
 
   persistName' <- do
     v <- newName "v"
-    let mkLambda t = [|undefined :: $(forallT (thEmbeddedTypeParams def) (cxt []) [t|$(return embedded) -> $(return t)|])|]
+    let mkLambda t = [|undefined :: $(pure embedded) -> $(pure t)|]
     let paramNames = foldr1 (\p xs -> [|$p ++ [delim] ++ $xs|]) $ map (\t -> [|persistName ($(mkLambda t) $(varE v))|]) types
     let fullEmbeddedName =
           if null types
@@ -416,9 +417,9 @@ mkEntityPhantomConstructors def = do
   forM (thConstructors def) $ \c -> do
     v <- newName "v"
     let name = mkName $ thPhantomConstrName c
-    phantom <- [t|ConstructorMarker $(return entity)|]
-    let constr = ForallC (thTypeParams def) [equalP' (VarT v) phantom] $ NormalC name []
-    return $ dataD' [] name [PlainTV v] [constr] []
+    phantom <- [t|ConstructorMarker $(pure entity)|]
+    let constr = GadtC [name] [] (AppT (ConT name) phantom)
+    return $ dataD' [] name [plainTV v] [constr] []
 
 mkEntityPhantomConstructorInstances :: THEntityDef -> Q [Dec]
 mkEntityPhantomConstructorInstances def = zipWithM f [0 ..] (thConstructors def)
@@ -439,8 +440,8 @@ mkEntityUniqueKeysPhantoms def = do
           v <- newName "v"
           let name = mkName $ thUniqueKeyPhantomName u
           phantom <- [t|UniqueMarker $(return entity)|]
-          let constr = ForallC (thTypeParams def) [equalP' (VarT v) phantom] $ NormalC name []
-          return [dataD' [] name [PlainTV v] [constr] []]
+          let constr = GadtC [name] [] (AppT (ConT name) phantom)
+          return [dataD' [] name [plainTV v] [constr] []]
         else return []
 
 mkPersistEntityInstance :: THEntityDef -> Q [Dec]
@@ -496,7 +497,7 @@ mkPersistEntityInstance def = do
   entityDef' <- do
     v <- newName "v"
     proxy <- newName "p"
-    let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t|$(return entity) -> $(return t)|])|]
+    let mkLambda t = [|undefined :: $(pure entity) -> $(pure t) |]
         types = map extractType $ thTypeParams def
         typeParams' = listE $ map (\t -> [|dbType $(varE proxy) ($(mkLambda t) $(varE v))|]) types
         mkField c fNum f = do
@@ -508,7 +509,7 @@ mkPersistEntityInstance def = do
                     let pat = conP (thConstrName c) $ replicate fNum wildP ++ [varP a] ++ replicate (length (thConstrFields c) - fNum - 1) wildP
                         wildClause = if length (thConstructors def) > 1 then [match wildP (normalB [|undefined|]) []] else []
                      in caseE (varE v) (match pat (normalB $ varE a) [] : wildClause)
-                  else [|undefined :: $(return $ thFieldType f)|]
+                  else [|undefined :: $(pure $ thFieldType f)|]
               typ = mkType f proxy nvar
           [|(fname, $typ)|]
         constrs = listE $ map mkConstructorDef $ thConstructors def
@@ -607,33 +608,33 @@ mkEntityPersistFieldInstance def = case getDefaultKey def of
 
     persistName' <- do
       v <- newName "v"
-      let mkLambda t = [|undefined :: $(forallT (thTypeParams def) (cxt []) [t|$(return entity) -> $(return t)|])|]
+      let mkLambda t = [|undefined :: $(pure entity) -> $(pure t) |]
 
       let paramNames = foldr1 (\p xs -> [|$p ++ [delim] ++ $xs|]) $ map (\t -> [|persistName ($(mkLambda t) $(varE v))|]) types
-      let fullEntityName = case null types of
-            True -> [|$(stringE $ thDbEntityName def)|]
-            False -> [|$(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames)|]
+      let fullEntityName = case types of
+            [] -> [|$(stringE $ thDbEntityName def)|]
+            _ -> [|$(stringE $ thDbEntityName def) ++ [delim] ++ $(paramNames)|]
       let body = normalB fullEntityName
       let pat = if null types then wildP else varP v
       funD 'persistName [clause [pat] body []]
 
     isOne <- isDefaultKeyOneColumn def
-    let uniqInfo = either auto uniq defaultKey
+    let mUniqName = either auto uniq defaultKey
           where
             auto _ = Nothing
-            uniq u = let name = mkName $ thUniqueKeyPhantomName u in Just (conT name, conE name)
+            uniq u = Just $ mkName $ thUniqueKeyPhantomName u
 
     toPersistValues' <- do
-      let body = normalB $ case uniqInfo of
+      let body = normalB $ case mUniqName of
             _ | isOne -> [|singleToPersistValue|]
-            Just u -> [|toPersistValuesUnique $(snd u)|]
+            Just name -> [|toPersistValuesUnique $(conE name)|]
             _ -> error "mkEntityPersistFieldInstance: key has no unique type"
       funD 'toPersistValues [clause [] body []]
 
     fromPersistValues' <- do
-      let body = normalB $ case uniqInfo of
+      let body = normalB $ case mUniqName of
             _ | isOne -> [|singleFromPersistValue|]
-            Just u -> [|fromPersistValuesUnique $(snd u)|]
+            Just name -> [|fromPersistValuesUnique $(conE name)|]
             _ -> error "mkEntityPersistFieldInstance: key has no unique type"
       funD 'fromPersistValues [clause [] body []]
 
@@ -725,11 +726,11 @@ mkMigrateFunction name defs = do
 
 isDefaultKeyOneColumn :: THEntityDef -> Q Bool
 isDefaultKeyOneColumn def = case getDefaultKey def of
-  Just (Left _) -> return True
-  Just (Right unique)
-    | length (thUniqueKeyFields unique) == 1 ->
-      isPrim $ thFieldType $ head $ thUniqueKeyFields unique
-  _ -> return False
+  Just (Left _) -> pure True
+  Just (Right unique) -> case thUniqueKeyFields unique of
+    [field] -> isPrim $ thFieldType field
+    _ -> pure False
+  _ -> pure False
 
 getDefaultKey :: THEntityDef -> Maybe (Either THAutoKeyDef THUniqueKeyDef)
 getDefaultKey def = case thAutoKey def of
@@ -738,7 +739,11 @@ getDefaultKey def = case thAutoKey def of
     [] -> Nothing
     (u : _) -> Just $ Right u
 
+#if MIN_VERSION_template_haskell(2, 17, 0)
+paramsContext :: [TH.TyVarBndr flag] -> [THFieldDef] -> Cxt
+#else
 paramsContext :: [TyVarBndr] -> [THFieldDef] -> Cxt
+#endif
 paramsContext types fields = classPred ''PersistField params ++ classPred ''SinglePersistField maybys ++ classPred ''NeverNull maybys
   where
     classPred clazz = map (\t -> classP' clazz [t])
@@ -749,7 +754,11 @@ paramsContext types fields = classPred ''PersistField params ++ classPred ''Sing
     -- so that (Maybe param) is an instance of PersistField
     maybys = nub $ fields >>= insideMaybe . thFieldType
 
+#if MIN_VERSION_template_haskell(2, 17, 0)
+paramsPureContext :: [TH.TyVarBndr flag] -> [THFieldDef] -> Q (Maybe Cxt)
+#else
 paramsPureContext :: [TyVarBndr] -> [THFieldDef] -> Q (Maybe Cxt)
+#endif
 paramsPureContext types fields = do
   let isValidType (VarT _) = return True
       isValidType t = isPrim t
@@ -765,9 +774,15 @@ paramsPureContext types fields = do
         maybys = nub $ fields >>= insideMaybe . thFieldType
     _ -> Nothing
 
+#if MIN_VERSION_template_haskell(2, 17, 0)
+extractType :: TH.TyVarBndr flag -> Type
+extractType (PlainTV name _) = VarT name
+extractType (KindedTV name _ _) = VarT name
+#else
 extractType :: TyVarBndr -> Type
 extractType (PlainTV name) = VarT name
 extractType (KindedTV name _) = VarT name
+#endif
 
 #if MIN_VERSION_template_haskell(2, 7, 0)
 #define isClassInstance isInstance
@@ -881,7 +896,11 @@ dataInstD' context name types constrs derives =
 dataInstD' = DataInstD
 #endif
 
+#if MIN_VERSION_template_haskell(2, 17, 0)
+dataD' :: Cxt -> Name -> [TH.TyVarBndr ()] -> [Con] -> [Name] -> InstanceDec
+#else
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
+#endif
 #if MIN_VERSION_template_haskell(2, 12, 0)
 dataD' context name types constrs derives =
   DataD context name types Nothing constrs [DerivClause Nothing (map ConT derives)]
@@ -899,3 +918,11 @@ notStrict' = Bang NoSourceUnpackedness NoSourceStrictness
 notStrict' :: Strict
 notStrict' = NotStrict
 #endif
+
+type TyVarBndr =
+#if MIN_VERSION_template_haskell(2, 17, 0)
+  TH.TyVarBndr ()
+#else
+  TH.TyVarBndr
+#endif
+
