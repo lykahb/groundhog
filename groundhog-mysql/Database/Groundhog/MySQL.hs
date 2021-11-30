@@ -422,9 +422,15 @@ analyzeTable' name = do
     Nothing -> return Nothing
 
 getColumn :: ((String, String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int)) -> Column
-getColumn ((column_name, is_nullable, data_type, column_type, d), modifiers) = Column column_name (is_nullable == "YES") t d
-  where
-    t = readSqlType data_type column_type modifiers
+getColumn ((column_name, is_nullable, data_type, column_type, def), modifiers) = Column
+  { colName = column_name
+  , colNull = is_nullable == "YES"
+  , colType = readSqlType data_type column_type modifiers
+  , colDefault = case def of
+      Nothing -> Nothing
+      Just "NULL" -> Nothing
+      Just d -> Just d
+  }
 
 analyzeTableReferences :: QualifiedName -> Action MySQL [(Maybe String, Reference)]
 analyzeTableReferences name = do
