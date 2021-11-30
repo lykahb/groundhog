@@ -658,7 +658,7 @@ testMigrateAddUniqueConstraint = do
   insert val
   migr (undefined :: New.AddUniqueConstraint)
   assertExc "Uniqueness constraint not enforced" $ insert val
-  return ()
+  pure ()
 
 testMigrateDropUniqueConstraint :: PersistBackend m => m ()
 testMigrateDropUniqueConstraint = do
@@ -667,7 +667,7 @@ testMigrateDropUniqueConstraint = do
   insert val
   migr (undefined :: Old.AddUniqueConstraint)
   insert val
-  return ()
+  pure ()
 
 testMigrateAddUniqueIndex :: (PersistBackend m, MonadBaseControl IO m) => m ()
 testMigrateAddUniqueIndex = do
@@ -676,7 +676,7 @@ testMigrateAddUniqueIndex = do
   insert val
   migr (undefined :: New.AddUniqueIndex)
   assertExc "Unique index not enforced" $ insert val
-  return ()
+  pure ()
 
 testMigrateDropUniqueIndex :: PersistBackend m => m ()
 testMigrateDropUniqueIndex = do
@@ -685,7 +685,7 @@ testMigrateDropUniqueIndex = do
   insert val
   migr (undefined :: Old.AddUniqueIndex)
   insert val
-  return ()
+  pure ()
 
 testMigrateAddDropNotNull :: (PersistBackend m, MonadBaseControl IO m) => m ()
 testMigrateAddDropNotNull = do
@@ -765,7 +765,7 @@ testUniqueKey = do
   insert $ UniqueKeySample 3 2 Nothing
   insertByAll $ UniqueKeySample 4 2 Nothing
   3 @=?? count (Unique_key_two_columns ==. Unique_key_two_columnsKey 2 Nothing)
-  return ()
+  pure ()
 
 testForeignKeyUnique :: PersistBackend m => m ()
 testForeignKeyUnique = do
@@ -774,7 +774,7 @@ testForeignKeyUnique = do
   migr val
   insert uVal
   insert val
-  return ()
+  pure ()
 
 testProjection :: PersistBackend m => m ()
 testProjection = do
@@ -922,11 +922,11 @@ testTryAction c = do
     throwException :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     throwException = do
       lift $ throwE TestException
-      return ()
+      pure ()
 
     success :: (MonadIO m, MonadFail m, Functor m, PersistBackendConn conn) => TryAction TestException m conn ()
     success = do
-      return ()
+      pure ()
 
 testSchemas :: PersistBackend m => m ()
 testSchemas = do
@@ -988,10 +988,10 @@ testSchemaAnalysis = do
           []
 
   case singleInfo of
-    Just t | match t expectedSingleInfo -> return ()
+    Just t | match t expectedSingleInfo -> pure ()
     _ -> liftIO $ H.assertFailure $ "Single does not match the expected schema: " ++ show singleInfo
   case uniqueInfo of
-    Just t | match t expectedUniqueInfo -> return ()
+    Just t | match t expectedUniqueInfo -> pure ()
     _ -> liftIO $ H.assertFailure $ "UniqueKeySample does not match the expected schema: " ++ show uniqueInfo
 
 #if WITH_SQLITE
@@ -1058,7 +1058,7 @@ testArrays = do
   let val2 = Single (Array[myString], Array[Array[myString]])
   migr val2
   Just val2 @=?? (insert val2 >>= get)
-  Just (Array [2, 3, 20]) @=?? return (A.decode (A.encode (Array [(2::Int),3,20])) :: Maybe (Array Int))
+  Just (Array [2, 3, 20]) @=?? pure (A.decode (A.encode (Array [(2::Int),3,20])) :: Maybe (Array Int))
 
 testSchemaAnalysisPostgresql :: (PersistBackend m, Conn m ~ Postgresql) => m ()
 testSchemaAnalysisPostgresql = do
@@ -1126,7 +1126,7 @@ testSchemaAnalysisMySQL = do
 
 assertExc :: (PersistBackend m, MonadBaseControl IO m) => String -> m a -> m ()
 assertExc err m = do
-  happened <- control $ \runInIO -> E.catch (runInIO $ m >> return False) (\(_ :: SomeException) -> runInIO $ return True)
+  happened <- control $ \runInIO -> E.catch (runInIO $ m >> pure False) (\(_ :: SomeException) -> runInIO $ pure True)
   unless happened $ liftIO (H.assertFailure err)
 
 reescape :: DbDescriptor db => proxy db -> String -> String
@@ -1149,9 +1149,9 @@ queryRaw' query vals = do
 checkLeft :: MonadIO m => Either a b -> m ()
 checkLeft e = case e of
   Right _ -> liftIO $ H.assertFailure "exception not caught"
-  Left _ -> return ()
+  Left _ -> pure ()
 
 checkRight :: (MonadIO m, Show a) => Either a b -> m ()
 checkRight e = case e of
-  Right _ -> return ()
+  Right _ -> pure ()
   Left err -> liftIO $ H.assertFailure ("caught unexpected exception: " ++ show err)

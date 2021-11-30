@@ -1,0 +1,1 @@
+- error: {lhs: return, rhs: pure, name: Prefer pure}

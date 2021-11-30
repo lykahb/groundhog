@@ -45,7 +45,7 @@ insertFails = do
   janeKey <- insert $ Customer "Jane Doe" "987654321"
   -- Some logic leads to exception
   lift $ throwE TestException
-  return janeKey
+  pure janeKey
 
 main = withSqliteConn ":memory:" $ \conn -> do
   -- create tables

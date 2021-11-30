@@ -27,7 +27,7 @@ do
             decs = generateData dataConfig defaultReverseNamingStyle tables
         -- Generate mapping configuration that has tables and column names and other database information
         mappingSettings <- generateMapping defaultReverseNamingStyle tables
-        return (decs, mappingSettings)
+        pure (decs, mappingSettings)
   -- Function 'mkPersist' cannot be used here because it tries to reify datatypes which don't exist yet.
   -- So we manually combine declaration with mapping settings to generate mapping declarations
   let mkThEntity dec mapping = applyEntitySettings suffixNamingStyle mapping $ mkTHEntityDef suffixNamingStyle $ fst dec
@@ -35,7 +35,7 @@ do
   -- Use mapping configuration to generate mapping declarations
   mappingDecs <- defaultMkEntityDecs thEntities
   migrateFunction <- mkMigrateFunction "migrateAll" thEntities
-  return $ concatMap (uncurry (:)) $ Map.elems decs ++ mappingDecs ++ migrateFunction
+  pure $ concatMap (uncurry (:)) $ Map.elems decs ++ mappingDecs ++ migrateFunction
 
 deriving instance Show Customer
 

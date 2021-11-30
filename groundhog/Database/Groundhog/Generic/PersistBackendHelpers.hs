@@ -55,7 +55,7 @@ get RenderConfig {..} queryFunc (k :: Key v BackendSpecific) = do
       x <- queryFunc query [toPrimitivePersistValue k] >>= firstRow
       case x of
         Just xs -> fmap (Just . fst) $ fromEntityPersistValues $ PersistInt64 0 : xs
-        Nothing -> return Nothing
+        Nothing -> pure Nothing
     else do
       let query = "SELECT discr FROM " <> mainTableName esc e <> " WHERE id=?"
       x <- queryFunc query [toPrimitivePersistValue k] >>= firstRow
@@ -70,7 +70,7 @@ get RenderConfig {..} queryFunc (k :: Key v BackendSpecific) = do
             Just xs -> fmap (Just . fst) $ fromEntityPersistValues $ discr : xs
             Nothing -> fail "Missing entry in constructor table"
         Just x' -> fail $ "Unexpected number of columns returned: " ++ show x'
-        Nothing -> return Nothing
+        Nothing -> pure Nothing
 
 select ::
   forall conn r v c opts.
@@ -140,7 +140,7 @@ selectAllStream RenderConfig {..} queryFunc = start
     mkEntity cNum xs = do
       let (k, xs') = fromPurePersistValues xs
       (v, _) <- fromEntityPersistValues (toPrimitivePersistValue (cNum :: Int) : xs')
-      return (k, v)
+      pure (k, v)
 
 getBy ::
   forall conn v u.
@@ -163,7 +163,7 @@ getBy conf@RenderConfig {..} queryFunc (k :: Key v (Unique u)) = do
   x <- queryFunc query (vals []) >>= firstRow
   case x of
     Just xs -> fmap (Just . fst) $ fromEntityPersistValues $ PersistInt64 0 : xs
-    Nothing -> return Nothing
+    Nothing -> pure Nothing
 
 project ::
   forall conn r v c p opts a'.
@@ -224,7 +224,7 @@ count conf@RenderConfig {..} queryFunc cond = do
           whereClause = maybe "" (\c -> " WHERE " <> getQuery c) cond'
   x <- queryFunc query (maybe [] (`getValues` []) cond') >>= firstRow
   case x of
-    Just [num] -> return $ fromPrimitivePersistValue num
+    Just [num] -> pure $ fromPrimitivePersistValue num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail "COUNT returned no rows"
 
@@ -272,7 +272,7 @@ replace RenderConfig {..} queryFunc execFunc insertIntoConstructorTable k v = do
 
               let updateDiscrQuery = "UPDATE " <> mainTableName esc e <> " SET discr=? WHERE id=?"
               execFunc updateDiscrQuery [head vals, k']
-        Nothing -> return ()
+        Nothing -> pure ()
 
 replaceBy ::
   forall conn v u.
@@ -317,7 +317,7 @@ update conf@RenderConfig {..} execFunc upds cond = do
             where
               whereClause = maybe (getQuery upds') (\c -> getQuery upds' <> " WHERE " <> getQuery c) cond'
       execFunc query (getValues upds' <> maybe mempty getValues cond' $ [])
-    Nothing -> return ()
+    Nothing -> pure ()
 
 delete ::
   forall conn r v c.
@@ -372,7 +372,7 @@ insertByAll RenderConfig {..} queryFunc manyNulls v = do
       x <- queryFunc query (vals []) >>= firstRow
       case x of
         Nothing -> Right <$> Core.insert v
-        Just xs -> return $ Left $ fst $ fromPurePersistValues xs
+        Just xs -> pure $ Left $ fst $ fromPurePersistValues xs
 
 deleteBy ::
   forall conn v.
@@ -419,7 +419,7 @@ countAll RenderConfig {..} queryFunc (_ :: v) = do
       query = "SELECT COUNT(*) FROM " <> mainTableName esc e
   x <- queryFunc query [] >>= firstRow
   case x of
-    Just [num] -> return $ fromPrimitivePersistValue num
+    Just [num] -> pure $ fromPrimitivePersistValue num
     Just xs -> fail $ "requested 1 column, returned " ++ show (length xs)
     Nothing -> fail "COUNT returned no rows"
 
@@ -449,7 +449,7 @@ insertBy conf@RenderConfig {..} queryFunc manyNulls u v = do
       x <- queryFunc query (vals []) >>= firstRow
       case x of
         Nothing -> Right <$> Core.insert v
-        Just [k] -> return $ Left $ fst $ fromPurePersistValues [k]
+        Just [k] -> pure $ Left $ fst $ fromPurePersistValues [k]
         Just xs -> fail $ "unexpected query result: " ++ show xs
 
 constrId :: (Utf8 -> Utf8) -> ConstructorDef -> Maybe Utf8

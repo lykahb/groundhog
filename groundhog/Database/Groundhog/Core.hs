@@ -720,7 +720,7 @@ tryExceptT ::
 tryExceptT e = do
   outside <- tryAny $ runExceptT e
   case outside of
-    Left outsideErr -> return . Left $ outsideErr
+    Left outsideErr -> pure . Left $ outsideErr
     Right inside -> case inside of
-      Left insideErr -> return . Left . SomeException $ insideErr
-      Right y -> return $ Right y
+      Left insideErr -> pure . Left . SomeException $ insideErr
+      Right y -> pure $ Right y

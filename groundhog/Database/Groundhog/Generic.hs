@@ -237,11 +237,11 @@ applyReferencesSettings (Just (Just parent, onDel, onUpd)) Nothing = Just (Right
 applyReferencesSettings _ Nothing = error "applyReferencesSettings: expected type with reference, got Nothing"
 
 primToPersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m ([PersistValue] -> [PersistValue])
-primToPersistValue a = return (toPrimitivePersistValue a :)
+primToPersistValue a = pure (toPrimitivePersistValue a :)
 
 primFromPersistValue :: (PersistBackend m, PrimitivePersistField a) => [PersistValue] -> m (a, [PersistValue])
-primFromPersistValue (x : xs) = return (fromPrimitivePersistValue x, xs)
-primFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
+primFromPersistValue (x : xs) = pure (fromPrimitivePersistValue x, xs)
+primFromPersistValue xs = (\a -> fail (failMessage a xs) >> pure (a, xs)) undefined
 
 primToPurePersistValues :: PrimitivePersistField a => a -> ([PersistValue] -> [PersistValue])
 primToPurePersistValues a = (toPrimitivePersistValue a :)
@@ -251,23 +251,23 @@ primFromPurePersistValues (x : xs) = (fromPrimitivePersistValue x, xs)
 primFromPurePersistValues xs = (\a -> error (failMessage a xs) `asTypeOf` (a, xs)) undefined
 
 primToSinglePersistValue :: (PersistBackend m, PrimitivePersistField a) => a -> m PersistValue
-primToSinglePersistValue a = return (toPrimitivePersistValue a)
+primToSinglePersistValue a = pure (toPrimitivePersistValue a)
 
 primFromSinglePersistValue :: (PersistBackend m, PrimitivePersistField a) => PersistValue -> m a
-primFromSinglePersistValue a = return (fromPrimitivePersistValue a)
+primFromSinglePersistValue a = pure (fromPrimitivePersistValue a)
 
 pureToPersistValue :: (PersistBackend m, PurePersistField a) => a -> m ([PersistValue] -> [PersistValue])
-pureToPersistValue a = return (toPurePersistValues a)
+pureToPersistValue a = pure (toPurePersistValues a)
 
 pureFromPersistValue :: (PersistBackend m, PurePersistField a) => [PersistValue] -> m (a, [PersistValue])
-pureFromPersistValue xs = return (fromPurePersistValues xs)
+pureFromPersistValue xs = pure (fromPurePersistValues xs)
 
 singleToPersistValue :: (PersistBackend m, SinglePersistField a) => a -> m ([PersistValue] -> [PersistValue])
-singleToPersistValue a = toSinglePersistValue a >>= \x -> return (x :)
+singleToPersistValue a = toSinglePersistValue a >>= \x -> pure (x :)
 
 singleFromPersistValue :: (PersistBackend m, SinglePersistField a) => [PersistValue] -> m (a, [PersistValue])
-singleFromPersistValue (x : xs) = fromSinglePersistValue x >>= \a -> return (a, xs)
-singleFromPersistValue xs = (\a -> fail (failMessage a xs) >> return (a, xs)) undefined
+singleFromPersistValue (x : xs) = fromSinglePersistValue x >>= \a -> pure (a, xs)
+singleFromPersistValue xs = (\a -> fail (failMessage a xs) >> pure (a, xs)) undefined
 
 toSinglePersistValueUnique ::
   forall m v u.
@@ -283,7 +283,7 @@ fromSinglePersistValueUnique ::
   u (UniqueMarker v) ->
   PersistValue ->
   m v
-fromSinglePersistValueUnique _ x = getBy (fromPrimitivePersistValue x :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show x) return
+fromSinglePersistValueUnique _ x = getBy (fromPrimitivePersistValue x :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show x) pure
 
 toPersistValuesUnique ::
   forall m v u.
@@ -299,7 +299,7 @@ fromPersistValuesUnique ::
   u (UniqueMarker v) ->
   [PersistValue] ->
   m (v, [PersistValue])
-fromPersistValuesUnique _ xs = fromPersistValues xs >>= \(k, xs') -> getBy (k :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show xs) (\v -> return (v, xs'))
+fromPersistValuesUnique _ xs = fromPersistValues xs >>= \(k, xs') -> getBy (k :: Key v (Unique u)) >>= maybe (fail $ "No data with id " ++ show xs) (\v -> pure (v, xs'))
 
 toSinglePersistValueAutoKey ::
   forall m v.
@@ -313,7 +313,7 @@ fromSinglePersistValueAutoKey ::
   (PersistBackend m, PersistEntity v, PrimitivePersistField (Key v BackendSpecific)) =>
   PersistValue ->
   m v
-fromSinglePersistValueAutoKey x = get (fromPrimitivePersistValue x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) return
+fromSinglePersistValueAutoKey x = get (fromPrimitivePersistValue x :: Key v BackendSpecific) >>= maybe (fail $ "No data with id " ++ show x) pure
 
 replaceOne :: (Eq x, Show x) => String -> (a -> x) -> (b -> x) -> (a -> b -> b) -> a -> [b] -> [b]
 replaceOne what getter1 getter2 apply a bs = case filter ((getter1 a ==) . getter2) bs of
@@ -343,7 +343,7 @@ haveSameElems p xs ys = case matchElements p xs ys of
   _ -> False
 
 phantomDb :: PersistBackend m => m (proxy (Conn m))
-phantomDb = return $ error "phantomDb"
+phantomDb = pure $ error "phantomDb"
 
 getDefaultAutoKeyType :: DbDescriptor db => proxy db -> DbTypePrimitive
 getDefaultAutoKeyType proxy = case dbType proxy ((undefined :: proxy db -> AutoKeyType db) proxy) of
@@ -356,38 +356,38 @@ firstRow s = liftIO $ with s id
 streamToList :: MonadIO m => RowStream a -> m [a]
 streamToList s = liftIO $ with s go
   where
-    go next = next >>= maybe (return []) (\a -> fmap (a :) (go next))
+    go next = next >>= maybe (pure []) (\a -> fmap (a :) (go next))
 
 mapStream :: PersistBackendConn conn => (a -> Action conn b) -> RowStream a -> Action conn (RowStream b)
 mapStream f s = do
   conn <- ask
   let apply next =
         next >>= \case
-          Nothing -> return Nothing
+          Nothing -> pure Nothing
           Just a' -> Just <$> runReaderT (f a') conn
-  return $ fmap apply s
+  pure $ fmap apply s
 
 joinStreams :: [Action conn (RowStream a)] -> Action conn (RowStream a)
 joinStreams streams = do
   conn <- ask
-  var <- liftIO $ newIORef ((return Nothing, const $ return ()), streams)
-  return $
+  var <- liftIO $ newIORef ((pure Nothing, const $ pure ()), streams)
+  pure $
     Acquire $ \restore -> do
       let joinedNext = do
             ((next, close), queue) <- readIORef var
             val <- next
             case val of
               Nothing -> case queue of
-                [] -> return Nothing
+                [] -> pure Nothing
                 (makeStream : queue') -> do
                   close ReleaseNormal
                   Acquire f <- runReaderT makeStream conn
                   Allocated next' close' <- f restore
                   writeIORef var ((next', close'), queue')
                   joinedNext
-              Just a -> return $ Just a
+              Just a -> pure $ Just a
           joinedClose typ = readIORef var >>= \((_, close), _) -> close typ
-      return $ Allocated joinedNext joinedClose
+      pure $ Allocated joinedNext joinedClose
 
 getUniqueFields :: UniqueDef' str (Either field str) -> [field]
 getUniqueFields (UniqueDef _ _ uFields) = map (either id (error "A unique key may not contain expressions")) uFields

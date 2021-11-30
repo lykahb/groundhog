@@ -450,11 +450,11 @@ instance PersistField ZonedTime where
 -- instance (SinglePersistField a, NeverNull a) => PersistField (Maybe a) where -- HANGS
 instance (PersistField a, NeverNull a) => PersistField (Maybe a) where
   persistName a = "Maybe" ++ delim : persistName ((undefined :: Maybe a -> a) a)
-  toPersistValues Nothing = return (PersistNull :)
+  toPersistValues Nothing = pure (PersistNull :)
   toPersistValues (Just a) = toPersistValues a
   fromPersistValues [] = fail "fromPersistValues Maybe: empty list"
-  fromPersistValues (PersistNull : xs) = return (Nothing, xs)
-  fromPersistValues xs = fromPersistValues xs >>= \(x, xs') -> return (Just x, xs')
+  fromPersistValues (PersistNull : xs) = pure (Nothing, xs)
+  fromPersistValues xs = fromPersistValues xs >>= \(x, xs') -> pure (Just x, xs')
   dbType db a = case dbType db ((undefined :: Maybe a -> a) a) of
     DbTypePrimitive t _ def ref -> DbTypePrimitive t True def ref
     DbEmbedded (EmbeddedDef concatName [(field, DbTypePrimitive t _ def ref')]) ref ->
@@ -465,13 +465,13 @@ instance {-# OVERLAPPABLE #-} (PersistField a) => PersistField [a] where
   persistName a = "List" ++ delim : delim : persistName ((undefined :: [] a -> a) a)
   toPersistValues l = insertList l >>= toPersistValues
   fromPersistValues [] = fail "fromPersistValues []: empty list"
-  fromPersistValues (x : xs) = getList (fromPrimitivePersistValue x) >>= \l -> return (l, xs)
+  fromPersistValues (x : xs) = getList (fromPrimitivePersistValue x) >>= \l -> pure (l, xs)
   dbType db a = DbList (persistName a) $ dbType db ((undefined :: [] a -> a) a)
 
 instance PersistField () where
   persistName _ = "Unit" ++ [delim]
-  toPersistValues _ = return id
-  fromPersistValues xs = return ((), xs)
+  toPersistValues _ = pure id
+  fromPersistValues xs = pure ((), xs)
   dbType _ _ = DbEmbedded (EmbeddedDef False []) Nothing
 
 instance (PersistField a, PersistField b) => PersistField (a, b) where
@@ -479,11 +479,11 @@ instance (PersistField a, PersistField b) => PersistField (a, b) where
   toPersistValues (a, b) = do
     a' <- toPersistValues a
     b' <- toPersistValues b
-    return $ a' . b'
+    pure $ a' . b'
   fromPersistValues xs = do
     (a, rest0) <- fromPersistValues xs
     (b, rest1) <- fromPersistValues rest0
-    return ((a, b), rest1)
+    pure ((a, b), rest1)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b) -> a) a)), ("val1", dbType db ((undefined :: (a, b) -> b) a))]) Nothing
 
 instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b, c) where
@@ -492,12 +492,12 @@ instance (PersistField a, PersistField b, PersistField c) => PersistField (a, b,
     a' <- toPersistValues a
     b' <- toPersistValues b
     c' <- toPersistValues c
-    return $ a' . b' . c'
+    pure $ a' . b' . c'
   fromPersistValues xs = do
     (a, rest0) <- fromPersistValues xs
     (b, rest1) <- fromPersistValues rest0
     (c, rest2) <- fromPersistValues rest1
-    return ((a, b, c), rest2)
+    pure ((a, b, c), rest2)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b, c) -> a) a)), ("val1", dbType db ((undefined :: (a, b, c) -> b) a)), ("val2", dbType db ((undefined :: (a, b, c) -> c) a))]) Nothing
 
 instance (PersistField a, PersistField b, PersistField c, PersistField d) => PersistField (a, b, c, d) where
@@ -507,13 +507,13 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d) => Per
     b' <- toPersistValues b
     c' <- toPersistValues c
     d' <- toPersistValues d
-    return $ a' . b' . c' . d'
+    pure $ a' . b' . c' . d'
   fromPersistValues xs = do
     (a, rest0) <- fromPersistValues xs
     (b, rest1) <- fromPersistValues rest0
     (c, rest2) <- fromPersistValues rest1
     (d, rest3) <- fromPersistValues rest2
-    return ((a, b, c, d), rest3)
+    pure ((a, b, c, d), rest3)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b, c, d) -> a) a)), ("val1", dbType db ((undefined :: (a, b, c, d) -> b) a)), ("val2", dbType db ((undefined :: (a, b, c, d) -> c) a)), ("val3", dbType db ((undefined :: (a, b, c, d) -> d) a))]) Nothing
 
 instance (PersistField a, PersistField b, PersistField c, PersistField d, PersistField e) => PersistField (a, b, c, d, e) where
@@ -524,14 +524,14 @@ instance (PersistField a, PersistField b, PersistField c, PersistField d, Persis
     c' <- toPersistValues c
     d' <- toPersistValues d
     e' <- toPersistValues e
-    return $ a' . b' . c' . d' . e'
+    pure $ a' . b' . c' . d' . e'
   fromPersistValues xs = do
     (a, rest0) <- fromPersistValues xs
     (b, rest1) <- fromPersistValues rest0
     (c, rest2) <- fromPersistValues rest1
     (d, rest3) <- fromPersistValues rest2
     (e, rest4) <- fromPersistValues rest3
-    return ((a, b, c, d, e), rest4)
+    pure ((a, b, c, d, e), rest4)
   dbType db a = DbEmbedded (EmbeddedDef False [("val0", dbType db ((undefined :: (a, b, c, d, e) -> a) a)), ("val1", dbType db ((undefined :: (a, b, c, d, e) -> b) a)), ("val2", dbType db ((undefined :: (a, b, c, d, e) -> c) a)), ("val3", dbType db ((undefined :: (a, b, c, d, e) -> d) a)), ("val4", dbType db ((undefined :: (a, b, c, d, e) -> e) a))]) Nothing
 
 instance (DbDescriptor db, PersistEntity v, PersistField v) => PersistField (KeyForBackend db v) where
@@ -616,7 +616,7 @@ instance (Projection a1 a1', Projection a2 a2') => Projection (a1, a2) (a1', a2'
   projectionResult (a', b') xs = do
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
-    return ((a, b), rest1)
+    pure ((a, b), rest1)
 
 instance (Projection a1 a1', Projection a2 a2', Projection a3 a3') => Projection (a1, a2, a3) (a1', a2', a3') where
   type ProjectionDb (a1, a2, a3) db = (ProjectionDb (a1, a2) db, ProjectionDb a3 db)
@@ -626,7 +626,7 @@ instance (Projection a1 a1', Projection a2 a2', Projection a3 a3') => Projection
     (a, rest0) <- projectionResult a' xs
     (b, rest1) <- projectionResult b' rest0
     (c, rest2) <- projectionResult c' rest1
-    return ((a, b, c), rest2)
+    pure ((a, b, c), rest2)
 
 instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4 a4') => Projection (a1, a2, a3, a4) (a1', a2', a3', a4') where
   type ProjectionDb (a1, a2, a3, a4) db = (ProjectionDb (a1, a2, a3) db, ProjectionDb a4 db)
@@ -637,7 +637,7 @@ instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4
     (b, rest1) <- projectionResult b' rest0
     (c, rest2) <- projectionResult c' rest1
     (d, rest3) <- projectionResult d' rest2
-    return ((a, b, c, d), rest3)
+    pure ((a, b, c, d), rest3)
 
 instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4 a4', Projection a5 a5') => Projection (a1, a2, a3, a4, a5) (a1', a2', a3', a4', a5') where
   type ProjectionDb (a1, a2, a3, a4, a5) db = (ProjectionDb (a1, a2, a3, a4) db, ProjectionDb a5 db)
@@ -649,7 +649,7 @@ instance (Projection a1 a1', Projection a2 a2', Projection a3 a3', Projection a4
     (c, rest2) <- projectionResult c' rest1
     (d, rest3) <- projectionResult d' rest2
     (e, rest4) <- projectionResult e' rest3
-    return ((a, b, c, d, e), rest4)
+    pure ((a, b, c, d, e), rest4)
 
 instance (EntityConstr v c, a ~ AutoKey v) => Assignable (AutoKeyField v c) a
 
@@ -699,14 +699,14 @@ instance Constructor c => EntityConstr' HTrue c where
   entityConstrNum' _ = phantomConstrNum
 
 instance A.FromJSON PersistValue where
-  parseJSON (A.String t) = return $ PersistText t
+  parseJSON (A.String t) = pure $ PersistText t
   parseJSON (A.Number n) =
-    return $
+    pure $
       if fromInteger (floor n) == n
         then PersistInt64 $ floor n
         else PersistDouble $ fromRational $ toRational n
-  parseJSON (A.Bool b) = return $ PersistBool b
-  parseJSON A.Null = return PersistNull
+  parseJSON (A.Bool b) = pure $ PersistBool b
+  parseJSON A.Null = pure PersistNull
   parseJSON a = fail $ "parseJSON PersistValue: unexpected " ++ show a
 
 instance A.ToJSON PersistValue where

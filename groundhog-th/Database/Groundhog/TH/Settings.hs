@@ -296,7 +296,7 @@ instance FromJSON UniqueType where
     x <- parseJSON o
     let vals = [("constraint", UniqueConstraint), ("index", UniqueIndex), ("primary", UniquePrimary False)]
     case lookup x vals of
-      Just a -> return a
+      Just a -> pure a
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
 instance FromJSON ReferenceActionType where
@@ -304,7 +304,7 @@ instance FromJSON ReferenceActionType where
     x <- parseJSON o
     let vals = [("no action", NoAction), ("restrict", Restrict), ("cascade", Cascade), ("set null", SetNull), ("set default", SetDefault)]
     case lookup x vals of
-      Just a -> return a
+      Just a -> pure a
       Nothing -> fail $ "parseJSON: UniqueType expected " ++ show (map fst vals) ++ ", but got " ++ x
 
 instance FromJSON (PSFieldDef String) where

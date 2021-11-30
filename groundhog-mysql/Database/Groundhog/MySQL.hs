@@ -105,20 +105,20 @@ instance PersistBackendConn MySQL where
   getList k = runDb' $ getList' k
 
 instance SchemaAnalyzer MySQL where
-  schemaExists schema = runDb' $ queryRaw' "SELECT 1 FROM information_schema.schemata WHERE schema_name=?" [toPrimitivePersistValue schema] >>= firstRow >>= return . isJust
-  getCurrentSchema = runDb' $ queryRaw' "SELECT database()" [] >>= firstRow >>= return . (>>= fst . fromPurePersistValues)
-  listTables schema = runDb' $ queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,database())" [toPrimitivePersistValue schema] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
-  listTableTriggers name = runDb' $ queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,database()) AND event_object_table=?" (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  schemaExists schema = runDb' $ queryRaw' "SELECT 1 FROM information_schema.schemata WHERE schema_name=?" [toPrimitivePersistValue schema] >>= firstRow >>= pure . isJust
+  getCurrentSchema = runDb' $ queryRaw' "SELECT database()" [] >>= firstRow >>= pure . (>>= fst . fromPurePersistValues)
+  listTables schema = runDb' $ queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,database())" [toPrimitivePersistValue schema] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
+  listTableTriggers name = runDb' $ queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,database()) AND event_object_table=?" (toPurePersistValues name []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   analyzeTable = runDb' . analyzeTable'
   analyzeTrigger name = runDb' $ do
     x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,database()) AND trigger_name=?" (toPurePersistValues name []) >>= firstRow
-    return $ case x of
+    pure $ case x of
       Nothing -> Nothing
       Just src -> fst $ fromPurePersistValues src
   analyzeFunction name = runDb' $ do
     result <- queryRaw' "SELECT param_list, returns, body_utf8 from mysql.proc WHERE db = coalesce(?, database()) AND name = ?" (toPurePersistValues name []) >>= firstRow
     let read' typ = readSqlType typ typ (Nothing, Nothing, Nothing)
-    return $ case result of
+    pure $ case result of
       Nothing -> Nothing
       -- TODO: parse param_list
       Just result' -> Just (Just [DbOther (OtherTypeDef [Left param_list])], if ret == "" then Nothing else Just $ read' ret, src)
@@ -165,14 +165,14 @@ instance Savepoint MySQL where
     _ <- liftIO $ MySQL.execute_ c $ "SAVEPOINT " `combine` name'
     x <- onException m (liftIO $ MySQL.execute_ c $ "ROLLBACK TO SAVEPOINT " `combine` name')
     _ <- liftIO $ MySQL.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
-    return x
+    pure x
 
 instance ConnectionManager MySQL where
   withConn f conn@(MySQL c) = do
     _ <- liftIO $ MySQL.execute_ c "start transaction"
     x <- onException (f conn) (liftIO $ MySQL.rollback c)
     liftIO $ MySQL.commit c
-    return x
+    pure x
 
 instance TryConnectionManager MySQL where
   tryWithConn f g conn@(MySQL c) = do
@@ -181,7 +181,7 @@ instance TryConnectionManager MySQL where
     case x of
       Left _ -> liftIO $ MySQL.rollback c
       Right _ -> liftIO $ MySQL.commit c
-    return x
+    pure x
 
 instance ExtractConnection MySQL MySQL where
   extractConn f conn = f conn
@@ -193,7 +193,7 @@ open' :: MySQL.ConnectInfo -> IO MySQL
 open' ci = do
   conn <- MySQL.connect ci
   MySQLBase.autocommit conn False -- disable autocommit!
-  return $ MySQL conn
+  pure $ MySQL conn
 
 close' :: MySQL -> IO ()
 close' (MySQL conn) = MySQL.close conn
@@ -268,9 +268,9 @@ insertList' (l :: [a]) = do
         x' <- toPersistValues x
         executeRaw' query $ (k :) . (toPrimitivePersistValue n :) . x' $ []
         go (n + 1) xs
-      go _ [] = return ()
+      go _ [] = pure ()
   go 0 l
-  return $ fromPrimitivePersistValue k
+  pure $ fromPrimitivePersistValue k
 
 getList' :: forall a. PersistField a => Int64 -> Action MySQL [a]
 getList' k = do
@@ -283,7 +283,7 @@ getList' k = do
 getLastInsertId :: Action MySQL PersistValue
 getLastInsertId = do
   x <- queryRaw' "SELECT last_insert_id()" [] >>= firstRow
-  return $ maybe (error "getLastInsertId: Nothing") head x
+  pure $ maybe (error "getLastInsertId: Nothing") head x
 
 ----------
 
@@ -294,7 +294,7 @@ executeRaw' query vals = do
   let stmt = getStatement query
   liftIO $ do
     _ <- MySQL.execute conn stmt (map P vals)
-    return ()
+    pure ()
 
 renderConfig :: RenderConfig
 renderConfig =
@@ -358,7 +358,7 @@ migTriggerOnDelete :: QualifiedName -> [(String, String)] -> Action MySQL (Bool,
 migTriggerOnDelete name deletes = do
   let addTrigger = AddTriggerOnDelete name name (concatMap snd deletes)
   x <- analyzeTrigger name
-  return $ case x of
+  pure $ case x of
     Nothing | null deletes -> (False, [])
     Nothing -> (False, [addTrigger])
     Just sql ->
@@ -381,8 +381,8 @@ migTriggerOnUpdate tName deletes = do
       trigBody = concatMap f deletes
   let addTrigger = AddTriggerOnUpdate trigName tName Nothing trigBody
   x <- analyzeTrigger trigName
-  return $
-    return $ case x of
+  pure $
+    pure $ case x of
       Nothing | null deletes -> (False, [])
       Nothing -> (False, [addTrigger])
       Just sql ->
@@ -407,19 +407,19 @@ analyzeTable' name = do
             \  WHERE c.table_schema = coalesce(?, database()) AND c.table_name=?\
             \  ORDER BY c.ordinal_position"
 
-      cols <- queryRaw' colQuery (toPurePersistValues name []) >>= mapStream (return . first getColumn . fst . fromPurePersistValues) >>= streamToList
+      cols <- queryRaw' colQuery (toPurePersistValues name []) >>= mapStream (pure . first getColumn . fst . fromPurePersistValues) >>= streamToList
       -- MySQL has no difference between unique keys and indexes
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.key_column_usage u USING (constraint_catalog, constraint_schema, constraint_name, table_schema, table_name) WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,database()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
-      uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues ("UNIQUE" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
-      uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues ("PRIMARY KEY" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+      uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues ("UNIQUE" :: String, name) []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
+      uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues ("PRIMARY KEY" :: String, name) []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
       let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map (Left . snd) us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName (fst c) `elem` map snd uniqPrimary) cols of
             [(c, extra)] -> colType c `elem` [DbInt32, DbInt64] && "auto_increment" `isInfixOf` (extra :: String)
             _ -> False
           uniqs = mkUniqs UniqueConstraint uniqConstraints ++ mkUniqs (UniquePrimary isAutoincremented) uniqPrimary
       references <- analyzeTableReferences name
-      return $ Just $ TableInfo (map fst cols) uniqs references
-    Nothing -> return Nothing
+      pure $ Just $ TableInfo (map fst cols) uniqs references
+    Nothing -> pure Nothing
 
 getColumn :: ((String, String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int)) -> Column
 getColumn ((column_name, is_nullable, data_type, column_type, def), modifiers) = Column
@@ -440,7 +440,7 @@ analyzeTableReferences name = do
         \  INNER JOIN information_schema.referential_constraints rc USING (constraint_catalog, constraint_schema, constraint_name)\
         \  WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema=coalesce(?, database()) AND tc.table_name=?\
         \  ORDER BY tc.constraint_name"
-  x <- queryRaw' query (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  x <- queryRaw' query (toPurePersistValues name []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   -- (refName, ((parentTableSchema, parentTable, onDelete, onUpdate), (childColumn, parentColumn)))
   let mkReference xs = (Just refName, Reference parentTable pairs (mkAction onDelete) (mkAction onUpdate))
         where
@@ -448,7 +448,7 @@ analyzeTableReferences name = do
           (refName, ((parentTable, onDelete, onUpdate), _)) = head xs
           mkAction c = Just $ fromMaybe (error $ "unknown reference action type: " ++ c) $ readReferenceAction c
       references = map mkReference $ groupBy ((==) `on` fst) x
-  return references
+  pure references
 
 showAlterDb :: String -> AlterDB -> SingleMigration
 showAlterDb _ (AddTable s) = Right [(False, defaultPriority, s)]
@@ -710,20 +710,20 @@ queryRaw' query vals = do
         let go acc = do
               row <- MySQLBase.fetchRow result
               case row of
-                [] -> return (acc [])
+                [] -> pure (acc [])
                 _ ->
                   let converted = convert row
                    in converted `seq` go (acc . (converted :))
         -- TODO: this variable is ugly. Switching to pipes or conduit might help
         rowsVar <- finally (go id) (MySQLBase.freeResult result) >>= newIORef
-        return $ do
+        pure $ do
           rows <- readIORef rowsVar
           case rows of
-            [] -> return Nothing
+            [] -> pure Nothing
             (x : xs) -> do
               writeIORef rowsVar xs
-              return $ Just x
-  return $ mkAcquire open (const $ return ())
+              pure $ Just x
+  pure $ mkAcquire open (const $ pure ())
 
 -- | Avoid orphan instances.
 newtype P = P PersistValue

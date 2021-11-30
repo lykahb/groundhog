@@ -141,9 +141,9 @@ mkColumns listAutoKeyType = go ""
 mkReferences :: DbTypePrimitive -> (String, DbType) -> [Reference]
 mkReferences autoKeyType field = concat $ traverseDbType f field
   where
-    f (DbEmbedded _ ref) cols = maybe [] (return . mkReference cols) ref
+    f (DbEmbedded _ ref) cols = maybe [] (pure . mkReference cols) ref
     f (DbList lName _) cols = [mkReference cols (Right ((Nothing, lName), ["id"]), Nothing, Nothing)]
-    f (DbTypePrimitive _ _ _ ref) cols = maybe [] (return . mkReference cols) ref
+    f (DbTypePrimitive _ _ _ ref) cols = maybe [] (pure . mkReference cols) ref
     mkReference :: [String] -> ParentTableReference -> Reference
     mkReference cols (parent, onDel, onUpd) = case parent of
       Left (e, Nothing) -> Reference (entitySchema e, entityName e) (zipWith' (,) cols [keyName]) onDel onUpd
@@ -203,11 +203,11 @@ migrateRecursively migS migE migL v = result
     allSubtypes = map snd . concatMap constrParams . constructors
     migRef ref = case ref of
       Just (Left (e, _), _, _) -> migEntity e
-      _ -> return ()
+      _ -> pure ()
     migEntity e = do
       case entitySchema e of
-        Just name -> f ("schema " ++ name) (migS name) (return ())
-        Nothing -> return ()
+        Just name -> f ("schema " ++ name) (migS name) (pure ())
+        Nothing -> pure ()
       f ("entity " ++ mainTableName id e) (migE e) (mapM_ go (allSubtypes e))
     f name mig cont = do
       a <- gets (Map.lookup name)
@@ -217,7 +217,7 @@ migrateRecursively migS migE migL v = result
 migrateSchema :: SchemaAnalyzer conn => MigrationPack conn -> String -> Action conn SingleMigration
 migrateSchema MigrationPack {..} schema = do
   x <- schemaExists schema
-  return $
+  pure $
     if x
       then Right []
       else showAlterDb $ CreateSchema schema False
@@ -237,7 +237,7 @@ migrateEntity m@MigrationPack {..} e = do
       case x of
         Just old
           | null $ getAlters m old expectedMainStructure ->
-            return $
+            pure $
               Left
                 ["Datatype with multiple constructors was truncated to one constructor. Manual migration required. Datatype: " ++ name]
         _ -> fmap snd $ migConstr e $ head constrs
@@ -245,7 +245,7 @@ migrateEntity m@MigrationPack {..} e = do
       mainStructure <- analyzeTable (entitySchema e, name)
       let constrTable c = name ++ [delim] ++ constrName c
       res <- mapM (migConstr e) constrs
-      return $ case mainStructure of
+      pure $ case mainStructure of
         Nothing ->
           -- no constructor tables can exist if there is no main data table
           let orphans = filter (fst . fst) $ zip res constrs
@@ -282,7 +282,7 @@ migrateList m@MigrationPack {..} (DbList mainName t) = do
   valuesStructure <- analyzeTable (Nothing, valuesName)
   let triggerMain = []
   (_, triggerValues) <- migTriggerOnDelete (Nothing, valuesName) $ mkDeletes escape ("value", t)
-  return $ case (mainStructure, valuesStructure) of
+  pure $ case (mainStructure, valuesStructure) of
     (Nothing, Nothing) ->
       let rest = [AlterTable (Nothing, valuesName) valuesQuery expectedValuesStructure expectedValuesStructure addInAlters]
        in mergeMigrations $ map showAlterDb $ [AddTable mainQuery, AddTable valuesQuery] ++ rest ++ triggerMain ++ triggerValues
@@ -384,7 +384,7 @@ defaultMigConstr m@MigrationPack {..} e constr = do
         )
         where
           (columns, refs) = foldr (mkColumns autoKeyType) [] &&& concatMap (mkReferences autoKeyType) $ constrParams constr
-          uniques = map (\u -> u {uniqueDefFields = concatMap (either (map Left . ($ []) . flatten id) (return . Right)) $ uniqueDefFields u}) $ constrUniques constr
+          uniques = map (\u -> u {uniqueDefFields = concatMap (either (map Left . ($ []) . flatten id) (pure . Right)) $ uniqueDefFields u}) $ constrUniques constr
           f autoKey cols uniqs refs' = (addTable', addInAlters')
             where
               (addInCreate, addInAlters') = addUniquesReferences uniqs refs'
@@ -408,7 +408,7 @@ defaultMigConstr m@MigrationPack {..} e constr = do
         if constrExisted == triggerExisted || (constrExisted && null dels)
           then migErrs
           else ("Both trigger and constructor table must exist: " ++ show qualifiedCName) : migErrs
-  return
+  pure
     ( constrExisted,
       if null allErrs
         then mergeMigrations $ map showAlterDb $ mig ++ delTrigger ++ updTriggers

@@ -99,20 +99,20 @@ instance PersistBackendConn Sqlite where
 
 instance SchemaAnalyzer Sqlite where
   schemaExists _ = fail "schemaExists: is not supported by Sqlite"
-  getCurrentSchema = return Nothing
-  listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  getCurrentSchema = pure Nothing
+  listTables Nothing = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='table'" [] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   listTables sch = fail $ "listTables: schemas are not supported by Sqlite: " ++ show sch
-  listTableTriggers (Nothing, name) = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue name] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  listTableTriggers (Nothing, name) = runDb' $ queryRaw' "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?" [toPrimitivePersistValue name] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   listTableTriggers (sch, _) = fail $ "listTableTriggers: schemas are not supported by Sqlite: " ++ show sch
   analyzeTable = runDb' . analyzeTable'
   analyzeTrigger (Nothing, name) = runDb' $ do
     x <- queryRaw' "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?" [toPrimitivePersistValue name] >>= firstRow
     case x of
-      Nothing -> return Nothing
-      Just src -> return (fst $ fromPurePersistValues src)
+      Nothing -> pure Nothing
+      Just src -> pure (fst $ fromPurePersistValues src)
   analyzeTrigger (sch, _) = fail $ "analyzeTrigger: schemas are not supported by Sqlite: " ++ show sch
   analyzeFunction _ = fail "analyzeFunction: is not supported by Sqlite"
-  getMigrationPack = return migrationPack
+  getMigrationPack = pure migrationPack
 
 withSqlitePool ::
   (MonadBaseControl IO m, MonadIO m) =>
@@ -147,14 +147,14 @@ instance Savepoint Sqlite where
     liftIO $ S.exec c $ "SAVEPOINT " <> name'
     x <- onException m (liftIO $ S.exec c $ "ROLLBACK TO " <> name')
     liftIO $ S.exec c $ "RELEASE " <> name'
-    return x
+    pure x
 
 instance ConnectionManager Sqlite where
   withConn f conn@(Sqlite c _) = do
     liftIO $ S.exec c "BEGIN"
     x <- onException (f conn) (liftIO $ S.exec c "ROLLBACK")
     liftIO $ S.exec c "COMMIT"
-    return x
+    pure x
 
 instance TryConnectionManager Sqlite where
   tryWithConn f g conn@(Sqlite c _) = do
@@ -163,7 +163,7 @@ instance TryConnectionManager Sqlite where
     case x of
       Left _ -> liftIO $ S.exec c "ROLLBACK"
       Right _ -> liftIO $ S.exec c "COMMIT"
-    return x
+    pure x
 
 instance ExtractConnection Sqlite Sqlite where
   extractConn f conn = f conn
@@ -176,7 +176,7 @@ open' s = do
   conn <- S.open $ T.pack s
   S.prepare conn "PRAGMA foreign_keys = ON" >>= \stmt -> S.step stmt >> S.finalize stmt
   cache <- newIORef Map.empty
-  return $ Sqlite conn cache
+  pure $ Sqlite conn cache
 
 close' :: Sqlite -> IO ()
 close' (Sqlite conn smap) = do
@@ -184,7 +184,7 @@ close' (Sqlite conn smap) = do
   S.close conn
 
 migrate' :: PersistEntity v => v -> Migration (Action Sqlite)
-migrate' = migrateRecursively (const $ return $ Right []) (migrateEntity migrationPack) (migrateList migrationPack)
+migrate' = migrateRecursively (const $ pure $ Right []) (migrateEntity migrationPack) (migrateList migrationPack)
 
 migrationPack :: GM.MigrationPack Sqlite
 migrationPack =
@@ -216,7 +216,7 @@ migTriggerOnDelete :: QualifiedName -> [(String, String)] -> Action Sqlite (Bool
 migTriggerOnDelete qualifiedName deletes = do
   let addTrigger = AddTriggerOnDelete qualifiedName qualifiedName (concatMap snd deletes)
   x <- analyzeTrigger qualifiedName
-  return $ case x of
+  pure $ case x of
     Nothing | null deletes -> (False, [])
     Nothing -> (False, [addTrigger])
     Just sql ->
@@ -237,7 +237,7 @@ migTriggerOnUpdate name dels = forM dels $ \(fieldName, del) -> do
   let trigName = (Nothing, snd name ++ delim : fieldName)
   let addTrigger = AddTriggerOnUpdate trigName name (Just fieldName) del
   x <- analyzeTrigger trigName
-  return $ case x of
+  pure $ case x of
     Nothing -> (False, [addTrigger])
     Just sql ->
       ( True,
@@ -249,26 +249,26 @@ migTriggerOnUpdate name dels = forM dels $ \(fieldName, del) -> do
 analyzeTable' :: QualifiedName -> Action Sqlite (Maybe TableInfo)
 analyzeTable' (Nothing, tName) = do
   let fromName = escapeS . fromString
-  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  tableInfo <- queryRaw' ("pragma table_info(" <> fromName tName <> ")") [] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   case tableInfo of
-    [] -> return Nothing
+    [] -> pure Nothing
     rawColumns -> do
       let mkColumn :: (Int, (String, String, Int, Maybe String, Int)) -> Column
           mkColumn (_, (name, typ, isNotNull, defaultValue, _)) = Column name (isNotNull == 0) (readSqlType typ) defaultValue
           primaryKeyColumnNames = foldr (\(_, (name, _, _, _, primaryIndex)) xs -> if primaryIndex > 0 then name : xs else xs) [] rawColumns
           columns = map mkColumn rawColumns
-      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+      indexList <- queryRaw' ("pragma index_list(" <> fromName tName <> ")") [] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
       let uniqueNames = map (\(_ :: Int, name, _) -> name) $ filter (\(_, _, isUnique) -> isUnique) indexList
       uniques <- forM uniqueNames $ \name -> do
-        uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+        uFields <- queryRaw' ("pragma index_info(" <> fromName name <> ")") [] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
         sql <- queryRaw' "select sql from sqlite_master where type = 'index' and name = ?" [toPrimitivePersistValue name] >>= firstRow
         let columnNames = map (\(_, _, columnName) -> columnName) (uFields :: [(Int, Int, String)])
             uType =
               if sql == Just [PersistNull]
                 then if sort columnNames == sort primaryKeyColumnNames then UniquePrimary False else UniqueConstraint
                 else UniqueIndex
-        return $ UniqueDef (Just name) uType (map Left columnNames)
-      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+        pure $ UniqueDef (Just name) uType (map Left columnNames)
+      foreignKeyList <- queryRaw' ("pragma foreign_key_list(" <> fromName tName <> ")") [] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
       (foreigns :: [(Maybe String, Reference)]) <- do
         let foreigns :: [[(Int, (Int, String, (String, Maybe String), (String, String, String)))]]
             foreigns = groupBy ((==) `on` fst) . sort $ foreignKeyList -- sort by foreign key number and column number inside key (first and second integers)
@@ -279,11 +279,11 @@ analyzeTable' (Nothing, tName) = do
           parents' <- case head parents of
             Nothing ->
               analyzePrimaryKey foreignTable >>= \case
-                Just primaryCols -> return primaryCols
+                Just primaryCols -> pure primaryCols
                 Nothing -> error $ "analyzeTable: cannot find primary key for table " ++ foreignTable ++ " which is referenced without specifying column names"
-            Just _ -> return $ map (fromMaybe (error "analyzeTable: all parents must be either NULL or values")) parents
+            Just _ -> pure $ map (fromMaybe (error "analyzeTable: all parents must be either NULL or values")) parents
           let refs = zip children parents'
-          return (Nothing, Reference (Nothing, foreignTable) refs (mkAction onDelete) (mkAction onUpdate))
+          pure (Nothing, Reference (Nothing, foreignTable) refs (mkAction onDelete) (mkAction onUpdate))
       let notPrimary x = case x of
             UniquePrimary _ -> False
             _ -> True
@@ -292,15 +292,15 @@ analyzeTable' (Nothing, tName) = do
               ++ if all (notPrimary . uniqueDefType) uniques && not (null primaryKeyColumnNames)
                 then [UniqueDef Nothing (UniquePrimary True) (map Left primaryKeyColumnNames)]
                 else []
-      return $ Just $ TableInfo columns uniques' foreigns
+      pure $ Just $ TableInfo columns uniques' foreigns
 analyzeTable' (sch, _) = fail $ "analyzeTable: schemas are not supported by Sqlite: " ++ show sch
 
 analyzePrimaryKey :: String -> Action Sqlite (Maybe [String])
 analyzePrimaryKey tName = do
-  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  tableInfo <- queryRaw' ("pragma table_info(" <> escapeS (fromString tName) <> ")") [] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   let cols = map (\(_, (name, _, _, _, primaryIndex)) -> (primaryIndex, name)) (tableInfo :: [(Int, (String, String, Int, Maybe String, Int))])
       cols' = map snd $ sort $ filter ((> 0) . fst) cols
-  return $
+  pure $
     if null cols'
       then Nothing
       else Just cols'
@@ -315,8 +315,8 @@ getStatementCached sql = do
       Nothing -> do
         stmt <- S.prepareUtf8 conn $ SD.Utf8 sql'
         writeIORef smap (Map.insert sql' stmt smap')
-        return stmt
-      Just stmt -> return stmt
+        pure stmt
+      Just stmt -> pure stmt
 
 getStatement :: Utf8 -> Action Sqlite S.Statement
 getStatement sql = do
@@ -466,9 +466,9 @@ insertList' l = do
         x' <- toPersistValues x
         executeRawCached' query $ (k :) . (toPrimitivePersistValue n :) . x' $ []
         go (n + 1) xs
-      go _ [] = return ()
+      go _ [] = pure ()
   go 0 l
-  return $ fromPrimitivePersistValue k
+  pure $ fromPrimitivePersistValue k
 
 getList' :: forall a. PersistField a => Int64 -> Action Sqlite [a]
 getList' k = do
@@ -488,7 +488,7 @@ getLastInsertRowId = do
 bind :: S.Statement -> [PersistValue] -> IO ()
 bind stmt = go 1
   where
-    go _ [] = return ()
+    go _ [] = pure ()
     go i (x : xs) = do
       case x of
         PersistInt64 int64 -> S.bindInt64 stmt i int64
@@ -513,7 +513,7 @@ executeRaw' query vals = do
     flip finally (S.finalize stmt) $ do
       bind stmt vals
       S.Done <- S.step stmt
-      return ()
+      pure ()
 
 executeRawCached' :: Utf8 -> [PersistValue] -> Action Sqlite ()
 executeRawCached' query vals = do
@@ -523,7 +523,7 @@ executeRawCached' query vals = do
     flip finally (S.reset stmt) $ do
       bind stmt vals
       S.Done <- S.step stmt
-      return ()
+      pure ()
 
 runQuery :: (Utf8 -> Action Sqlite S.Statement) -> (S.Statement -> IO ()) -> Utf8 -> [PersistValue] -> Action Sqlite (RowStream [PersistValue])
 runQuery getStmt close query vals = do
@@ -532,13 +532,13 @@ runQuery getStmt close query vals = do
   let open = do
         stmt <- runReaderT (getStmt query) conn
         bind stmt vals
-        return stmt
+        pure stmt
       mkNext stmt = do
         x <- S.step stmt
         case x of
-          S.Done -> return Nothing
+          S.Done -> pure Nothing
           S.Row -> Just . map pFromSql <$> S.columns stmt
-  return $ mkNext <$> mkAcquire open close
+  pure $ mkNext <$> mkAcquire open close
 
 queryRaw', queryRawCached' :: Utf8 -> [PersistValue] -> Action Sqlite (RowStream [PersistValue])
 queryRaw' = runQuery getStatement S.finalize

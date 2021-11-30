@@ -108,14 +108,14 @@ instance PersistBackendConn Postgresql where
   getList k = runDb' $ getList' k
 
 instance SchemaAnalyzer Postgresql where
-  schemaExists schema = runDb' $ queryRaw' "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=?" [toPrimitivePersistValue schema] >>= firstRow >>= return . isJust
-  getCurrentSchema = runDb' $ queryRaw' "SELECT current_schema()" [] >>= firstRow >>= return . (>>= fst . fromPurePersistValues)
-  listTables schema = runDb' $ queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue schema] >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
-  listTableTriggers name = runDb' $ queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  schemaExists schema = runDb' $ queryRaw' "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=?" [toPrimitivePersistValue schema] >>= firstRow >>= pure . isJust
+  getCurrentSchema = runDb' $ queryRaw' "SELECT current_schema()" [] >>= firstRow >>= pure . (>>= fst . fromPurePersistValues)
+  listTables schema = runDb' $ queryRaw' "SELECT table_name FROM information_schema.tables WHERE table_schema=coalesce(?,current_schema())" [toPrimitivePersistValue schema] >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
+  listTableTriggers name = runDb' $ queryRaw' "SELECT trigger_name FROM information_schema.triggers WHERE event_object_schema=coalesce(?,current_schema()) AND event_object_table=?" (toPurePersistValues name []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   analyzeTable = runDb' . analyzeTable'
   analyzeTrigger name = runDb' $ do
     x <- queryRaw' "SELECT action_statement FROM information_schema.triggers WHERE trigger_schema=coalesce(?,current_schema()) AND trigger_name=?" (toPurePersistValues name []) >>= firstRow
-    return $ case x of
+    pure $ case x of
       Nothing -> Nothing
       Just src -> fst $ fromPurePersistValues src
   analyzeFunction name = runDb' $ do
@@ -129,9 +129,9 @@ instance SchemaAnalyzer Postgresql where
           \     INNER JOIN pg_type ret ON p.prorettype = ret.oid\
           \     LEFT JOIN pg_type ret_te ON ret_te.oid = ret.typelem\
           \     WHERE n.nspname = coalesce(?,current_schema()) AND p.proname = ?"
-    result <- queryRaw' query (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+    result <- queryRaw' query (toPurePersistValues name []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
     let read' (typ, arr) = readSqlType typ (Nothing, Nothing, Nothing, Nothing, Nothing) arr
-    return $ case result of
+    pure $ case result of
       [] -> Nothing
       ((_, (ret, src)) : _) -> Just (Just $ map read' args, Just $ read' ret, src)
         where
@@ -182,14 +182,14 @@ instance Savepoint Postgresql where
     _ <- liftIO $ PG.execute_ c $ "SAVEPOINT " `combine` name'
     x <- onException m (liftIO $ PG.execute_ c $ "ROLLBACK TO SAVEPOINT " `combine` name')
     _ <- liftIO $ PG.execute_ c $ "RELEASE SAVEPOINT" `combine` name'
-    return x
+    pure x
 
 instance ConnectionManager Postgresql where
   withConn f conn@(Postgresql c) = do
     liftIO $ PG.begin c
     x <- onException (f conn) (liftIO $ PG.rollback c)
     liftIO $ PG.commit c
-    return x
+    pure x
 
 instance TryConnectionManager Postgresql where
   tryWithConn f g conn@(Postgresql c) = do
@@ -198,7 +198,7 @@ instance TryConnectionManager Postgresql where
     case x of
       Left _ -> liftIO $ PG.rollback c
       Right _ -> liftIO $ PG.commit c
-    return x
+    pure x
 
 instance ExtractConnection Postgresql Postgresql where
   extractConn f conn = f conn
@@ -210,7 +210,7 @@ open' :: String -> IO Postgresql
 open' s = do
   conn <- PG.connectPostgreSQL $ pack s
   _ <- PG.execute_ conn $ getStatement "SET client_min_messages TO WARNING"
-  return $ Postgresql conn
+  pure $ Postgresql conn
 
 close' :: Postgresql -> IO ()
 close' (Postgresql conn) = PG.close conn
@@ -288,9 +288,9 @@ insertList' (l :: [a]) = do
         x' <- toPersistValues x
         executeRaw' query $ (k :) . (toPrimitivePersistValue n :) . x' $ []
         go (n + 1) xs
-      go _ [] = return ()
+      go _ [] = pure ()
   go 0 l
-  return $ fromPrimitivePersistValue k
+  pure $ fromPrimitivePersistValue k
 
 getList' :: forall a. PersistField a => Int64 -> Action Postgresql [a]
 getList' k = do
@@ -302,7 +302,7 @@ getList' k = do
 
 --TODO: consider removal
 getKey :: RowStream [PersistValue] -> Action Postgresql PersistValue
-getKey stream = firstRow stream >>= \(Just [k]) -> return k
+getKey stream = firstRow stream >>= \(Just [k]) -> pure k
 
 ----------
 
@@ -313,7 +313,7 @@ executeRaw' query vals = do
   let stmt = getStatement query
   liftIO $ do
     _ <- PG.execute conn stmt (map P vals)
-    return ()
+    pure ()
 
 renderConfig :: RenderConfig
 renderConfig =
@@ -410,7 +410,7 @@ migTriggerOnDelete tName deletes = do
                   else -- this can happen when an ephemeral field was added or removed.
                     [DropTrigger trigName tName, addTrigger]
           )
-  return (trigExisted, funcMig ++ trigMig)
+  pure (trigExisted, funcMig ++ trigMig)
 
 -- | Table name and a list of field names and according delete statements
 -- assume that this function is called only for ephemeral fields
@@ -444,7 +444,7 @@ migTriggerOnUpdate tName dels = forM dels $ \(fieldName, del) -> do
               else -- this can happen when an ephemeral field was added or removed.
                 [DropTrigger trigName tName, addTrigger]
           )
-  return (trigExisted, funcMig ++ trigMig)
+  pure (trigExisted, funcMig ++ trigMig)
 
 analyzeTable' :: QualifiedName -> Action Postgresql (Maybe TableInfo)
 analyzeTable' name = do
@@ -462,11 +462,11 @@ analyzeTable' name = do
             \  WHERE c.table_schema = coalesce(?, current_schema()) AND c.table_name=?\
             \  ORDER BY c.ordinal_position"
 
-      cols <- queryRaw' colQuery (toPurePersistValues name []) >>= mapStream (return . getColumn . fst . fromPurePersistValues) >>= streamToList
+      cols <- queryRaw' colQuery (toPurePersistValues name []) >>= mapStream (pure . getColumn . fst . fromPurePersistValues) >>= streamToList
       let constraintQuery = "SELECT u.constraint_name, u.column_name FROM information_schema.table_constraints tc INNER JOIN information_schema.constraint_column_usage u ON tc.constraint_catalog=u.constraint_catalog AND tc.constraint_schema=u.constraint_schema AND tc.constraint_name=u.constraint_name WHERE tc.constraint_type=? AND tc.table_schema=coalesce(?,current_schema()) AND u.table_name=? ORDER BY u.constraint_name, u.column_name"
 
-      uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues ("UNIQUE" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
-      uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues ("PRIMARY KEY" :: String, name) []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+      uniqConstraints <- queryRaw' constraintQuery (toPurePersistValues ("UNIQUE" :: String, name) []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
+      uniqPrimary <- queryRaw' constraintQuery (toPurePersistValues ("PRIMARY KEY" :: String, name) []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
       -- indexes with system columns like oid are omitted
       let indexQuery =
             "WITH indexes as (\
@@ -489,7 +489,7 @@ analyzeTable' name = do
             \  INNER JOIN (SELECT oid FROM indexes\
             \    GROUP BY oid\
             \    HAVING every(attnum > 0 OR attnum IS NULL)) non_system ON i.oid = non_system.oid"
-      uniqIndexes <- queryRaw' indexQuery (toPurePersistValues name []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+      uniqIndexes <- queryRaw' indexQuery (toPurePersistValues name []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
       let mkUniqs typ = map (\us -> UniqueDef (fst $ head us) typ (map snd us)) . groupBy ((==) `on` fst)
           isAutoincremented = case filter (\c -> colName c `elem` map snd uniqPrimary) cols of
             [c] -> colType c `elem` [DbInt32, DbInt64] && maybe False ("nextval" `isPrefixOf`) (colDefault c)
@@ -499,8 +499,8 @@ analyzeTable' name = do
               ++ mkUniqs UniqueIndex (map (second $ \(col, expr) -> maybe (Right expr) Left col) uniqIndexes)
               ++ mkUniqs (UniquePrimary isAutoincremented) (map (second Left) uniqPrimary)
       references <- analyzeTableReferences name
-      return $ Just $ TableInfo cols uniqs references
-    Nothing -> return Nothing
+      pure $ Just $ TableInfo cols uniqs references
+    Nothing -> pure Nothing
 
 getColumn :: ((String, String, String, Maybe String), (Maybe Int, Maybe Int, Maybe Int, Maybe Int, Maybe String), (Int, Maybe String)) -> Column
 getColumn ((column_name, is_nullable, udt_name, d), modifiers, arr_info) = Column column_name (is_nullable == "YES") t d
@@ -522,7 +522,7 @@ analyzeTableReferences tName = do
         \  INNER JOIN pg_namespace sch_child ON sch_child.oid = cl_child.relnamespace\
         \  WHERE sch_child.nspname = coalesce(?, current_schema()) AND cl_child.relname = ?\
         \  ORDER BY c.conname"
-  x <- queryRaw' sql (toPurePersistValues tName []) >>= mapStream (return . fst . fromPurePersistValues) >>= streamToList
+  x <- queryRaw' sql (toPurePersistValues tName []) >>= mapStream (pure . fst . fromPurePersistValues) >>= streamToList
   -- (refName, ((parentTableSchema, parentTable, onDelete, onUpdate), (childColumn, parentColumn)))
   let mkReference xs = (Just refName, Reference parentTable pairs (mkAction onDelete) (mkAction onUpdate))
         where
@@ -536,7 +536,7 @@ analyzeTableReferences tName = do
             "d" -> SetDefault
             _ -> error $ "unknown reference action type: " ++ c
       references = map mkReference $ groupBy ((==) `on` fst) x
-  return references
+  pure references
 
 showAlterDb :: AlterDB -> SingleMigration
 showAlterDb (AddTable s) = Right [(False, defaultPriority, s)]
@@ -844,7 +844,7 @@ queryRaw' query vals = do
               -- Check result status
               status <- LibPQ.resultStatus ret
               case status of
-                LibPQ.TuplesOk -> return ()
+                LibPQ.TuplesOk -> pure ()
                 _ -> do
                   msg <- LibPQ.resStatus status
                   merr <- LibPQ.errorMessage rawconn
@@ -860,28 +860,28 @@ queryRaw' query vals = do
               cols <- LibPQ.nfields ret
               getters <- forM [0 .. cols -1] $ \col -> do
                 oid <- LibPQ.ftype ret col
-                return $ getGetter oid $ PG.Field ret col oid
+                pure $ getGetter oid $ PG.Field ret col oid
               -- Ready to go!
               rowRef <- newIORef (LibPQ.Row 0)
               rowCount <- LibPQ.ntuples ret
-              return (ret, rowRef, rowCount, getters)
+              pure (ret, rowRef, rowCount, getters)
 
-        return $ do
+        pure $ do
           row <- atomicModifyIORef rowRef (\r -> (r + 1, r))
           if row == rowCount
-            then return Nothing
+            then pure Nothing
             else fmap Just $
               forM (zip getters [0 ..]) $ \(getter, col) -> do
                 mbs <- LibPQ.getvalue' ret row col
                 case mbs of
-                  Nothing -> return PersistNull
+                  Nothing -> pure PersistNull
                   Just bs -> do
                     ok <- PGFF.runConversion (getter mbs) conn
                     bs `seq` case ok of
                       Errors (exc : _) -> throw exc
                       Errors [] -> error "Got an Errors, but no exceptions"
-                      Ok v -> return v
-  return $ mkAcquire open (const $ return ())
+                      Ok v -> pure v
+  pure $ mkAcquire open (const $ pure ())
 
 -- | Avoid orphan instances.
 newtype P = P PersistValue
@@ -929,10 +929,10 @@ getGetter (PG.Oid oid) = case oid of
   1560 -> convertPV PersistInt64
   1562 -> convertPV PersistInt64
   1700 -> convertPV (PersistDouble . fromRational)
-  2278 -> \_ _ -> return PersistNull
+  2278 -> \_ _ -> pure PersistNull
   _ -> \f dat -> fmap PersistByteString $ case dat of
     Nothing -> PGFF.returnError PGFF.UnexpectedNull f ""
-    Just str -> return $ copy str
+    Just str -> pure $ copy str
 
 unBinary :: PG.Binary a -> a
 unBinary (PG.Binary x) = x

@@ -74,7 +74,7 @@ pMigrate :: P.SqlPersistT (NoLoggingT (ResourceT IO)) () -> P.SqlPersistT (NoLog
 pMigrate truncate = P.runMigration migrateP >> truncate >> P.insert pPerson
 
 instance MonadLogger IO where
-  monadLoggerLog _ _ _ _ = return ()
+  monadLoggerLog _ _ _ _ = pure ()
 
 -- open transaction to reduce execution time on the DB side
 eachStatementInTransaction :: Bool

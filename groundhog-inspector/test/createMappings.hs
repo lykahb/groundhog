@@ -33,7 +33,7 @@ main = do
       executeRaw False "ROLLBACK" [] >> executeRaw False "BEGIN" []
       let decs = generateData defaultDataCodegenConfig defaultReverseNamingStyle tables
       mappings <- generateMapping defaultReverseNamingStyle tables
-      return (decs, mappings)
+      pure (decs, mappings)
   --  mapM_ (putStrLn . showData) decs
   writeFile "Datatypes.hs" $
     "{-# LANGUAGE GADTs, TypeFamilies, TemplateHaskell, QuasiQuotes, FlexibleInstances, StandaloneDeriving #-}\n"

@@ -213,7 +213,7 @@ mkPersist CodegenConfig {..} PersistDefinitions {..} = do
   unless (null duplicates) $ fail $ "All definitions must be unique. Found duplicates: " ++ show duplicates
   let getDecl name = do
         info <- reify $ mkName name
-        return $ case info of
+        pure $ case info of
           TyConI d -> d
           _ -> error $ "Only datatypes can be processed: " ++ name
 
@@ -322,7 +322,7 @@ notUniqueBy f xs = let xs' = map f xs in nub $ xs' \\ nub xs'
 
 assertUnique :: (Eq b, Show b) => (a -> b) -> [a] -> String -> Either String ()
 assertUnique f xs what = case notUniqueBy f xs of
-  [] -> return ()
+  [] -> pure ()
   ys -> Left $ "All " ++ what ++ " must be unique: " ++ show ys
 
 -- we need to validate datatype names because TH just creates unusable fields with spaces
@@ -341,7 +341,7 @@ validateEntity def = do
     assertUnique thDbFieldName fields "db field name in a constructor"
     mapM_ validateField fields
     case filter (\(THUniqueDef _ _ uFields) -> null uFields) $ thConstrUniques cdef of
-      [] -> return ()
+      [] -> pure ()
       ys -> Left $ "Constraints must have at least one field: " ++ show ys
     when (isNothing (thDbAutoKeyName cdef) /= isNothing (thAutoKey def)) $
       Left $ "Presence of autokey definitions should be the same in entity and constructors definitions " ++ show (thDataName def) ++ ": " ++ show (thDbAutoKeyName cdef) ++ " - " ++ show (thAutoKey def)
@@ -370,7 +370,7 @@ validateEntity def = do
   let keyDefaults = maybe id ((:) . thAutoKeyIsDef) (thAutoKey def) $ map thUniqueKeyIsDef (thUniqueKeys def)
   when (not (null keyDefaults) && length (filter id keyDefaults) /= 1) $
     Left $ "A datatype with keys must have one default key: " ++ show (thDataName def)
-  return def
+  pure def
 
 validateField :: THFieldDef -> Either String ()
 validateField fDef = do
@@ -384,7 +384,7 @@ validateEmbedded def = do
   assertUnique thExprName fields "expr field name in an embedded datatype"
   assertUnique thDbFieldName fields "db field name in an embedded datatype"
   mapM_ validateField fields
-  return def
+  pure def
 
 mkTHEntityDef :: NamingStyle -> Dec -> THEntityDef
 mkTHEntityDef NamingStyle {..} dec = THEntityDef dName (mkDbEntityName dName') Nothing autokey [] typeVars constrs

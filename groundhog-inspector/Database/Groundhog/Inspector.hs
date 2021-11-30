@@ -197,11 +197,11 @@ followReferencedTables p = go mempty
             x <- analyzeTable ref
             case x of
               Nothing -> fail $ "Reference to " ++ show ref ++ "not found"
-              Just x' -> return $ Map.insert ref x' acc
+              Just x' -> pure $ Map.insert ref x' acc
         )
         mempty
         missingReferences
-    go checkedTables currentTables | Map.null currentTables = return checkedTables
+    go checkedTables currentTables | Map.null currentTables = pure checkedTables
     go checkedTables currentTables = do
       newTables <- getDirectMissingReferences checkedTables currentTables
       go (checkedTables <> currentTables) newTables
@@ -228,7 +228,7 @@ collectTables p schema = do
         x <- analyzeTable ref
         case x of
           Nothing -> error $ "Reference to " ++ show ref ++ "not found"
-          Just x' -> return x'
+          Just x' -> pure x'
   analyzedTables <- Traversable.mapM analyzeTable' $ Map.fromList $ zip tables tables
   followReferencedTables p analyzedTables
 
@@ -334,7 +334,7 @@ equalP' t1 t2 = EqualP t1 t2
 generateMapping :: (PersistBackend m, SchemaAnalyzer (Conn m)) => ReverseNamingStyle -> Map QualifiedName TableInfo -> m (Map QualifiedName PSEntityDef)
 generateMapping style tables = do
   m <- getMigrationPack
-  return $ generateMappingPure style m tables
+  pure $ generateMappingPure style m tables
 
 generateMappingPure :: DbDescriptor conn => ReverseNamingStyle -> MigrationPack conn -> Map QualifiedName TableInfo -> Map QualifiedName PSEntityDef
 generateMappingPure style m tables = Map.mapWithKey (generateMapping' style m tables) tables

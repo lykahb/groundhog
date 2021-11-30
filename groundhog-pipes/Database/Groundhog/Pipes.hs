@@ -38,7 +38,7 @@ fromStream stream = do
         a <- liftIO next
         case a of
           Just a' -> yield a' >> go
-          Nothing -> return ()
+          Nothing -> pure ()
   case close of
     Nothing -> go
     Just close' -> go `finally` liftIO close'

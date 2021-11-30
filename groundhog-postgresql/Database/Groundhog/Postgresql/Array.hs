@@ -113,9 +113,9 @@ jstring_ =
     _ <- A.word8 doubleQuote
     if backslash `B.elem` s
       then case Z.parse unescape s of
-        Right r -> return r
+        Right r -> pure r
         Left err -> fail err
-      else return s
+      else pure s
 {-# INLINE jstring_ #-}
 
 -- Borrowed from aeson
@@ -140,7 +140,7 @@ unescape = B.toStrict <$> B.toLazyByteString <$> go mempty
                 cont (B.word8 escape)
       done <- Z.atEnd
       if done
-        then return (acc `mappend` B.byteString h)
+        then pure (acc `mappend` B.byteString h)
         else rest
 
 doubleQuote, backslash :: Word8
