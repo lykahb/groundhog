@@ -123,6 +123,7 @@ import Data.Acquire (Acquire)
 import Data.ByteString.Char8 (ByteString)
 import Data.ByteString.Lazy (toStrict)
 import Data.Int (Int64)
+import Data.Kind (Type, Constraint)
 import Data.Map (Map)
 import Data.Semigroup (Semigroup)
 import Data.String (IsString)
@@ -131,17 +132,16 @@ import Data.Text.Lazy.Builder (Builder, fromText, toLazyText)
 import Data.Text.Lazy.Encoding (encodeUtf8)
 import Data.Time (Day, TimeOfDay, UTCTime)
 import Data.Time.LocalTime (ZonedTime, zonedTimeToLocalTime, zonedTimeToUTC, zonedTimeZone)
-import GHC.Exts (Constraint)
 
 -- | Only instances of this class can be persisted in a database
 class (PurePersistField (AutoKey v), PurePersistField (DefaultKey v)) => PersistEntity v where
   -- | This type is used for typesafe manipulation of separate fields of datatype v.
   -- Each constructor in 'Field' corresponds to its field in a datatype v.
   -- It is parametrised by constructor phantom type and field value type.
-  data Field v :: ((* -> *) -> *) -> * -> *
+  data Field v :: ((Type -> Type) -> Type) -> Type -> Type
 
   -- | A unique identifier of a value stored in a database. This may be a primary key, a constraint or unique indices. The second parameter is the key description.
-  data Key v :: * -> *
+  data Key v :: Type -> Type
 
   -- | This type is the default autoincremented key for the entity. If entity does not have such key, AutoKey v = ().
   type AutoKey v
@@ -169,7 +169,7 @@ class (PurePersistField (AutoKey v), PurePersistField (DefaultKey v)) => Persist
   entityFieldChain :: DbDescriptor db => proxy db -> Field v c a -> FieldChain
 
 -- | A holder for Unique constraints
-data Unique (u :: (* -> *) -> *)
+data Unique (u :: (Type -> Type) -> Type)
 
 -- | Key marked with this type can have value for any backend
 data BackendSpecific
@@ -231,7 +231,7 @@ class Assignable f a => FieldLike f a | f -> a where
   fieldChain :: (DbDescriptor db, ProjectionDb f db) => proxy db -> f -> FieldChain
 
 class PersistField v => Embedded v where
-  data Selector v :: * -> *
+  data Selector v :: Type -> Type
   selectorNum :: Selector v a -> Int
 
 infixl 5 ~>
@@ -246,15 +246,15 @@ field ~> sel = subField
         other -> error $ "(~>): cannot get subfield of non-embedded type " ++ show other
     db = (undefined :: SubField db v c a' -> proxy db) subField
 
-newtype SubField db v (c :: (* -> *) -> *) a = SubField FieldChain
+newtype SubField db v (c :: (Type -> Type) -> Type) a = SubField FieldChain
 
 -- | It can be used in expressions like a regular field.
 -- For example, @delete (AutoKeyField ==. k)@
 -- or @delete (AutoKeyField ==. k ||. SomeField ==. \"DUPLICATE\")@
-data AutoKeyField v (c :: (* -> *) -> *) where
+data AutoKeyField v (c :: (Type -> Type) -> Type) where
   AutoKeyField :: AutoKeyField v c
 
-data RestrictionHolder v (c :: (* -> *) -> *)
+data RestrictionHolder v (c :: (Type -> Type) -> Type)
 
 data SelectOptions db r hasLimit hasOffset hasOrder hasDistinct = SelectOptions
   { condOptions :: Cond db r,
@@ -307,7 +307,7 @@ class PrimitivePersistField (AutoKeyType db) => DbDescriptor db where
   type AutoKeyType db
 
   -- | Value of this type can be used as a part of a query. For example, it can be RenderS for relational databases, or BSON for MongoDB.
-  type QueryRaw db :: * -> *
+  type QueryRaw db :: Type -> Type
 
   -- | Name of backend
   backendName :: proxy db -> String
@@ -470,13 +470,13 @@ class Constructor c where
   -- or as a separate type, eg instance Constructor MyDataConstructor (MyData a) which requires -XMultiParamTypeClasses
 
   -- | Returns constructor index which can be used to get ConstructorDef from EntityDef
-  phantomConstrNum :: c (a :: * -> *) -> Int
+  phantomConstrNum :: c (a :: Type -> Type) -> Int
 
 -- | This class helps type inference in cases when query does not contain any fields which
 -- define the constructor, but the entity has only one.
 -- For example, in @select $ AutoKeyField ==. k@ the condition would need type annotation with constructor name only if we select a sum type.
 class PersistEntity v => EntityConstr v c where
-  entityConstrNum :: proxy v -> c (a :: * -> *) -> Int
+  entityConstrNum :: proxy v -> c (a :: Type -> Type) -> Int
 
 class PurePersistField uKey => IsUniqueKey uKey where
   -- | Creates value of unique key using the data extracted from the passed value

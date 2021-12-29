@@ -15,6 +15,7 @@ import qualified Data.ByteString.Base64 as B64
 import Data.ByteString.Char8 (ByteString, unpack)
 import qualified Data.ByteString.Lazy.Char8 as Lazy
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.Kind (Type)
 import Data.Maybe (fromMaybe)
 import qualified Data.Scientific
 import qualified Data.Text as T
@@ -690,7 +691,7 @@ instance (PersistEntity v, EntityConstr' (IsSumType v) c) => EntityConstr v c wh
   entityConstrNum v = entityConstrNum' $ (undefined :: proxy v -> IsSumType v) v
 
 class EntityConstr' flag c where
-  entityConstrNum' :: flag -> c (a :: * -> *) -> Int
+  entityConstrNum' :: flag -> c (a :: Type -> Type) -> Int
 
 instance EntityConstr' HFalse c where
   entityConstrNum' _ _ = 0
