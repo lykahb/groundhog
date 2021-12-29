@@ -16,13 +16,6 @@ services:
 
 matrix:
   include:
-  - env: GHC-VER=8.0.2 STACK_YAML="stack-ghc-8.0.yaml"
-    addons:
-      apt:
-        sources:
-          - hvr-ghc
-        packages:
-          - ghc-8.0.2
   - env: GHC-VER=8.2.2 STACK_YAML="stack-ghc-8.2.yaml"
     addons:
       apt:
@@ -68,4 +61,4 @@ before_script:
 - cd ..
 
 script:
-- stack test --no-terminal --skip-ghc-check --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite
+- stack test --no-terminal --skip-ghc-check --flag groundhog-test:mysql --flag groundhog-test:postgresql --flag groundhog-test:sqlite groundhog-test
