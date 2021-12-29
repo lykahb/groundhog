@@ -896,11 +896,7 @@ dataInstD' context name types constrs derives =
 dataInstD' = DataInstD
 #endif
 
-#if MIN_VERSION_template_haskell(2, 17, 0)
-dataD' :: Cxt -> Name -> [TH.TyVarBndr ()] -> [Con] -> [Name] -> InstanceDec
-#else
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
-#endif
 #if MIN_VERSION_template_haskell(2, 12, 0)
 dataD' context name types constrs derives =
   DataD context name types Nothing constrs [DerivClause Nothing (map ConT derives)]
@@ -925,4 +921,3 @@ type TyVarBndr =
 #else
   TH.TyVarBndr
 #endif
-

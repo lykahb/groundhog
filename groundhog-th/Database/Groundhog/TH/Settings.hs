@@ -1,8 +1,10 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -40,7 +42,8 @@ import Database.Groundhog.Generic (PSFieldDef (..))
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Lift (..))
 
-data PersistDefinitions = PersistDefinitions {psEntities :: [PSEntityDef], psEmbeddeds :: [PSEmbeddedDef], psPrimitives :: [PSPrimitiveDef]} deriving (Show)
+data PersistDefinitions = PersistDefinitions {psEntities :: [PSEntityDef], psEmbeddeds :: [PSEmbeddedDef], psPrimitives :: [PSPrimitiveDef]}
+  deriving (Show, Lift)
 
 -- data SomeData a = U1 { foo :: Int} | U2 { bar :: Maybe String, asc :: Int64, add :: a} | U3 deriving (Show, Eq)
 
@@ -147,7 +150,7 @@ data PSEntityDef = PSEntityDef
     psUniqueKeys :: Maybe [PSUniqueKeyDef],
     psConstructors :: Maybe [PSConstructorDef]
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
 data PSEmbeddedDef = PSEmbeddedDef
   { psEmbeddedName :: String,
@@ -155,7 +158,7 @@ data PSEmbeddedDef = PSEmbeddedDef
     psDbEmbeddedName :: Maybe String,
     psEmbeddedFields :: Maybe [PSFieldDef String]
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
 data PSPrimitiveDef = PSPrimitiveDef
   { psPrimitiveName :: String,
@@ -164,7 +167,7 @@ data PSPrimitiveDef = PSPrimitiveDef
     -- | Name of a pair of functions converting the value to and from a type that is an instance of `PrimitivePersistField`
     psPrimitiveConverter :: String
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
 data PSConstructorDef = PSConstructorDef
   { psConstrName :: String, -- U2
@@ -174,14 +177,14 @@ data PSConstructorDef = PSConstructorDef
     psConstrFields :: Maybe [PSFieldDef String],
     psConstrUniques :: Maybe [PSUniqueDef]
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
 data PSUniqueDef = PSUniqueDef
   { psUniqueName :: String,
     psUniqueType :: Maybe UniqueType,
     psUniqueFields :: [Either String String]
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
 data PSUniqueKeyDef = PSUniqueKeyDef
   { psUniqueKeyName :: String,
@@ -192,52 +195,18 @@ data PSUniqueKeyDef = PSUniqueKeyDef
     psUniqueKeyMakeEmbedded :: Maybe Bool,
     psUniqueKeyIsDef :: Maybe Bool
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
 data PSAutoKeyDef = PSAutoKeyDef
   { psAutoKeyConstrName :: Maybe String,
     psAutoKeyIsDef :: Maybe Bool
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Lift)
 
-instance Lift PSPrimitiveDef where
-  lift PSPrimitiveDef {..} = [|PSPrimitiveDef $(lift psPrimitiveName) $(lift psPrimitiveDbName) $(lift psPrimitiveConverter)|]
 
-instance Lift PersistDefinitions where
-  lift PersistDefinitions {..} = [|PersistDefinitions $(lift psEntities) $(lift psEmbeddeds) $(lift psPrimitives)|]
-
-instance Lift PSEntityDef where
-  lift PSEntityDef {..} = [|PSEntityDef $(lift psDataName) $(lift psDbEntityName) $(lift psEntitySchema) $(lift psAutoKey) $(lift psUniqueKeys) $(lift psConstructors)|]
-
-instance Lift PSEmbeddedDef where
-  lift PSEmbeddedDef {..} = [|PSEmbeddedDef $(lift psEmbeddedName) $(lift psDbEmbeddedName) $(lift psEmbeddedFields)|]
-
-instance Lift PSConstructorDef where
-  lift PSConstructorDef {..} = [|PSConstructorDef $(lift psConstrName) $(lift psPhantomConstrName) $(lift psDbConstrName) $(lift psDbAutoKeyName) $(lift psConstrFields) $(lift psConstrUniques)|]
-
-instance Lift PSUniqueDef where
-  lift (PSUniqueDef name typ fields) = [|PSUniqueDef $(lift name) $(lift typ) $(lift fields)|]
-
-instance Lift UniqueType where
-  lift UniqueConstraint = [|UniqueConstraint|]
-  lift UniqueIndex = [|UniqueIndex|]
-  lift (UniquePrimary x) = [|UniquePrimary $(lift x)|]
-
-instance Lift ReferenceActionType where
-  lift NoAction = [|NoAction|]
-  lift Restrict = [|Restrict|]
-  lift Cascade = [|Cascade|]
-  lift SetNull = [|SetNull|]
-  lift SetDefault = [|SetDefault|]
-
-instance Lift (PSFieldDef String) where
-  lift PSFieldDef {..} = [|PSFieldDef $(lift psFieldName) $(lift psDbFieldName) $(lift psDbTypeName) $(lift psExprName) $(lift psEmbeddedDef) $(lift psDefaultValue) $(lift psReferenceParent) $(lift psFieldConverter)|]
-
-instance Lift PSUniqueKeyDef where
-  lift PSUniqueKeyDef {..} = [|PSUniqueKeyDef $(lift psUniqueKeyName) $(lift psUniqueKeyPhantomName) $(lift psUniqueKeyConstrName) $(lift psUniqueKeyDbName) $(lift psUniqueKeyFields) $(lift psUniqueKeyMakeEmbedded) $(lift psUniqueKeyIsDef)|]
-
-instance Lift PSAutoKeyDef where
-  lift PSAutoKeyDef {..} = [|PSAutoKeyDef $(lift psAutoKeyConstrName) $(lift psAutoKeyIsDef)|]
+deriving instance Lift a => Lift (PSFieldDef a)
+deriving instance Lift UniqueType
+deriving instance Lift ReferenceActionType
 
 instance FromJSON PersistDefinitions where
   {- it allows omitting parts of the settings file. All these forms are possible:

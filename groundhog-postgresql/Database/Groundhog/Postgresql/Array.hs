@@ -40,7 +40,6 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Lazy as B (toStrict)
 import qualified Data.ByteString.Unsafe as B
 import Data.Monoid hiding ((<>))
-import Data.Traversable (traverse)
 import qualified Data.Vector as V
 import Data.Word
 import Database.Groundhog.Core
