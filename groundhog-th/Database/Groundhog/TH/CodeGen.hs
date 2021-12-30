@@ -497,7 +497,7 @@ mkPersistEntityInstance def = do
   entityDef' <- do
     v <- newName "v"
     proxy <- newName "p"
-    let mkLambda t = [|undefined :: $(pure entity) -> $(pure t) |]
+    let mkLambda t = [|undefined :: $(pure entity) -> $(pure t)|]
         types = map extractType $ thTypeParams def
         typeParams' = listE $ map (\t -> [|dbType $(varE proxy) ($(mkLambda t) $(varE v))|]) types
         mkField c fNum f = do
@@ -608,7 +608,7 @@ mkEntityPersistFieldInstance def = case getDefaultKey def of
 
     persistName' <- do
       v <- newName "v"
-      let mkLambda t = [|undefined :: $(pure entity) -> $(pure t) |]
+      let mkLambda t = [|undefined :: $(pure entity) -> $(pure t)|]
 
       let paramNames = foldr1 (\p xs -> [|$p ++ [delim] ++ $xs|]) $ map (\t -> [|persistName ($(mkLambda t) $(varE v))|]) types
       let fullEntityName = case types of
@@ -897,6 +897,7 @@ dataInstD' = DataInstD
 #endif
 
 dataD' :: Cxt -> Name -> [TyVarBndr] -> [Con] -> [Name] -> InstanceDec
+
 #if MIN_VERSION_template_haskell(2, 12, 0)
 dataD' context name types constrs derives =
   DataD context name types Nothing constrs [DerivClause Nothing (map ConT derives)]
@@ -915,9 +916,8 @@ notStrict' :: Strict
 notStrict' = NotStrict
 #endif
 
-type TyVarBndr =
 #if MIN_VERSION_template_haskell(2, 17, 0)
-  TH.TyVarBndr ()
+type TyVarBndr = TH.TyVarBndr ()
 #else
-  TH.TyVarBndr
+type TyVarBndr = TH.TyVarBndr
 #endif

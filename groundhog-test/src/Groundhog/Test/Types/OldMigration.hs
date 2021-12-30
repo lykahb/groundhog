@@ -4,7 +4,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Migration.Old where
+module Groundhog.Test.Types.OldMigration where
 
 import Database.Groundhog ()
 import Database.Groundhog.TH

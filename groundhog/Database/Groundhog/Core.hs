@@ -122,7 +122,7 @@ import Data.Acquire (Acquire)
 import Data.ByteString.Char8 (ByteString)
 import Data.ByteString.Lazy (toStrict)
 import Data.Int (Int64)
-import Data.Kind (Type, Constraint)
+import Data.Kind (Constraint, Type)
 import Data.Map (Map)
 import Data.Semigroup (Semigroup)
 import Data.String (IsString)
@@ -666,11 +666,11 @@ class Savepoint conn where
 -- | This class helps to shorten the type signatures of user monadic code.
 -- If your monad has several connections, e.g., for main and audit databases, create run*Db function
 -- runAuditDb :: Action conn a -> m a
-class (Monad m, Applicative m, Functor m, MonadIO m, MonadFail m, ConnectionManager (Conn m), PersistBackendConn (Conn m)) => PersistBackend m where
+class (Monad m, MonadIO m, MonadFail m, ConnectionManager (Conn m), PersistBackendConn (Conn m)) => PersistBackend m where
   type Conn m
   getConnection :: m (Conn m)
 
-instance (Monad m, Applicative m, Functor m, MonadIO m, MonadFail m, PersistBackendConn conn) => PersistBackend (ReaderT conn m) where
+instance (Monad m, MonadIO m, MonadFail m, PersistBackendConn conn) => PersistBackend (ReaderT conn m) where
   type Conn (ReaderT conn m) = conn
   getConnection = ask
 
@@ -704,7 +704,6 @@ runDb' f = getConnection >>= liftIO . runReaderT f
 -- @
 runDbConn' :: (MonadIO m, MonadBaseControl IO m, ConnectionManager conn, ExtractConnection cm conn) => Action conn a -> cm -> m a
 runDbConn' f = extractConn (liftIO . runReaderT f)
-
 
 -- | It helps to run 'withConnSavepoint' within a monad. Make sure that transaction is open
 withSavepoint :: (PersistBackend m, MonadBaseControl IO m, MonadIO m, Savepoint (Conn m)) => String -> m a -> m a

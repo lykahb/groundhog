@@ -7,5 +7,6 @@ dist/
 
 .idea
 .cabal-sandbox/
+*.iml
 cabal.sandbox.config
 .stack-work/

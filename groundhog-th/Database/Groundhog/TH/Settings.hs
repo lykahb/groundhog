@@ -203,9 +203,10 @@ data PSAutoKeyDef = PSAutoKeyDef
   }
   deriving (Eq, Show, Lift)
 
-
 deriving instance Lift a => Lift (PSFieldDef a)
+
 deriving instance Lift UniqueType
+
 deriving instance Lift ReferenceActionType
 
 instance FromJSON PersistDefinitions where
