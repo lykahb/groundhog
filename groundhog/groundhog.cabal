@@ -1,5 +1,5 @@
 name:            groundhog
-version:         0.11.0
+version:         0.12.0
 license:         BSD3
 license-file:    LICENSE
 author:          Boris Lykah <lykahb@gmail.com>
@@ -8,7 +8,7 @@ synopsis:        Type-safe datatype-database mapping library.
 description:     This library maps your datatypes to a relational model, in a way similar to what ORM libraries do in object-oriented programming. The mapping can be configured to work with almost any schema. Groundhog supports schema migrations, composite keys, advanced expressions in queries, and much more. See tutorial <https://www.schoolofhaskell.com/user/lykahb/groundhog> and examples <https://github.com/lykahb/groundhog/tree/master/examples> on GitHub.
 category:        Database
 stability:       Stable
-cabal-version:   >= 1.6
+cabal-version:   >= 1.10
 build-type:      Simple
 homepage:        http://github.com/lykahb/groundhog
 
@@ -43,6 +43,7 @@ library
                      Database.Groundhog.Generic.PersistBackendHelpers
                      Database.Groundhog.Instances
     ghc-options:     -Wall
+    default-language: Haskell2010
 
 source-repository head
   type:     git

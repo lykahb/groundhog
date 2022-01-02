@@ -1,0 +1,4 @@
+postgresql
+libpq-dev
+libpcre3-dev
+postgresql-client

@@ -38,7 +38,6 @@ test-suite test
                  , time                     >= 1.1.4
                  , text                     >= 0.8
                  , vector
-                 , aeson                    >= 0.5
                  , scientific
                  , containers               >= 0.2
                  , monad-control            >= 0.3     && < 1.1
