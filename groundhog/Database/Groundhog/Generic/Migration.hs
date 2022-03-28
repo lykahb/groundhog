@@ -314,13 +314,13 @@ getAlters m@MigrationPack {..} (TableInfo oldColumns oldUniques oldRefs) (TableI
     colAlters = mapMaybe (\(a, b) -> mkAlterColumn b $ migrateColumn m a b) (filter ((`notElem` primaryColumns) . colName . fst) commonColumns)
     mkAlterColumn col alters = if null alters then Nothing else Just $ AlterColumn col alters
     tableAlters =
-      map (DropColumn . colName) oldOnlyColumns
+      map dropUnique oldOnlyUniques
+        ++ map (DropReference . fromMaybe (error "getAlters: old reference does not have name") . fst) oldOnlyRefs
+        ++ map (DropColumn . colName) oldOnlyColumns
         ++ map AddColumn newOnlyColumns
         ++ colAlters
-        ++ map dropUnique oldOnlyUniques
         ++ map AddUnique newOnlyUniques
         ++ concatMap (uncurry migrateUniq) commonUniques
-        ++ map (DropReference . fromMaybe (error "getAlters: old reference does not have name") . fst) oldOnlyRefs
         ++ map (AddReference . snd) newOnlyRefs
 
 -- from database, from datatype
