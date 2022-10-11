@@ -32,9 +32,10 @@ where
 import Control.Applicative
 import Control.Monad (forM, mzero, when)
 import Data.Aeson
+import Data.Aeson.Key (fromText)
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (Pair)
 import qualified Data.Foldable as Fold
-import qualified Data.HashMap.Strict as H
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Database.Groundhog.Core (ReferenceActionType (..), UniqueType (..))
@@ -231,9 +232,9 @@ instance FromJSON PersistDefinitions where
     where
       initial = PersistDefinitions [] [] []
       go obj p@PersistDefinitions {..} = flip (withObject "definition") obj $ \v -> case () of
-        _ | H.member "entity" v -> (\x -> p {psEntities = x : psEntities}) <$> parseJSON obj
-        _ | H.member "embedded" v -> (\x -> p {psEmbeddeds = x : psEmbeddeds}) <$> parseJSON obj
-        _ | H.member "primitive" v -> (\x -> p {psPrimitives = x : psPrimitives}) <$> parseJSON obj
+        _ | KeyMap.member "entity" v -> (\x -> p {psEntities = x : psEntities}) <$> parseJSON obj
+        _ | KeyMap.member "embedded" v -> (\x -> p {psEmbeddeds = x : psEmbeddeds}) <$> parseJSON obj
+        _ | KeyMap.member "primitive" v -> (\x -> p {psPrimitives = x : psPrimitives}) <$> parseJSON obj
         _ -> fail $ "Invalid definition: " ++ show obj
 
 instance FromJSON PSEntityDef where
@@ -246,7 +247,7 @@ instance FromJSON PSEmbeddedDef where
 
 instance FromJSON PSPrimitiveDef where
   parseJSON = withObject "primitive" $ \v -> do
-    when (H.member "representation" v) $ fail $ "parseJSON: field 'representation' is deprecated. Use 'converter' instead: " ++ show v
+    when (KeyMap.member "representation" v) $ fail $ "parseJSON: field 'representation' is deprecated. Use 'converter' instead: " ++ show v
     PSPrimitiveDef <$> v .: "primitive" <*> v .:? "dbName" <*> v .: "converter"
 
 instance FromJSON PSConstructorDef where
@@ -303,11 +304,11 @@ instance FromJSON PSAutoKeyDef where
     PSAutoKeyDef <$> v .:? "constrName" <*> v .:? "default"
 
 (.=?) :: ToJSON a => Text -> Maybe a -> Maybe Pair
-name .=? value = (name .=) <$> value
+name .=? value = (fromText name .=) <$> value
 
 (.=:) :: ToJSON a => Text -> Maybe [a] -> Maybe Pair
 name .=: value = case value of
-  Just (_ : _) -> Just $ name .= value
+  Just (_ : _) -> Just $ fromText name .= value
   _ -> Nothing
 
 instance ToJSON PSEntityDef where
