@@ -22,7 +22,7 @@ where
 import Control.Arrow ((***))
 import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO (..))
-import Control.Monad.Trans.Control (MonadBaseControl)
+import Control.Monad.Trans.Control (MonadBaseControl, liftBaseOp)
 import Control.Monad.Trans.Reader (ask, runReaderT)
 import Control.Monad.Trans.State (mapStateT)
 import Data.Acquire (mkAcquire)
@@ -139,7 +139,7 @@ createSqlitePool ::
   -- | number of connections to open
   Int ->
   m (Pool Sqlite)
-createSqlitePool s connCount = liftIO $ createPool (open' s) close' 1 20 connCount
+createSqlitePool s connCount = liftIO $ newPool $ PoolConfig (open' s) close' 20 connCount
 
 instance Savepoint Sqlite where
   withConnSavepoint name m (Sqlite c _) = do
@@ -169,7 +169,7 @@ instance ExtractConnection Sqlite Sqlite where
   extractConn f conn = f conn
 
 instance ExtractConnection (Pool Sqlite) Sqlite where
-  extractConn f pconn = withResource pconn f
+  extractConn f pconn = liftBaseOp (withResource pconn) f
 
 open' :: String -> IO Sqlite
 open' s = do
