@@ -23,7 +23,7 @@ library
                    , containers               >= 0.2
                    , text                     >= 0.8
                    , direct-sqlite            >= 2.3.5
-                   , resource-pool            >= 0.2.1
+                   , resource-pool            >= 0.3
                    , unordered-containers
                    , resourcet                >= 1.1.2
     exposed-modules: Database.Groundhog.Sqlite
